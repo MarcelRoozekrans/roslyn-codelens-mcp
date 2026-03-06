@@ -59,36 +59,6 @@ claude plugin install roslyn-codegraph
 
 The plugin includes a bootstrap script that auto-installs the .NET global tool on first run if not already present. No separate `dotnet tool install` step required.
 
-### Dependency on superpowers-extensions
-
-The `marketplace.json` includes a reference to `gh:MarcelRoozekrans/superpowers-extensions` so that installing the Roslyn plugin also pulls in the superpowers skills it enhances (brainstorming, refactor-analysis).
-
-```json
-{
-  "name": "roslyn-codegraph-mcp",
-  "description": "Roslyn-based .NET code graph intelligence for Claude Code",
-  "version": "1.0.0",
-  "owner": {
-    "name": "Marcel Roozekrans"
-  },
-  "dependencies": [
-    "gh:MarcelRoozekrans/superpowers-extensions"
-  ],
-  "plugins": [
-    {
-      "name": "roslyn-codegraph",
-      "description": "Roslyn-based code graph intelligence for .NET codebases. Provides semantic understanding of type hierarchies, call sites, DI registrations, and reflection usage to enhance brainstorming and refactor analysis.",
-      "version": "1.0.0",
-      "author": {
-        "name": "Marcel Roozekrans"
-      },
-      "source": "./plugins/roslyn-codegraph",
-      "category": "code-intelligence"
-    }
-  ]
-}
-```
-
 ### Plugin Configuration
 
 ```json
@@ -200,24 +170,15 @@ All tools accept a `symbol` parameter as a simple name (`"UserService"`) or full
 
 ## Skill Design
 
-The skill (`SKILL.md`) enhances two superpowers skills when the Roslyn MCP tools are detected.
+The skill (`SKILL.md`) provides guidance on when and how to use the Roslyn MCP tools. It is standalone and has no external dependencies.
 
-### Relationship to brainstorming
+### When to Use
 
-Always-on when tools are available. The skill instructs Claude to:
+The skill instructs Claude to use these tools **instead of Grep/Glob** for .NET code structure queries:
 
-1. **At brainstorming start** — `get_project_dependencies` on the main project for solution architecture. `get_symbol_context` on any types mentioned in the initial request.
-2. **During clarifying questions** — `find_implementations`, `get_type_hierarchy`, `find_callers` to ground questions in actual architecture.
-3. **When proposing approaches** — `get_di_registrations` for current wiring, `find_reflection_usage` for hidden coupling, `get_type_hierarchy` for extension points.
-4. **During design presentation** — reference concrete types, interfaces, and call sites. "These 4 classes implement IUserService: UserService, CachedUserService, MockUserService, AdminUserService."
-
-### Relationship to refactor-analysis
-
-When available, replaces text-based search in key phases:
-
-- **Phase 2 (Direct Dependency Mapping):** `find_callers` + `find_implementations` instead of Grep
-- **Phase 3 (Transitive Closure):** `get_type_hierarchy` + `get_project_dependencies` for semantic traversal
-- **Phase 5 (Risk Identification):** `find_reflection_usage` for dynamic/hidden coupling
+- **Understanding a codebase** — `get_project_dependencies` for architecture, `get_symbol_context` for type details, `get_type_hierarchy` for inheritance
+- **Finding dependencies** — `find_callers` for call sites, `find_implementations` for interface implementors, `get_di_registrations` for DI wiring, `find_reflection_usage` for hidden coupling
+- **Planning changes** — combine all tools to assess impact before modifying code
 
 ### Detection
 

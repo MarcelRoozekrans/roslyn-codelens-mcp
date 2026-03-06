@@ -5,9 +5,6 @@
   "owner": {
     "name": "Marcel Roozekrans"
   },
-  "dependencies": [
-    "gh:MarcelRoozekrans/superpowers-extensions"
-  ],
   "plugins": [
     {
       "name": "roslyn-codegraph",

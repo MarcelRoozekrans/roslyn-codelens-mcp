@@ -1,6 +1,6 @@
 ---
 name: roslyn-codegraph
-description: Enhances brainstorming and refactor-analysis with Roslyn-powered semantic code intelligence for .NET codebases. Activates automatically when roslyn-codegraph MCP tools are available.
+description: Use Roslyn-powered semantic code intelligence when working with .NET codebases. Activates automatically when roslyn-codegraph MCP tools are available.
 ---
 
 # Roslyn Code Graph Intelligence
@@ -9,25 +9,34 @@ description: Enhances brainstorming and refactor-analysis with Roslyn-powered se
 
 Check if `find_implementations` is available as an MCP tool. If not, this skill is inert — do nothing.
 
-## During Brainstorming
+## When to Use These Tools
 
-When brainstorming about a .NET codebase:
+Use these tools **instead of Grep/Glob** whenever you need to understand .NET code structure. They provide semantic accuracy that text search cannot match.
 
-1. **At start** — Call `get_project_dependencies` on the main project to understand solution architecture. Call `get_symbol_context` on any types mentioned in the request.
+### Understanding a Codebase
 
-2. **During clarifying questions** — Use `find_implementations`, `get_type_hierarchy`, and `find_callers` to ground questions in actual architecture rather than assumptions.
+- Call `get_project_dependencies` to understand solution architecture and how projects relate
+- Call `get_symbol_context` on types mentioned in the user's request for a full context dump (namespace, base class, interfaces, DI dependencies, public members)
+- Call `get_type_hierarchy` to understand inheritance chains and extension points
 
-3. **When proposing approaches** — Call `get_di_registrations` for current DI wiring, `find_reflection_usage` for hidden coupling, `get_type_hierarchy` for extension points.
+### Finding Dependencies and Usage
 
-4. **During design presentation** — Reference concrete types, interfaces, and call sites. Example: "These 3 classes implement IUserService: UserService, CachedUserService, AdminUserService."
+- Use `find_callers` to find every call site for a method — more accurate than text search
+- Use `find_implementations` to find all classes implementing an interface or extending a class
+- Use `get_di_registrations` to see how types are wired in the DI container and their lifetimes
+- Use `find_reflection_usage` to detect hidden/dynamic coupling that text search misses (Type.GetType, Activator.CreateInstance, MethodInfo.Invoke, assembly scanning)
 
-## During Refactor Analysis
+### Planning Changes
 
-When analyzing refactors in a .NET codebase:
+Before modifying code, use these tools to understand the impact:
 
-- **Direct Dependency Mapping:** Use `find_callers` + `find_implementations` instead of Grep for accurate dependency tracking.
-- **Transitive Closure:** Use `get_type_hierarchy` + `get_project_dependencies` for semantic traversal instead of text search.
-- **Risk Identification:** Use `find_reflection_usage` to detect dynamic/hidden coupling that text search misses.
+1. `get_symbol_context` — what does this type look like?
+2. `find_callers` + `find_implementations` — what depends on it?
+3. `get_type_hierarchy` + `get_project_dependencies` — where does it sit in the architecture?
+4. `get_di_registrations` — how is it wired up?
+5. `find_reflection_usage` — is it used dynamically?
+
+Reference concrete types, interfaces, and call sites in your analysis. Example: "These 3 classes implement IUserService: UserService, CachedUserService, AdminUserService."
 
 ## Tool Quick Reference
 
