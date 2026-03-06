@@ -1,10 +1,10 @@
-mode: ContinuousDeployment
+workflow: ContinuousDeployment
 branches:
   main:
     regex: ^main$
-    tag: ''
+    label: ''
     increment: Patch
   pull-request:
     regex: ^(pull|pull\-requests|pr)[/-]
-    tag: preview
+    label: preview
     increment: Inherit
