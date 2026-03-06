@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/RoslynCodeGraph.Benchmarks/RoslynCodeGraph.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/RoslynCodeGraph/RoslynCodeGraph.csproj" />
   </Folder>

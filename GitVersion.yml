@@ -1,0 +1,10 @@
+mode: ContinuousDeployment
+branches:
+  main:
+    regex: ^main$
+    tag: ''
+    increment: Patch
+  pull-request:
+    regex: ^(pull|pull\-requests|pr)[/-]
+    tag: preview
+    increment: Inherit

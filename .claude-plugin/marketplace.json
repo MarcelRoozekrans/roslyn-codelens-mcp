@@ -1,0 +1,20 @@
+{
+  "name": "roslyn-codegraph-mcp",
+  "description": "Roslyn-based .NET code graph intelligence for Claude Code",
+  "version": "1.0.0",
+  "owner": {
+    "name": "Marcel Roozekrans"
+  },
+  "plugins": [
+    {
+      "name": "roslyn-codegraph",
+      "description": "Roslyn-based code graph intelligence for .NET codebases. Provides semantic understanding of type hierarchies, call sites, DI registrations, and reflection usage.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Marcel Roozekrans"
+      },
+      "source": "./plugins/roslyn-codegraph",
+      "category": "code-intelligence"
+    }
+  ]
+}

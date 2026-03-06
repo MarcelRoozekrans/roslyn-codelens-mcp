@@ -1,0 +1,21 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["nuget"],
+      "groupName": "Microsoft.Build packages",
+      "matchPackagePatterns": ["^Microsoft\\.Build", "^Microsoft\\.NET\\.StringTools"],
+      "groupSlug": "msbuild"
+    },
+    {
+      "matchManagers": ["nuget"],
+      "groupName": "Roslyn packages",
+      "matchPackagePatterns": ["^Microsoft\\.CodeAnalysis"],
+      "groupSlug": "roslyn"
+    }
+  ]
+}

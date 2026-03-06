@@ -1,0 +1,14 @@
+{
+  "name": "roslyn-codegraph",
+  "description": "Roslyn-based code graph intelligence for .NET codebases.",
+  "author": {
+    "name": "Marcel Roozekrans"
+  },
+  "mcp_servers": {
+    "roslyn-codegraph": {
+      "command": "bootstrap",
+      "args": [],
+      "transport": "stdio"
+    }
+  }
+}

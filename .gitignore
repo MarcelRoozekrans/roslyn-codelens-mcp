@@ -18,3 +18,9 @@ packages/
 
 # Test results
 TestResults/
+
+# Build artifacts
+artifacts/
+
+# Benchmark results
+BenchmarkDotNet.Artifacts/
