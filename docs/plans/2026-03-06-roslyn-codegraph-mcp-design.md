@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-06
 **Status:** Approved
-**Repo:** `MarcelRoozekrans/roslyn-codegraph-mcp` (separate from superpowers-extensions)
+**Repo:** `MarcelRoozekrans/roslyn-codegraph-mcp`
 
 ## Problem Statement
 
@@ -10,7 +10,7 @@ On large .NET codebases (900k+ lines), Claude Code loses track during implementa
 
 ## Solution
 
-A Roslyn-based MCP server that loads the .NET solution, compiles it, and exposes structured semantic queries as MCP tools. Paired with a skill that enhances brainstorming and refactor-analysis with always-on architectural context.
+A standalone Roslyn-based MCP server that loads the .NET solution, compiles it, and exposes structured semantic queries as MCP tools. Includes a skill that provides guidance on when to use the tools for codebase understanding, dependency analysis, and change planning.
 
 ## Repository Structure
 
