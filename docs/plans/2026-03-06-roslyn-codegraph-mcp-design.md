@@ -233,18 +233,18 @@ The server is optimized for minimal allocations and fast queries by caching all 
 - **Span-based comparisons** — DI registration matching uses `ReadOnlySpan<char>` to avoid `string.Split()` allocations
 - **Value tuple deduplication** — `DistinctBy` uses value tuples instead of string interpolation
 
-### Benchmark Results (i9-12900HK, .NET 9.0.13, Release)
+### Benchmark Results (i9-12900HK, .NET 10.0.3, Release)
 
 | Tool | Latency | Memory |
 |------|--------:|-------:|
-| `find_implementations` | 238 µs | 95 KB |
-| `find_callers` | 215 µs | 32 KB |
-| `get_type_hierarchy` | 162 µs | 1.1 KB |
-| `get_symbol_context` | 1.4 µs | 1.0 KB |
-| `get_di_registrations` | 68 µs | 13 KB |
-| `get_project_dependencies` | 0.5 µs | 1.2 KB |
-| `find_reflection_usage` | 93 µs | 15 KB |
-| Solution loading (one-time) | 1,086 ms | 8 MB |
+| `find_implementations` | 187 µs | 95 KB |
+| `find_callers` | 192 µs | 32 KB |
+| `get_type_hierarchy` | 139 µs | 1.1 KB |
+| `get_symbol_context` | 1.3 µs | 1.0 KB |
+| `get_di_registrations` | 79 µs | 13 KB |
+| `get_project_dependencies` | 0.4 µs | 1.2 KB |
+| `find_reflection_usage` | 98 µs | 15 KB |
+| Solution loading (one-time) | 1,049 ms | 8 MB |
 
 ## Out of Scope (v1.0)
 
