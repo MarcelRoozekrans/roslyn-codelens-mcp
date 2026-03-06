@@ -6,7 +6,19 @@
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>roslyn-codegraph-mcp</ToolCommandName>
+    <PackageId>RoslynCodeGraph</PackageId>
+    <Authors>Marcel Roozekrans</Authors>
+    <Description>Roslyn-based MCP server providing semantic code intelligence for .NET codebases</Description>
+    <PackageProjectUrl>https://github.com/MarcelRoozekrans/roslyn-codegraph-mcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MarcelRoozekrans/roslyn-codegraph-mcp</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>roslyn;mcp;code-analysis;dotnet-tool</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="0.*" />
