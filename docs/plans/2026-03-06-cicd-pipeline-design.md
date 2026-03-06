@@ -25,15 +25,15 @@ Three GitHub Actions workflows with GitVersion for semantic versioning, Conventi
 
 `GitVersion.yml` at repo root:
 ```yaml
-mode: ContinuousDeployment
+workflow: ContinuousDeployment
 branches:
   main:
     regex: ^main$
-    tag: ''
+    label: ''
     increment: Patch
   pull-request:
     regex: ^(pull|pull\-requests|pr)[/-]
-    tag: preview
+    label: preview
     increment: Inherit
 ```
 
@@ -52,7 +52,7 @@ branches:
 
 **Steps:**
 1. Checkout with full history (`fetch-depth: 0`)
-2. Setup .NET 9 SDK
+2. Setup .NET 10 SDK
 3. Validate PR title (Conventional Commits)
 4. `dotnet restore`
 5. `dotnet build --no-restore`
@@ -66,7 +66,7 @@ branches:
 
 **Steps:**
 1. Checkout with full history
-2. Setup .NET 9 SDK
+2. Setup .NET 10 SDK
 3. Install GitVersion
 4. Calculate version → `$GITVERSION_SEMVER`
 5. `dotnet restore`
