@@ -57,15 +57,24 @@ public class SymbolResolver
     {
         foreach (var type in ns.GetTypeMembers())
         {
-            yield return type;
-            foreach (var nested in type.GetTypeMembers())
-                yield return nested;
+            foreach (var t in GetAllNestedTypes(type))
+                yield return t;
         }
 
         foreach (var childNs in ns.GetNamespaceMembers())
         {
             foreach (var type in GetAllTypes(childNs))
                 yield return type;
+        }
+    }
+
+    private static IEnumerable<INamedTypeSymbol> GetAllNestedTypes(INamedTypeSymbol type)
+    {
+        yield return type;
+        foreach (var nested in type.GetTypeMembers())
+        {
+            foreach (var t in GetAllNestedTypes(nested))
+                yield return t;
         }
     }
 

@@ -107,7 +107,7 @@ public static class FindCallersLogic
 public static class FindCallersTool
 {
     [McpServerTool(Name = "find_callers"),
-     Description("Find every call site for a method, property, or constructor")]
+     Description("Find every call site for a method")]
     public static List<CallerInfo> Execute(
         LoadedSolution loaded,
         SymbolResolver resolver,
