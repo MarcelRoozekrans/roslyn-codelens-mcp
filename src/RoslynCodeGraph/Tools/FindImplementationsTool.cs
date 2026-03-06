@@ -14,46 +14,43 @@ public static class FindImplementationsLogic
 
         foreach (var target in targetTypes)
         {
-            foreach (var compilation in loaded.Compilations.Values)
+            foreach (var candidate in resolver.AllTypes)
             {
-                foreach (var candidate in SymbolResolver.GetAllTypes(compilation.GlobalNamespace))
+                if (SymbolEqualityComparer.Default.Equals(candidate, target))
+                    continue;
+
+                bool isMatch = false;
+
+                if (target.TypeKind == TypeKind.Interface)
                 {
-                    if (SymbolEqualityComparer.Default.Equals(candidate, target))
-                        continue;
-
-                    bool isMatch = false;
-
-                    if (target.TypeKind == TypeKind.Interface)
+                    isMatch = candidate.AllInterfaces.Any(i =>
+                        SymbolEqualityComparer.Default.Equals(i, target));
+                }
+                else if (target.TypeKind == TypeKind.Class)
+                {
+                    var baseType = candidate.BaseType;
+                    while (baseType != null)
                     {
-                        isMatch = candidate.AllInterfaces.Any(i =>
-                            SymbolEqualityComparer.Default.Equals(i, target));
-                    }
-                    else if (target.TypeKind == TypeKind.Class)
-                    {
-                        var baseType = candidate.BaseType;
-                        while (baseType != null)
+                        if (SymbolEqualityComparer.Default.Equals(baseType, target))
                         {
-                            if (SymbolEqualityComparer.Default.Equals(baseType, target))
-                            {
-                                isMatch = true;
-                                break;
-                            }
-                            baseType = baseType.BaseType;
+                            isMatch = true;
+                            break;
                         }
+                        baseType = baseType.BaseType;
                     }
+                }
 
-                    if (isMatch)
+                if (isMatch)
+                {
+                    var (file, line) = resolver.GetFileAndLine(candidate);
+                    var project = resolver.GetProjectName(candidate);
+                    var kind = candidate.TypeKind switch
                     {
-                        var (file, line) = resolver.GetFileAndLine(candidate);
-                        var project = resolver.GetProjectName(candidate);
-                        var kind = candidate.TypeKind switch
-                        {
-                            TypeKind.Struct => "struct",
-                            TypeKind.Interface => "interface",
-                            _ => "class"
-                        };
-                        results.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
-                    }
+                        TypeKind.Struct => "struct",
+                        TypeKind.Interface => "interface",
+                        _ => "class"
+                    };
+                    results.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
                 }
             }
         }

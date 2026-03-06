@@ -43,31 +43,28 @@ public static class GetTypeHierarchyLogic
 
         // Walk DOWN: find derived types
         var derived = new List<SymbolLocation>();
-        foreach (var compilation in loaded.Compilations.Values)
+        foreach (var candidate in resolver.AllTypes)
         {
-            foreach (var candidate in SymbolResolver.GetAllTypes(compilation.GlobalNamespace))
-            {
-                if (SymbolEqualityComparer.Default.Equals(candidate, target))
-                    continue;
+            if (SymbolEqualityComparer.Default.Equals(candidate, target))
+                continue;
 
-                var candidateBase = candidate.BaseType;
-                while (candidateBase != null)
+            var candidateBase = candidate.BaseType;
+            while (candidateBase != null)
+            {
+                if (SymbolEqualityComparer.Default.Equals(candidateBase, target))
                 {
-                    if (SymbolEqualityComparer.Default.Equals(candidateBase, target))
+                    var (file, line) = resolver.GetFileAndLine(candidate);
+                    var project = resolver.GetProjectName(candidate);
+                    var kind = candidate.TypeKind switch
                     {
-                        var (file, line) = resolver.GetFileAndLine(candidate);
-                        var project = resolver.GetProjectName(candidate);
-                        var kind = candidate.TypeKind switch
-                        {
-                            TypeKind.Struct => "struct",
-                            TypeKind.Interface => "interface",
-                            _ => "class"
-                        };
-                        derived.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
-                        break;
-                    }
-                    candidateBase = candidateBase.BaseType;
+                        TypeKind.Struct => "struct",
+                        TypeKind.Interface => "interface",
+                        _ => "class"
+                    };
+                    derived.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
+                    break;
                 }
+                candidateBase = candidateBase.BaseType;
             }
         }
 

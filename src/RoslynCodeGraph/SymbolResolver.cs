@@ -5,35 +5,77 @@ namespace RoslynCodeGraph;
 public class SymbolResolver
 {
     private readonly LoadedSolution _loaded;
+    private readonly List<INamedTypeSymbol> _allTypes;
+    private readonly Dictionary<string, List<INamedTypeSymbol>> _typesBySimpleName;
+    private readonly Dictionary<string, INamedTypeSymbol> _typesByFullName;
+    private readonly Dictionary<string, string> _fileToProjectName;
 
     public SymbolResolver(LoadedSolution loaded)
     {
         _loaded = loaded;
-    }
 
-    public List<INamedTypeSymbol> FindNamedTypes(string symbol)
-    {
-        var results = new List<INamedTypeSymbol>();
-        var hasDot = symbol.Contains('.');
+        // Build cached type lists once
+        var allTypes = new List<INamedTypeSymbol>();
+        var seen = new HashSet<string>();
 
-        foreach (var compilation in _loaded.Compilations.Values)
+        foreach (var compilation in loaded.Compilations.Values)
         {
             foreach (var type in GetAllTypes(compilation.GlobalNamespace))
             {
-                if (hasDot)
-                {
-                    if (type.ToDisplayString() == symbol)
-                        results.Add(type);
-                }
-                else
-                {
-                    if (type.Name == symbol)
-                        results.Add(type);
-                }
+                var fullName = type.ToDisplayString();
+                if (seen.Add(fullName))
+                    allTypes.Add(type);
             }
         }
 
-        return results.DistinctBy(t => t.ToDisplayString()).ToList();
+        _allTypes = allTypes;
+
+        // Build lookup dictionaries
+        _typesBySimpleName = new Dictionary<string, List<INamedTypeSymbol>>();
+        _typesByFullName = new Dictionary<string, INamedTypeSymbol>();
+
+        foreach (var type in _allTypes)
+        {
+            var fullName = type.ToDisplayString();
+            _typesByFullName[fullName] = type;
+
+            if (!_typesBySimpleName.TryGetValue(type.Name, out var list))
+            {
+                list = new List<INamedTypeSymbol>();
+                _typesBySimpleName[type.Name] = list;
+            }
+            list.Add(type);
+        }
+
+        // Build file-to-project lookup
+        _fileToProjectName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in loaded.Solution.Projects)
+        {
+            foreach (var doc in project.Documents)
+            {
+                if (doc.FilePath != null)
+                    _fileToProjectName[doc.FilePath] = project.Name;
+            }
+        }
+    }
+
+    /// <summary>
+    /// All deduplicated types across all compilations, cached at construction.
+    /// </summary>
+    public IReadOnlyList<INamedTypeSymbol> AllTypes => _allTypes;
+
+    public List<INamedTypeSymbol> FindNamedTypes(string symbol)
+    {
+        if (symbol.Contains('.'))
+        {
+            return _typesByFullName.TryGetValue(symbol, out var type)
+                ? [type]
+                : [];
+        }
+
+        return _typesBySimpleName.TryGetValue(symbol, out var list)
+            ? list
+            : [];
     }
 
     public List<IMethodSymbol> FindMethods(string symbol)
@@ -97,12 +139,8 @@ public class SymbolResolver
         var location = GetLocation(symbol);
         if (location?.SourceTree == null) return "";
 
-        var filePath = location.SourceTree.FilePath;
-        foreach (var project in _loaded.Solution.Projects)
-        {
-            if (project.Documents.Any(d => d.FilePath == filePath))
-                return project.Name;
-        }
-        return "";
+        return _fileToProjectName.TryGetValue(location.SourceTree.FilePath, out var name)
+            ? name
+            : "";
     }
 }

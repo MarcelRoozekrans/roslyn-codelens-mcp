@@ -54,7 +54,7 @@ public static class FindCallersLogic
             }
         }
 
-        return results.DistinctBy(r => $"{r.File}:{r.Line}").ToList();
+        return results.DistinctBy(r => (r.File, r.Line)).ToList();
     }
 
     private static bool IsInterfaceImplementation(IMethodSymbol calledMethod, IMethodSymbol targetMethod)

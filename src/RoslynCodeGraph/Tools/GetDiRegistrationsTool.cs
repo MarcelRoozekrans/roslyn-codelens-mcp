@@ -86,8 +86,9 @@ public static class GetDiRegistrationsLogic
         if (symbol.Contains('.'))
             return fullName == symbol;
 
-        var simpleName = fullName.Split('.').Last();
-        return simpleName == symbol;
+        var lastDot = fullName.LastIndexOf('.');
+        var simpleName = lastDot >= 0 ? fullName.AsSpan(lastDot + 1) : fullName.AsSpan();
+        return simpleName.SequenceEqual(symbol.AsSpan());
     }
 
     private static string ExtractLifetime(string methodName)
