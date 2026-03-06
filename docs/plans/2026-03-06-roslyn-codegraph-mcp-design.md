@@ -223,6 +223,29 @@ When available, replaces text-based search in key phases:
 
 The skill checks for tool availability. If `find_implementations` is not in the available MCP tools, the skill is inert. No errors, no degradation.
 
+## Performance
+
+The server is optimized for minimal allocations and fast queries by caching all type information at construction time in `SymbolResolver`:
+
+- **Cached type lists** — All types across all compilations are enumerated once and stored in a flat list, deduplicated by fully-qualified name
+- **Dictionary lookups** — Types are indexed by both simple name and fully-qualified name for O(1) `FindNamedTypes()` instead of O(all types)
+- **File-to-project map** — `GetProjectName()` uses a pre-built `Dictionary<string, string>` instead of linear-scanning all projects and documents
+- **Span-based comparisons** — DI registration matching uses `ReadOnlySpan<char>` to avoid `string.Split()` allocations
+- **Value tuple deduplication** — `DistinctBy` uses value tuples instead of string interpolation
+
+### Benchmark Results (i9-12900HK, .NET 9.0.13, Release)
+
+| Tool | Latency | Memory |
+|------|--------:|-------:|
+| `find_implementations` | 238 µs | 95 KB |
+| `find_callers` | 215 µs | 32 KB |
+| `get_type_hierarchy` | 162 µs | 1.1 KB |
+| `get_symbol_context` | 1.4 µs | 1.0 KB |
+| `get_di_registrations` | 68 µs | 13 KB |
+| `get_project_dependencies` | 0.5 µs | 1.2 KB |
+| `find_reflection_usage` | 93 µs | 15 KB |
+| Solution loading (one-time) | 1,086 ms | 8 MB |
+
 ## Out of Scope (v1.0)
 
 - Hot reload / file watching
