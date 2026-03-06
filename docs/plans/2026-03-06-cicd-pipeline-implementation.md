@@ -6,7 +6,7 @@
 
 **Architecture:** Three GitHub Actions workflows — PR validation (build + test + lint), release (version + pack + publish), and GitVersion config. NuGet package metadata added to the csproj. Branch protection configured manually.
 
-**Tech Stack:** GitHub Actions, GitVersion, `amannn/action-semantic-pull-request`, .NET 9 SDK, NuGet.org
+**Tech Stack:** GitHub Actions, GitVersion, `amannn/action-semantic-pull-request`, .NET 10 SDK, NuGet.org
 
 **Design Doc:** `docs/plans/2026-03-06-cicd-pipeline-design.md`
 

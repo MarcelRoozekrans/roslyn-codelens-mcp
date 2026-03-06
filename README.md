@@ -52,7 +52,7 @@ roslyn-codegraph-mcp /path/to/MySolution.sln
 
 ## Requirements
 
-- .NET 9 SDK
+- .NET 10 SDK
 - A .NET solution with compilable projects
 
 ## Development

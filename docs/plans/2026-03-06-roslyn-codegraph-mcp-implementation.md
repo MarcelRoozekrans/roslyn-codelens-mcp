@@ -4,9 +4,9 @@
 
 **Goal:** Build a Roslyn-based MCP server that loads .NET solutions and exposes 7 semantic query tools over stdio, packaged as a Claude Code plugin.
 
-**Architecture:** A .NET 9 global tool using the `ModelContextProtocol` SDK for stdio transport. On startup it discovers and compiles a `.sln` via `MSBuildWorkspace`, then serves MCP tool requests against the Roslyn semantic model. Distributed as a Claude Code plugin with bootstrap scripts.
+**Architecture:** A .NET 10 global tool using the `ModelContextProtocol` SDK for stdio transport. On startup it discovers and compiles a `.sln` via `MSBuildWorkspace`, then serves MCP tool requests against the Roslyn semantic model. Distributed as a Claude Code plugin with bootstrap scripts.
 
-**Tech Stack:** .NET 9, Roslyn (`Microsoft.CodeAnalysis.Workspaces.MSBuild`), `ModelContextProtocol` SDK, xUnit for tests.
+**Tech Stack:** .NET 10, Roslyn (`Microsoft.CodeAnalysis.Workspaces.MSBuild`), `ModelContextProtocol` SDK, xUnit for tests.
 
 **Design Doc:** `docs/plans/2026-03-06-roslyn-codegraph-mcp-design.md`
 
@@ -67,7 +67,7 @@ Edit `src/RoslynCodeGraph/RoslynCodeGraph.csproj`:
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
@@ -2087,7 +2087,7 @@ roslyn-codegraph-mcp /path/to/MySolution.sln
 
 ## Requirements
 
-- .NET 9 SDK
+- .NET 10 SDK
 - A .NET solution with compilable projects
 
 ## Development
