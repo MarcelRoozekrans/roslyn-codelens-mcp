@@ -14,10 +14,14 @@ public static class FindCallersLogic
         if (targetMethods.Count == 0)
             return [];
 
+        var targetSet = new HashSet<IMethodSymbol>(targetMethods, SymbolEqualityComparer.Default);
         var results = new List<CallerInfo>();
+        var seen = new HashSet<(string, int)>();
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
+            var projectName = resolver.GetProjectName(projectId);
+
             foreach (var syntaxTree in compilation.SyntaxTrees)
             {
                 var semanticModel = compilation.GetSemanticModel(syntaxTree);
@@ -26,35 +30,42 @@ public static class FindCallersLogic
                 foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
                 {
                     var symbolInfo = semanticModel.GetSymbolInfo(invocation);
-                    var calledMethod = symbolInfo.Symbol as IMethodSymbol;
-
-                    if (calledMethod == null)
+                    if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
                         continue;
 
-                    // Check if the called method matches any target, including interface implementations
-                    bool isMatch = targetMethods.Any(target =>
-                        SymbolEqualityComparer.Default.Equals(calledMethod, target) ||
-                        SymbolEqualityComparer.Default.Equals(calledMethod.OriginalDefinition, target) ||
-                        IsInterfaceImplementation(calledMethod, target));
-
-                    if (!isMatch)
+                    if (!IsMethodMatch(calledMethod, targetSet, targetMethods))
                         continue;
 
-                    var callerName = GetCallerName(invocation);
                     var lineSpan = invocation.GetLocation().GetLineSpan();
                     var file = lineSpan.Path;
                     var line = lineSpan.StartLinePosition.Line + 1;
-                    var snippet = invocation.ToString();
 
-                    var projectName = loaded.Solution.Projects
-                        .FirstOrDefault(p => p.Id == projectId)?.Name ?? "";
+                    if (!seen.Add((file, line)))
+                        continue;
+
+                    var callerName = GetCallerName(invocation);
+                    var snippet = invocation.ToString();
 
                     results.Add(new CallerInfo(callerName, file, line, snippet, projectName));
                 }
             }
         }
 
-        return results.DistinctBy(r => (r.File, r.Line)).ToList();
+        return results;
+    }
+
+    private static bool IsMethodMatch(IMethodSymbol calledMethod, HashSet<IMethodSymbol> targetSet, List<IMethodSymbol> targetMethods)
+    {
+        if (targetSet.Contains(calledMethod) || targetSet.Contains(calledMethod.OriginalDefinition))
+            return true;
+
+        for (int i = 0; i < targetMethods.Count; i++)
+        {
+            if (IsInterfaceImplementation(calledMethod, targetMethods[i]))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IsInterfaceImplementation(IMethodSymbol calledMethod, IMethodSymbol targetMethod)

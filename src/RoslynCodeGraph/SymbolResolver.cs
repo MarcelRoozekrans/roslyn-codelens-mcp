@@ -9,6 +9,9 @@ public class SymbolResolver
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesBySimpleName;
     private readonly Dictionary<string, INamedTypeSymbol> _typesByFullName;
     private readonly Dictionary<string, string> _fileToProjectName;
+    private readonly Dictionary<ProjectId, string> _projectIdToName;
+    private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _interfaceImplementors;
+    private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _derivedTypes;
 
     public SymbolResolver(LoadedSolution loaded)
     {
@@ -55,6 +58,43 @@ public class SymbolResolver
             {
                 if (doc.FilePath != null)
                     _fileToProjectName[doc.FilePath] = project.Name;
+            }
+        }
+
+        // Build ProjectId-to-name lookup
+        _projectIdToName = new Dictionary<ProjectId, string>();
+        foreach (var project in loaded.Solution.Projects)
+            _projectIdToName[project.Id] = project.Name;
+
+        // Build reverse inheritance maps
+        var comparer = SymbolEqualityComparer.Default;
+        _interfaceImplementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
+        _derivedTypes = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
+
+        foreach (var type in _allTypes)
+        {
+            // Index interface implementations
+            foreach (var iface in type.AllInterfaces)
+            {
+                if (!_interfaceImplementors.TryGetValue(iface, out var implList))
+                {
+                    implList = new List<INamedTypeSymbol>();
+                    _interfaceImplementors[iface] = implList;
+                }
+                implList.Add(type);
+            }
+
+            // Index direct base type → derived
+            var baseType = type.BaseType;
+            while (baseType != null && baseType.SpecialType != SpecialType.System_Object)
+            {
+                if (!_derivedTypes.TryGetValue(baseType, out var derivedList))
+                {
+                    derivedList = new List<INamedTypeSymbol>();
+                    _derivedTypes[baseType] = derivedList;
+                }
+                derivedList.Add(type);
+                baseType = baseType.BaseType;
             }
         }
     }
@@ -142,5 +182,26 @@ public class SymbolResolver
         return _fileToProjectName.TryGetValue(location.SourceTree.FilePath, out var name)
             ? name
             : "";
+    }
+
+    public string GetProjectName(ProjectId projectId)
+    {
+        return _projectIdToName.TryGetValue(projectId, out var name) ? name : "";
+    }
+
+    /// <summary>
+    /// Returns all types that implement the given interface, using pre-built index.
+    /// </summary>
+    public List<INamedTypeSymbol> GetInterfaceImplementors(INamedTypeSymbol iface)
+    {
+        return _interfaceImplementors.TryGetValue(iface, out var list) ? list : [];
+    }
+
+    /// <summary>
+    /// Returns all types that derive from the given type (directly or transitively), using pre-built index.
+    /// </summary>
+    public List<INamedTypeSymbol> GetDerivedTypes(INamedTypeSymbol baseType)
+    {
+        return _derivedTypes.TryGetValue(baseType, out var list) ? list : [];
     }
 }

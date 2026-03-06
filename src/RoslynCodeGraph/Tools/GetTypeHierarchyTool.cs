@@ -41,37 +41,34 @@ public static class GetTypeHierarchyLogic
             interfaces.Add(new SymbolLocation("interface", iface.ToDisplayString(), file, line, project));
         }
 
-        // Walk DOWN: find derived types
+        // Walk DOWN: find derived types using pre-built index
         var derived = new List<SymbolLocation>();
-        foreach (var candidate in resolver.AllTypes)
+        var derivedTypes = target.TypeKind == TypeKind.Interface
+            ? resolver.GetInterfaceImplementors(target)
+            : resolver.GetDerivedTypes(target);
+        var seen = new HashSet<string>();
+
+        foreach (var candidate in derivedTypes)
         {
-            if (SymbolEqualityComparer.Default.Equals(candidate, target))
+            var fullName = candidate.ToDisplayString();
+            if (!seen.Add(fullName))
                 continue;
 
-            var candidateBase = candidate.BaseType;
-            while (candidateBase != null)
+            var (file, line) = resolver.GetFileAndLine(candidate);
+            var project = resolver.GetProjectName(candidate);
+            var kind = candidate.TypeKind switch
             {
-                if (SymbolEqualityComparer.Default.Equals(candidateBase, target))
-                {
-                    var (file, line) = resolver.GetFileAndLine(candidate);
-                    var project = resolver.GetProjectName(candidate);
-                    var kind = candidate.TypeKind switch
-                    {
-                        TypeKind.Struct => "struct",
-                        TypeKind.Interface => "interface",
-                        _ => "class"
-                    };
-                    derived.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
-                    break;
-                }
-                candidateBase = candidateBase.BaseType;
-            }
+                TypeKind.Struct => "struct",
+                TypeKind.Interface => "interface",
+                _ => "class"
+            };
+            derived.Add(new SymbolLocation(kind, fullName, file, line, project));
         }
 
         return new TypeHierarchy(
             bases,
             interfaces,
-            derived.DistinctBy(d => d.FullName).ToList());
+            derived);
     }
 }
 

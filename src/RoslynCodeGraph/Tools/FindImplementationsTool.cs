@@ -11,51 +11,36 @@ public static class FindImplementationsLogic
     {
         var targetTypes = resolver.FindNamedTypes(symbol);
         var results = new List<SymbolLocation>();
+        var seen = new HashSet<string>();
 
         foreach (var target in targetTypes)
         {
-            foreach (var candidate in resolver.AllTypes)
+            List<INamedTypeSymbol> candidates;
+
+            if (target.TypeKind == TypeKind.Interface)
+                candidates = resolver.GetInterfaceImplementors(target);
+            else
+                candidates = resolver.GetDerivedTypes(target);
+
+            foreach (var candidate in candidates)
             {
-                if (SymbolEqualityComparer.Default.Equals(candidate, target))
+                var fullName = candidate.ToDisplayString();
+                if (!seen.Add(fullName))
                     continue;
 
-                bool isMatch = false;
-
-                if (target.TypeKind == TypeKind.Interface)
+                var (file, line) = resolver.GetFileAndLine(candidate);
+                var project = resolver.GetProjectName(candidate);
+                var kind = candidate.TypeKind switch
                 {
-                    isMatch = candidate.AllInterfaces.Any(i =>
-                        SymbolEqualityComparer.Default.Equals(i, target));
-                }
-                else if (target.TypeKind == TypeKind.Class)
-                {
-                    var baseType = candidate.BaseType;
-                    while (baseType != null)
-                    {
-                        if (SymbolEqualityComparer.Default.Equals(baseType, target))
-                        {
-                            isMatch = true;
-                            break;
-                        }
-                        baseType = baseType.BaseType;
-                    }
-                }
-
-                if (isMatch)
-                {
-                    var (file, line) = resolver.GetFileAndLine(candidate);
-                    var project = resolver.GetProjectName(candidate);
-                    var kind = candidate.TypeKind switch
-                    {
-                        TypeKind.Struct => "struct",
-                        TypeKind.Interface => "interface",
-                        _ => "class"
-                    };
-                    results.Add(new SymbolLocation(kind, candidate.ToDisplayString(), file, line, project));
-                }
+                    TypeKind.Struct => "struct",
+                    TypeKind.Interface => "interface",
+                    _ => "class"
+                };
+                results.Add(new SymbolLocation(kind, fullName, file, line, project));
             }
         }
 
-        return results.DistinctBy(r => r.FullName).ToList();
+        return results;
     }
 }
 
