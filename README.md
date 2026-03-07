@@ -86,7 +86,7 @@ All type lookups use pre-built reverse inheritance maps, member indexes, and att
 | `find_callers` | 211 µs | 38 KB |
 | `search_symbols` | 603 µs | 2.3 KB |
 | `find_references` | 1.1 ms | 208 KB |
-| `find_unused_symbols` | 9.4 ms | 1.4 MB |
+| `find_unused_symbols` | 1.3 ms | 212 KB |
 | `find_naming_violations` | 39 ms | 671 KB |
 | Solution loading (one-time) | ~1.1 s | 8 MB |
 
