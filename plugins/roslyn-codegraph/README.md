@@ -8,7 +8,7 @@ Before installing this plugin, ensure you have:
 2. **roslyn-codegraph-mcp global tool** — Install with:
 
 ```bash
-dotnet tool install -g roslyn-codegraph-mcp
+dotnet tool install -g RoslynCodeGraph.Mcp
 ```
 
 ## Install

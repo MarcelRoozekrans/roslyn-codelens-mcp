@@ -1,6 +1,6 @@
 {
   "name": "roslyn-codegraph",
-  "description": "Roslyn-based code graph intelligence for .NET codebases. Requires .NET 10 SDK and the global tool: dotnet tool install -g roslyn-codegraph-mcp",
+  "description": "Roslyn-based code graph intelligence for .NET codebases. Requires .NET 10 SDK and the global tool: dotnet tool install -g RoslynCodeGraph.Mcp",
   "author": {
     "name": "Marcel Roozekrans"
   },

@@ -23,7 +23,7 @@ claude install gh:MarcelRoozekrans/roslyn-codegraph-mcp
 ### As a .NET Global Tool
 
 ```bash
-dotnet tool install -g roslyn-codegraph-mcp
+dotnet tool install -g RoslynCodeGraph.Mcp
 ```
 
 ### Manual MCP Configuration
