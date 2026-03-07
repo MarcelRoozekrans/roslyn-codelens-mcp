@@ -112,11 +112,10 @@ public static class GetDiRegistrationsTool
     [McpServerTool(Name = "get_di_registrations"),
      Description("Scan IServiceCollection extension methods for DI registrations of a type")]
     public static List<DiRegistration> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Type name to search for (simple or fully qualified)")] string symbol)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return GetDiRegistrationsLogic.Execute(loaded, resolver, symbol);
+        manager.EnsureLoaded();
+        return GetDiRegistrationsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), symbol);
     }
 }

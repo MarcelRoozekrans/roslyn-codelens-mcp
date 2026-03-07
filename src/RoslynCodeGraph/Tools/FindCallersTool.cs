@@ -46,7 +46,7 @@ public static class FindCallersLogic
                     var callerName = GetCallerName(invocation);
                     var snippet = invocation.ToString();
 
-                    results.Add(new CallerInfo(callerName, file, line, snippet, projectName));
+                    results.Add(new CallerInfo(callerName, file, line, snippet, projectName, resolver.IsGenerated(file)));
                 }
             }
         }
@@ -120,11 +120,10 @@ public static class FindCallersTool
     [McpServerTool(Name = "find_callers"),
      Description("Find every call site for a method")]
     public static List<CallerInfo> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Method name as Type.Method (simple or fully qualified)")] string symbol)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return FindCallersLogic.Execute(loaded, resolver, symbol);
+        manager.EnsureLoaded();
+        return FindCallersLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), symbol);
     }
 }

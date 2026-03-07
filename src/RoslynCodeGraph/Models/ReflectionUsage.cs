@@ -5,4 +5,5 @@ public record ReflectionUsage(
     string Target,
     string File,
     int Line,
-    string Snippet);
+    string Snippet,
+    bool IsGenerated = false);

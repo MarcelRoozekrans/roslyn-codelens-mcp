@@ -59,11 +59,10 @@ public static class FindAttributeUsagesTool
     [McpServerTool(Name = "find_attribute_usages"),
      Description("Find all types and members decorated with a specific attribute (e.g., Obsolete, Authorize, Serializable)")]
     public static List<AttributeUsageInfo> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Attribute name to search for (with or without 'Attribute' suffix)")] string attribute)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return FindAttributeUsagesLogic.Execute(loaded, resolver, attribute);
+        manager.EnsureLoaded();
+        return FindAttributeUsagesLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), attribute);
     }
 }

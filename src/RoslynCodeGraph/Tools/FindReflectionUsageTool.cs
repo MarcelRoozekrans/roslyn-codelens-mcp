@@ -67,7 +67,7 @@ public static class FindReflectionUsageLogic
                     if (symbol != null && !snippet.Contains(symbol) && !target.Contains(symbol))
                         continue;
 
-                    results.Add(new ReflectionUsage(kind, target, file, line, snippet));
+                    results.Add(new ReflectionUsage(kind, target, file, line, snippet, resolver.IsGenerated(file)));
                 }
             }
         }
@@ -108,11 +108,10 @@ public static class FindReflectionUsageTool
     [McpServerTool(Name = "find_reflection_usage"),
      Description("Detect dynamic/reflection-based usage like Type.GetType, Activator.CreateInstance, MethodInfo.Invoke")]
     public static List<ReflectionUsage> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Optional type name to filter results (omit to scan entire solution)")] string? symbol = null)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return FindReflectionUsageLogic.Execute(loaded, resolver, symbol);
+        manager.EnsureLoaded();
+        return FindReflectionUsageLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), symbol);
     }
 }

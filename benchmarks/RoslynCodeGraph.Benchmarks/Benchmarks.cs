@@ -150,4 +150,16 @@ public class CodeGraphBenchmarks
     {
         return FindUnusedSymbolsLogic.Execute(_loaded, _resolver, null, false);
     }
+
+    [Benchmark(Description = "get_source_generators: all")]
+    public object GetSourceGenerators()
+    {
+        return GetSourceGeneratorsLogic.Execute(_loaded, _resolver, null);
+    }
+
+    [Benchmark(Description = "get_generated_code: all")]
+    public object GetGeneratedCode()
+    {
+        return GetGeneratedCodeLogic.Execute(_loaded, _resolver, null, null);
+    }
 }

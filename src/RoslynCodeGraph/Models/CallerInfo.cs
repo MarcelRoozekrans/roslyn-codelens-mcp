@@ -5,4 +5,5 @@ public record CallerInfo(
     string File,
     int Line,
     string Snippet,
-    string Project);
+    string Project,
+    bool IsGenerated = false);

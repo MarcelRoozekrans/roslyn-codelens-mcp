@@ -44,7 +44,7 @@ public static class GoToDefinitionLogic
             };
 
             var project = resolver.GetProjectName(s);
-            results.Add(new SymbolLocation(kind, fullName, file, line, project));
+            results.Add(new SymbolLocation(kind, fullName, file, line, project, resolver.IsGenerated(file)));
         }
 
         return results;
@@ -57,11 +57,10 @@ public static class GoToDefinitionTool
     [McpServerTool(Name = "go_to_definition"),
      Description("Find the source file and line where a symbol is defined")]
     public static List<SymbolLocation> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Symbol name: simple type (MyClass), fully qualified (Namespace.MyClass), or member (MyClass.DoWork)")] string symbol)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return GoToDefinitionLogic.Execute(resolver, symbol);
+        manager.EnsureLoaded();
+        return GoToDefinitionLogic.Execute(manager.GetResolver(), symbol);
     }
 }

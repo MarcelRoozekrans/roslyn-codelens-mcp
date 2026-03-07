@@ -5,4 +5,5 @@ public record SymbolLocation(
     string FullName,
     string File,
     int Line,
-    string Project);
+    string Project,
+    bool IsGenerated = false);

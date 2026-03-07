@@ -14,6 +14,7 @@ public class SymbolResolver
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _derivedTypes;
     private readonly Dictionary<string, List<ISymbol>> _membersBySimpleName;
     private readonly Dictionary<string, List<(ISymbol Symbol, AttributeData Attribute)>> _attributeIndex;
+    private readonly HashSet<string> _generatedFilePaths;
 
     public SymbolResolver(LoadedSolution loaded)
     {
@@ -127,6 +128,18 @@ public class SymbolResolver
                     _membersBySimpleName[member.Name] = memberList;
                 }
                 memberList.Add(member);
+            }
+        }
+
+        // Build generated file path index
+        _generatedFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var compilation in loaded.Compilations.Values)
+        {
+            foreach (var tree in compilation.SyntaxTrees)
+            {
+                var path = tree.FilePath;
+                if (IsGeneratedPath(path))
+                    _generatedFilePaths.Add(path);
             }
         }
     }
@@ -301,5 +314,22 @@ public class SymbolResolver
     public List<INamedTypeSymbol> GetDerivedTypes(INamedTypeSymbol baseType)
     {
         return _derivedTypes.TryGetValue(baseType, out var list) ? list : [];
+    }
+
+    public bool IsGenerated(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return true;
+        if (_generatedFilePaths.Contains(filePath))
+            return true;
+        return IsGeneratedPath(filePath);
+    }
+
+    private static bool IsGeneratedPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return true;
+        return path.Contains("/obj/")
+            || path.Contains("\\obj\\");
     }
 }

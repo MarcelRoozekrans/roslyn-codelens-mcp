@@ -47,6 +47,11 @@ Use these tools **instead of Grep/Glob** whenever you need to understand .NET co
 - Use `find_large_classes` to identify types that may need refactoring (too many members or lines)
 - Use `find_circular_dependencies` to detect project or namespace dependency cycles
 
+### Source Generators
+
+- Use `get_source_generators` to list source generators and their output per project (optional project filter)
+- Use `get_generated_code` to inspect generated source code from source generators (filter by generator name or file path)
+
 ### Planning Changes
 
 Before modifying code, use these tools to understand the impact:
@@ -87,3 +92,5 @@ Reference concrete types, interfaces, and call sites in your analysis. Example: 
 | `find_naming_violations` | "Check naming conventions" |
 | `find_large_classes` | "Find classes that need splitting" |
 | `find_circular_dependencies` | "Any circular dependencies?" |
+| `get_source_generators` | "What source generators are active?" / "List generators for this project" |
+| `get_generated_code` | "Show generated code" / "What did this generator produce?" |

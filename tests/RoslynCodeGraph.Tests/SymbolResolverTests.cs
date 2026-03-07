@@ -42,4 +42,31 @@ public class SymbolResolverTests : IAsyncLifetime
 
         Assert.NotEmpty(results);
     }
+
+    [Fact]
+    public void IsGenerated_ReturnsFalse_ForRegularFiles()
+    {
+        var resolver = new SymbolResolver(_loaded);
+        var types = resolver.FindNamedTypes("Greeter");
+        Assert.NotEmpty(types);
+        var (file, _) = resolver.GetFileAndLine(types[0]);
+        Assert.NotEmpty(file);
+        Assert.False(resolver.IsGenerated(file));
+    }
+
+    [Fact]
+    public void IsGenerated_ReturnsTrue_ForObjPaths()
+    {
+        var resolver = new SymbolResolver(_loaded);
+        Assert.True(resolver.IsGenerated(@"C:\project\obj\Debug\net10.0\Generated.cs"));
+        Assert.True(resolver.IsGenerated(@"C:\project\obj\Release\net10.0\SomeGen.g.cs"));
+    }
+
+    [Fact]
+    public void IsGenerated_ReturnsTrue_ForNullOrEmptyPaths()
+    {
+        var resolver = new SymbolResolver(_loaded);
+        Assert.True(resolver.IsGenerated(""));
+        Assert.True(resolver.IsGenerated(null!));
+    }
 }

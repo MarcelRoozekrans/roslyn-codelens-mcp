@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "roslyn-codegraph": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "src/RoslynCodeGraph/RoslynCodeGraph.csproj",
+        "--",
+        "RoslynCodeGraph.slnx"
+      ]
+    }
+  }
+}

@@ -186,11 +186,10 @@ public static class FindCircularDependenciesTool
     [McpServerTool(Name = "find_circular_dependencies"),
      Description("Detect circular dependencies in the project reference graph or namespace dependency graph")]
     public static List<CircularDependency> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Level: 'project' or 'namespace' (default: project)")] string level = "project")
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return FindCircularDependenciesLogic.Execute(loaded, resolver, level);
+        manager.EnsureLoaded();
+        return FindCircularDependenciesLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), level);
     }
 }

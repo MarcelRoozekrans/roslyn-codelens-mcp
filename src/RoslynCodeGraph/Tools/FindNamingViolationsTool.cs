@@ -61,19 +61,19 @@ public static class FindNamingViolationsLogic
                 if (string.IsNullOrEmpty(member.Name) || member.Name.StartsWith("."))
                     continue;
 
-                var (memberFile, memberLine) = resolver.GetFileAndLine(member);
-                if (string.IsNullOrEmpty(memberFile))
-                    continue;
-
                 switch (member)
                 {
                     case IMethodSymbol method when method.MethodKind == MethodKind.Ordinary:
                         if (!char.IsUpper(method.Name[0]))
                         {
-                            var suggestion = char.ToUpper(method.Name[0]) + method.Name.Substring(1);
-                            results.Add(new NamingViolation(
-                                method.Name, "Method", "Methods must be PascalCase",
-                                suggestion, memberFile, memberLine, projectName));
+                            var (mf, ml) = resolver.GetFileAndLine(method);
+                            if (!string.IsNullOrEmpty(mf))
+                            {
+                                var suggestion = char.ToUpper(method.Name[0]) + method.Name.Substring(1);
+                                results.Add(new NamingViolation(
+                                    method.Name, "Method", "Methods must be PascalCase",
+                                    suggestion, mf, ml, projectName));
+                            }
                         }
 
                         // Check parameters
@@ -87,10 +87,14 @@ public static class FindNamingViolationsLogic
 
                             if (char.IsUpper(param.Name[0]))
                             {
-                                var paramSuggestion = char.ToLower(param.Name[0]) + param.Name.Substring(1);
-                                results.Add(new NamingViolation(
-                                    param.Name, "Parameter", "Parameters should be camelCase",
-                                    paramSuggestion, memberFile, memberLine, projectName));
+                                var (pf, pl) = resolver.GetFileAndLine(method);
+                                if (!string.IsNullOrEmpty(pf))
+                                {
+                                    var paramSuggestion = char.ToLower(param.Name[0]) + param.Name.Substring(1);
+                                    results.Add(new NamingViolation(
+                                        param.Name, "Parameter", "Parameters should be camelCase",
+                                        paramSuggestion, pf, pl, projectName));
+                                }
                             }
                         }
                         break;
@@ -98,19 +102,27 @@ public static class FindNamingViolationsLogic
                     case IPropertySymbol property:
                         if (!char.IsUpper(property.Name[0]))
                         {
-                            var suggestion = char.ToUpper(property.Name[0]) + property.Name.Substring(1);
-                            results.Add(new NamingViolation(
-                                property.Name, "Property", "Properties must be PascalCase",
-                                suggestion, memberFile, memberLine, projectName));
+                            var (pf, pl) = resolver.GetFileAndLine(property);
+                            if (!string.IsNullOrEmpty(pf))
+                            {
+                                var suggestion = char.ToUpper(property.Name[0]) + property.Name.Substring(1);
+                                results.Add(new NamingViolation(
+                                    property.Name, "Property", "Properties must be PascalCase",
+                                    suggestion, pf, pl, projectName));
+                            }
                         }
                         break;
 
                     case IFieldSymbol field when field.DeclaredAccessibility == Accessibility.Private:
                         if (!field.Name.StartsWith("_"))
                         {
-                            results.Add(new NamingViolation(
-                                field.Name, "Field", "Private fields should start with '_'",
-                                $"_{field.Name}", memberFile, memberLine, projectName));
+                            var (ff, fl) = resolver.GetFileAndLine(field);
+                            if (!string.IsNullOrEmpty(ff))
+                            {
+                                results.Add(new NamingViolation(
+                                    field.Name, "Field", "Private fields should start with '_'",
+                                    $"_{field.Name}", ff, fl, projectName));
+                            }
                         }
                         break;
                 }
@@ -127,11 +139,10 @@ public static class FindNamingViolationsTool
     [McpServerTool(Name = "find_naming_violations"),
      Description("Check .NET naming convention compliance: PascalCase types/methods/properties, camelCase parameters, I-prefix interfaces, _ prefix private fields")]
     public static List<NamingViolation> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Optional project name filter")] string? project = null)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return FindNamingViolationsLogic.Execute(loaded, resolver, project);
+        manager.EnsureLoaded();
+        return FindNamingViolationsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project);
     }
 }

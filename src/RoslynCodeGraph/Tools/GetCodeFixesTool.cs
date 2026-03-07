@@ -71,14 +71,13 @@ public static class GetCodeFixesTool
     [McpServerTool(Name = "get_code_fixes"),
      Description("Get available code fixes for a specific diagnostic at a file location. Returns structured text edits that can be reviewed and applied.")]
     public static async Task<List<CodeFixSuggestion>> Execute(
-        LoadedSolution loaded,
-        SymbolResolver resolver,
+        SolutionManager manager,
         [Description("Diagnostic ID (e.g., 'CA1822', 'CS0168')")] string diagnosticId,
         [Description("Full path to the source file")] string filePath,
         [Description("Line number where the diagnostic occurs")] int line,
         CancellationToken ct = default)
     {
-        SolutionGuard.EnsureLoaded(loaded);
-        return await GetCodeFixesLogic.ExecuteAsync(loaded, resolver, diagnosticId, filePath, line, ct);
+        manager.EnsureLoaded();
+        return await GetCodeFixesLogic.ExecuteAsync(manager.GetLoadedSolution(), manager.GetResolver(), diagnosticId, filePath, line, ct);
     }
 }

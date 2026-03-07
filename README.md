@@ -1,6 +1,6 @@
 # Roslyn Code Graph MCP Server
 
-A Roslyn-based MCP server that provides semantic code intelligence for .NET codebases. Designed for use with Claude Code to understand type hierarchies, call sites, DI registrations, and reflection usage.
+A Roslyn-based MCP server that provides 21 semantic code intelligence tools for .NET codebases. Designed for use with Claude Code to understand type hierarchies, call sites, DI registrations, and reflection usage.
 
 ## Features
 
@@ -23,6 +23,8 @@ A Roslyn-based MCP server that provides semantic code intelligence for .NET code
 - **find_naming_violations** — Check .NET naming convention compliance
 - **find_large_classes** — Find oversized types by member or line count
 - **find_unused_symbols** — Dead code detection via reference analysis
+- **get_source_generators** — List source generators and their output per project
+- **get_generated_code** — Inspect generated source code from source generators
 
 ## Installation
 
@@ -84,9 +86,15 @@ All type lookups use pre-built reverse inheritance maps, member indexes, and att
 | `find_callers` | 211 µs | 38 KB |
 | `search_symbols` | 603 µs | 2.3 KB |
 | `find_references` | 1.1 ms | 208 KB |
-| `find_unused_symbols` | 9.4 ms | 1.4 MB |
+| `find_unused_symbols` | 1.3 ms | 212 KB |
 | `find_naming_violations` | 39 ms | 671 KB |
 | Solution loading (one-time) | ~1.1 s | 8 MB |
+
+## Hot Reload
+
+The server watches `.cs`, `.csproj`, `.props`, and `.targets` files for changes. When a change is detected, affected projects are lazily re-compiled on the next tool query — only stale projects and their downstream dependents are re-compiled, not the full solution.
+
+Location-returning tools include an `IsGenerated` flag to distinguish source-generator output from hand-written code.
 
 ## Requirements
 
