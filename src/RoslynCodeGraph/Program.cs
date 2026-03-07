@@ -10,22 +10,20 @@ var solutionPath = args.Length > 0
     ? args[0]
     : SolutionLoader.FindSolutionFile(Directory.GetCurrentDirectory());
 
-var loader = new SolutionLoader();
-LoadedSolution loaded;
+SolutionManager manager;
 
 if (solutionPath != null)
 {
-    loaded = await loader.LoadAsync(solutionPath);
+    manager = await SolutionManager.CreateAsync(solutionPath);
 }
 else
 {
     Console.Error.WriteLine("[roslyn-codegraph] No .sln file found. Tools will return errors.");
-    loaded = LoadedSolution.Empty;
+    manager = SolutionManager.CreateEmpty();
 }
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddSingleton(loaded);
-builder.Services.AddSingleton<SymbolResolver>();
+builder.Services.AddSingleton(manager);
 
 builder.Services
     .AddMcpServer()
