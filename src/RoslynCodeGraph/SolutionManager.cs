@@ -10,6 +10,7 @@ public class SolutionManager : IDisposable
     private readonly string? _solutionPath;
     private readonly FileChangeTracker? _tracker;
     private readonly object _lock = new();
+    private volatile bool _rebuilding;
 
     private SolutionManager(LoadedSolution loaded, string? solutionPath)
     {
@@ -63,23 +64,32 @@ public class SolutionManager : IDisposable
         lock (_lock)
         {
             // Double-check after acquiring lock
-            if (!_tracker.HasStaleProjects)
+            if (_tracker == null || !_tracker.HasStaleProjects || _rebuilding)
                 return;
 
-            var staleIds = _tracker.StaleProjectIds;
+            _rebuilding = true;
+        }
+
+        // Rebuild outside the lock to avoid blocking other reads
+        var staleIds = _tracker.StaleProjectIds;
+        Console.Error.WriteLine(
+            $"[roslyn-codegraph] Rebuilding {staleIds.Count} stale project(s)...");
+
+        try
+        {
+            RebuildStaleProjects(staleIds).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
             Console.Error.WriteLine(
-                $"[roslyn-codegraph] Rebuilding {staleIds.Count} stale project(s)...");
-
-            try
+                $"[roslyn-codegraph] Rebuild failed: {ex}. Using cached data.");
+        }
+        finally
+        {
+            lock (_lock)
             {
-                RebuildStaleProjects(staleIds).GetAwaiter().GetResult();
+                _rebuilding = false;
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(
-                    $"[roslyn-codegraph] Rebuild failed: {ex.Message}. Using cached data.");
-            }
-
             _tracker.ClearStale();
         }
     }
@@ -104,13 +114,20 @@ public class SolutionManager : IDisposable
                 compilations[project.Id] = compilation;
         }
 
-        _loaded = new LoadedSolution
+        var newLoaded = new LoadedSolution
         {
             Solution = solution,
             Compilations = compilations
         };
-        _resolver = new SymbolResolver(_loaded);
-        _tracker!.UpdateMappings(_loaded);
+        var newResolver = new SymbolResolver(newLoaded);
+
+        lock (_lock)
+        {
+            _loaded = newLoaded;
+            _resolver = newResolver;
+        }
+
+        _tracker!.UpdateMappings(newLoaded);
 
         Console.Error.WriteLine("[roslyn-codegraph] Rebuild complete.");
     }

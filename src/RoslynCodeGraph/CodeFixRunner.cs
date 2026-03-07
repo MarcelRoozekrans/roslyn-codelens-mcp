@@ -33,44 +33,15 @@ public class CodeFixRunner
             {
                 await provider.RegisterCodeFixesAsync(context);
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"[roslyn-codegraph] CodeFix registration failed ({provider.GetType().Name}): {ex.Message}");
                 continue;
             }
 
             foreach (var action in actions)
             {
-                var operations = await action.GetOperationsAsync(ct);
-                var applyOp = operations.OfType<ApplyChangesOperation>().FirstOrDefault();
-                if (applyOp == null) continue;
-
-                var changedSolution = applyOp.ChangedSolution;
-                var edits = new List<TextEdit>();
-
-                foreach (var changedDocId in changedSolution.GetChanges(project.Solution).GetProjectChanges()
-                    .SelectMany(pc => pc.GetChangedDocuments()))
-                {
-                    var originalDoc = project.Solution.GetDocument(changedDocId);
-                    var changedDoc = changedSolution.GetDocument(changedDocId);
-                    if (originalDoc == null || changedDoc == null) continue;
-
-                    var originalText = await originalDoc.GetTextAsync(ct);
-                    var changedText = await changedDoc.GetTextAsync(ct);
-                    var changes = changedText.GetTextChanges(originalText);
-
-                    foreach (var change in changes)
-                    {
-                        var startLine = originalText.Lines.GetLinePosition(change.Span.Start);
-                        var endLine = originalText.Lines.GetLinePosition(change.Span.End);
-
-                        edits.Add(new TextEdit(
-                            originalDoc.FilePath ?? "",
-                            startLine.Line + 1, startLine.Character + 1,
-                            endLine.Line + 1, endLine.Character + 1,
-                            change.NewText ?? ""));
-                    }
-                }
-
+                var edits = await ExtractTextEdits(action, project, ct);
                 if (edits.Count > 0)
                 {
                     suggestions.Add(new CodeFixSuggestion(action.Title, diagnostic.Id, edits));
@@ -79,6 +50,43 @@ public class CodeFixRunner
         }
 
         return suggestions;
+    }
+
+    private static async Task<List<TextEdit>> ExtractTextEdits(
+        CodeAction action, Project project, CancellationToken ct)
+    {
+        var operations = await action.GetOperationsAsync(ct);
+        var applyOp = operations.OfType<ApplyChangesOperation>().FirstOrDefault();
+        if (applyOp == null) return [];
+
+        var changedSolution = applyOp.ChangedSolution;
+        var edits = new List<TextEdit>();
+
+        foreach (var changedDocId in changedSolution.GetChanges(project.Solution).GetProjectChanges()
+            .SelectMany(pc => pc.GetChangedDocuments()))
+        {
+            var originalDoc = project.Solution.GetDocument(changedDocId);
+            var changedDoc = changedSolution.GetDocument(changedDocId);
+            if (originalDoc == null || changedDoc == null) continue;
+
+            var originalText = await originalDoc.GetTextAsync(ct);
+            var changedText = await changedDoc.GetTextAsync(ct);
+            var changes = changedText.GetTextChanges(originalText);
+
+            foreach (var change in changes)
+            {
+                var startLine = originalText.Lines.GetLinePosition(change.Span.Start);
+                var endLine = originalText.Lines.GetLinePosition(change.Span.End);
+
+                edits.Add(new TextEdit(
+                    originalDoc.FilePath ?? "",
+                    startLine.Line + 1, startLine.Character + 1,
+                    endLine.Line + 1, endLine.Character + 1,
+                    change.NewText ?? ""));
+            }
+        }
+
+        return edits;
     }
 
     private static List<CodeFixProvider> GetCodeFixProviders(Project project, string diagnosticId)
@@ -96,8 +104,9 @@ public class CodeFixRunner
             {
                 assembly = Assembly.LoadFrom(fullPath);
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"[roslyn-codegraph] Failed to load analyzer assembly '{fullPath}': {ex.Message}");
                 continue;
             }
 
@@ -110,8 +119,9 @@ public class CodeFixRunner
             {
                 types = ex.Types.Where(t => t != null).ToArray()!;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.Error.WriteLine($"[roslyn-codegraph] Failed to get types from '{fullPath}': {ex.Message}");
                 continue;
             }
 
@@ -134,8 +144,9 @@ public class CodeFixRunner
                 {
                     instance = (CodeFixProvider)Activator.CreateInstance(type)!;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.Error.WriteLine($"[roslyn-codegraph] Failed to create CodeFix provider '{type.Name}': {ex.Message}");
                     continue;
                 }
 

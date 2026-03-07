@@ -39,92 +39,63 @@ public static class FindCircularDependenciesLogic
 
     private static List<CircularDependency> FindNamespaceCycles(LoadedSolution loaded)
     {
-        // Collect all namespaces defined in the solution
         var definedNamespaces = new HashSet<string>(StringComparer.Ordinal);
-        // Map: namespace -> set of namespaces it depends on (via using directives)
-        var adjacency = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var adjacency = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
-        foreach (var project in loaded.Solution.Projects)
+        // Single pass: collect namespaces and build adjacency from syntax trees
+        foreach (var (_, compilation) in loaded.Compilations)
         {
-            foreach (var document in project.Documents)
+            foreach (var syntaxTree in compilation.SyntaxTrees)
             {
-                var tree = document.GetSyntaxTreeAsync().GetAwaiter().GetResult();
-                if (tree == null) continue;
+                var root = syntaxTree.GetRoot();
 
-                var root = tree.GetRoot();
+                // Collect file-level usings
+                var fileUsings = new List<string>();
+                foreach (var usingDirective in root.ChildNodes().OfType<UsingDirectiveSyntax>())
+                {
+                    var name = usingDirective.Name?.ToString();
+                    if (name != null)
+                        fileUsings.Add(name);
+                }
 
-                // Collect namespace declarations
+                // Process each namespace declaration
                 foreach (var nsDecl in root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>())
                 {
                     var nsName = nsDecl.Name.ToString();
                     definedNamespaces.Add(nsName);
-                }
-            }
-        }
 
-        // Build adjacency from using directives within each namespace
-        foreach (var project in loaded.Solution.Projects)
-        {
-            foreach (var document in project.Documents)
-            {
-                var tree = document.GetSyntaxTreeAsync().GetAwaiter().GetResult();
-                if (tree == null) continue;
-
-                var root = tree.GetRoot();
-
-                // Get file-level usings and associate with namespaces in this file
-                var fileUsings = root.DescendantNodes().OfType<UsingDirectiveSyntax>()
-                    .Where(u => u.Parent is CompilationUnitSyntax)
-                    .Select(u => u.Name?.ToString())
-                    .Where(n => n != null && definedNamespaces.Contains(n))
-                    .ToList();
-
-                var namespacesInFile = root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>()
-                    .Select(ns => ns.Name.ToString())
-                    .ToList();
-
-                foreach (var ns in namespacesInFile)
-                {
-                    if (!adjacency.TryGetValue(ns, out var deps))
+                    if (!adjacency.TryGetValue(nsName, out var deps))
                     {
-                        deps = new List<string>();
-                        adjacency[ns] = deps;
+                        deps = new HashSet<string>(StringComparer.Ordinal);
+                        adjacency[nsName] = deps;
                     }
 
-                    // Add file-level usings as dependencies (exclude self-references)
-                    foreach (var usingNs in fileUsings)
+                    // Add file-level usings (will filter to defined namespaces later)
+                    foreach (var u in fileUsings)
                     {
-                        if (usingNs != null && !usingNs.Equals(ns, StringComparison.Ordinal))
-                            deps.Add(usingNs);
+                        if (!u.Equals(nsName, StringComparison.Ordinal))
+                            deps.Add(u);
                     }
 
                     // Add namespace-level usings
-                    var nsDecl = root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>()
-                        .FirstOrDefault(n => n.Name.ToString() == ns);
-
-                    if (nsDecl != null)
+                    foreach (var usingDirective in nsDecl.ChildNodes().OfType<UsingDirectiveSyntax>())
                     {
-                        foreach (var usingDirective in nsDecl.DescendantNodes().OfType<UsingDirectiveSyntax>())
-                        {
-                            var usingName = usingDirective.Name?.ToString();
-                            if (usingName != null && definedNamespaces.Contains(usingName) &&
-                                !usingName.Equals(ns, StringComparison.Ordinal))
-                            {
-                                deps.Add(usingName);
-                            }
-                        }
+                        var usingName = usingDirective.Name?.ToString();
+                        if (usingName != null && !usingName.Equals(nsName, StringComparison.Ordinal))
+                            deps.Add(usingName);
                     }
                 }
             }
         }
 
-        // Deduplicate adjacency lists
-        foreach (var key in adjacency.Keys)
+        // Filter adjacency to only include defined namespaces
+        var filtered = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (ns, deps) in adjacency)
         {
-            adjacency[key] = adjacency[key].Distinct(StringComparer.Ordinal).ToList();
+            filtered[ns] = deps.Where(d => definedNamespaces.Contains(d)).ToList();
         }
 
-        return DetectCycles(adjacency, "namespace");
+        return DetectCycles(filtered, "namespace");
     }
 
     private static List<CircularDependency> DetectCycles(Dictionary<string, List<string>> adjacency, string level)

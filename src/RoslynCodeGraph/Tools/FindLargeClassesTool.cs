@@ -44,8 +44,9 @@ public static class FindLargeClassesLogic
         if (syntaxRef == null) return 0;
         var span = syntaxRef.Span;
         var tree = syntaxRef.SyntaxTree;
-        var startLine = tree.GetLineSpan(span).StartLinePosition.Line;
-        var endLine = tree.GetLineSpan(span).EndLinePosition.Line;
+        var lineSpan = tree.GetLineSpan(span);
+        var startLine = lineSpan.StartLinePosition.Line;
+        var endLine = lineSpan.EndLinePosition.Line;
         return endLine - startLine + 1;
     }
 }
