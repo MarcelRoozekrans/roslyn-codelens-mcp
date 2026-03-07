@@ -112,6 +112,7 @@ public static class FindReflectionUsageTool
         SymbolResolver resolver,
         [Description("Optional type name to filter results (omit to scan entire solution)")] string? symbol = null)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return FindReflectionUsageLogic.Execute(loaded, resolver, symbol);
     }
 }

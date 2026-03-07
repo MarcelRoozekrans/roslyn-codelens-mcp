@@ -67,6 +67,7 @@ public static class GetSymbolContextTool
         SymbolResolver resolver,
         [Description("Type name (simple or fully qualified)")] string symbol)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return GetSymbolContextLogic.Execute(loaded, resolver, symbol);
     }
 }

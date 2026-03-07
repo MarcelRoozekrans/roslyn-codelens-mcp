@@ -54,6 +54,7 @@ public static class FindImplementationsTool
         SymbolResolver resolver,
         [Description("Type name (simple or fully qualified)")] string symbol)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return FindImplementationsLogic.Execute(loaded, resolver, symbol);
     }
 }

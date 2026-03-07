@@ -82,6 +82,7 @@ public static class GetTypeHierarchyTool
         SymbolResolver resolver,
         [Description("Type name (simple or fully qualified)")] string symbol)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return GetTypeHierarchyLogic.Execute(loaded, resolver, symbol);
     }
 }

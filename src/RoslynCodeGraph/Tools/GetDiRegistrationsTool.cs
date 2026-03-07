@@ -116,6 +116,7 @@ public static class GetDiRegistrationsTool
         SymbolResolver resolver,
         [Description("Type name to search for (simple or fully qualified)")] string symbol)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return GetDiRegistrationsLogic.Execute(loaded, resolver, symbol);
     }
 }

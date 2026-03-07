@@ -65,6 +65,7 @@ public static class GetProjectDependenciesTool
         LoadedSolution loaded,
         [Description("Project name or .csproj filename")] string project)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return GetProjectDependenciesLogic.Execute(loaded, project);
     }
 }

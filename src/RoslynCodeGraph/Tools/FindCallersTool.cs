@@ -124,6 +124,7 @@ public static class FindCallersTool
         SymbolResolver resolver,
         [Description("Method name as Type.Method (simple or fully qualified)")] string symbol)
     {
+        SolutionGuard.EnsureLoaded(loaded);
         return FindCallersLogic.Execute(loaded, resolver, symbol);
     }
 }
