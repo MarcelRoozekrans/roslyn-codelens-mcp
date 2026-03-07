@@ -9,4 +9,7 @@ public class Greeter : IGreeter
 
     [Obsolete("Use Greet instead")]
     public string OldGreet(string name) => Greet(name);
+
+    // Helper method intentionally triggers CA1822 (can be made static)
+    public int ComputeLength(string value) => value.Length;
 }
