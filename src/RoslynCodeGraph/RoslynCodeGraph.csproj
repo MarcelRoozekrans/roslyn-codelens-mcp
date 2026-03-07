@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>roslyn-codegraph-mcp</ToolCommandName>
-    <PackageId>RoslynCodeGraph</PackageId>
+    <PackageId>RoslynCodeGraph.Mcp</PackageId>
     <Authors>Marcel Roozekrans</Authors>
     <Description>Roslyn-based MCP server providing semantic code intelligence for .NET codebases</Description>
     <PackageProjectUrl>https://github.com/MarcelRoozekrans/roslyn-codegraph-mcp</PackageProjectUrl>
