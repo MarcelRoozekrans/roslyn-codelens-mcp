@@ -120,4 +120,34 @@ public class CodeGraphBenchmarks
     {
         return FindAttributeUsagesLogic.Execute(_loaded, _resolver, "Obsolete");
     }
+
+    [Benchmark(Description = "find_circular_dependencies: project")]
+    public object FindCircularDependencies()
+    {
+        return FindCircularDependenciesLogic.Execute(_loaded, _resolver, "project");
+    }
+
+    [Benchmark(Description = "get_complexity_metrics: all")]
+    public object GetComplexityMetrics()
+    {
+        return GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 10);
+    }
+
+    [Benchmark(Description = "find_naming_violations: all")]
+    public object FindNamingViolations()
+    {
+        return FindNamingViolationsLogic.Execute(_loaded, _resolver, null);
+    }
+
+    [Benchmark(Description = "find_large_classes: all")]
+    public object FindLargeClasses()
+    {
+        return FindLargeClassesLogic.Execute(_loaded, _resolver, null, 20, 500);
+    }
+
+    [Benchmark(Description = "find_unused_symbols: all")]
+    public object FindUnusedSymbols()
+    {
+        return FindUnusedSymbolsLogic.Execute(_loaded, _resolver, null, false);
+    }
 }
