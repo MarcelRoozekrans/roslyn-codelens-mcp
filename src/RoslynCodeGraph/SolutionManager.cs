@@ -132,6 +132,30 @@ public sealed class SolutionManager : IDisposable
         await Console.Error.WriteLineAsync("[roslyn-codegraph] Rebuild complete.").ConfigureAwait(false);
     }
 
+    public async Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync()
+    {
+        if (_solutionPath == null)
+            throw new InvalidOperationException("No solution path configured. Cannot reload.");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var loader = new SolutionLoader();
+        var newLoaded = await loader.LoadAsync(_solutionPath).ConfigureAwait(false);
+        var newResolver = new SymbolResolver(newLoaded);
+
+        lock (_lock)
+        {
+            _loaded = newLoaded;
+            _resolver = newResolver;
+        }
+
+        _tracker?.UpdateMappings(newLoaded);
+        _tracker?.ClearStale();
+
+        sw.Stop();
+        return (newLoaded.Compilations.Count, sw.Elapsed);
+    }
+
     public void Dispose()
     {
         _tracker?.Dispose();

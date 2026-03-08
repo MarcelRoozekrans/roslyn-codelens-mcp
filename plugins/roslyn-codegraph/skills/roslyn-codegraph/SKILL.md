@@ -64,6 +64,10 @@ Use these tools **instead of Grep/Glob and instead of MSBuild** whenever you nee
 - Use `get_source_generators` to list source generators and their output per project (optional project filter)
 - Use `get_generated_code` to inspect generated source code from source generators (filter by generator name or file path)
 
+### Solution Management
+
+- Use `rebuild_solution` to force a full reload of the analyzed solution — re-opens the `.sln`, recompiles all projects, and rebuilds all indexes. Use after changing `Directory.Build.props`, adding/removing NuGet packages or analyzers, or when diagnostics seem stale.
+
 ### Planning Changes
 
 Before modifying code, use these tools to understand the impact:
@@ -106,3 +110,4 @@ Reference concrete types, interfaces, and call sites in your analysis. Example: 
 | `find_circular_dependencies` | "Any circular dependencies?" |
 | `get_source_generators` | "What source generators are active?" / "List generators for this project" |
 | `get_generated_code` | "Show generated code" / "What did this generator produce?" |
+| `rebuild_solution` | "Reload the solution" / "Pick up new analyzers" / "Diagnostics are stale" |
