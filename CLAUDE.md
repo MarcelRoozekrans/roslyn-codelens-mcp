@@ -1,4 +1,4 @@
-# Roslyn Code Graph MCP
+# Roslyn CodeLens MCP
 
 This is a Roslyn-based MCP server that provides semantic code intelligence for .NET codebases.
 
@@ -8,7 +8,7 @@ The `.mcp.json` configures the roslyn-codelens MCP server to analyze this soluti
 
 ## Skill
 
-The `plugins/roslyn-codelens/skills/roslyn-codelens/SKILL.md` skill teaches Claude when and how to use the 21 code intelligence tools. Use the MCP tools instead of Grep/Glob for any .NET semantic queries (finding implementations, callers, references, diagnostics, etc.).
+The `plugins/roslyn-codelens/skills/roslyn-codelens/SKILL.md` skill teaches Claude when and how to use the 22 code intelligence tools. Use the MCP tools instead of Grep/Glob for any .NET semantic queries (finding implementations, callers, references, diagnostics, etc.).
 
 ## Project Structure
 

@@ -1,6 +1,6 @@
-# Roslyn Code Graph MCP Server
+# Roslyn CodeLens MCP Server
 
-A Roslyn-based MCP server that provides 21 semantic code intelligence tools for .NET codebases. Designed for use with Claude Code to understand type hierarchies, call sites, DI registrations, and reflection usage.
+A Roslyn-based MCP server that provides 22 semantic code intelligence tools for .NET codebases. Designed for use with Claude Code to understand type hierarchies, call sites, DI registrations, and reflection usage.
 
 ## Features
 

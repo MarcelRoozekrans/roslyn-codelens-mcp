@@ -1,4 +1,4 @@
-# Roslyn Code Graph Plugin
+# Roslyn CodeLens Plugin
 
 ## Prerequisites
 
