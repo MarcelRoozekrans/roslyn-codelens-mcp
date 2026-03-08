@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using RoslynCodeGraph.Models;
 
@@ -29,7 +30,7 @@ public static class GetSourceGeneratorsLogic
                 .GroupBy(f => InferGeneratorName(f), StringComparer.Ordinal)
                 .ToList();
 
-            foreach (var group in byGenerator)
+            foreach (var group in CollectionsMarshal.AsSpan(byGenerator))
             {
                 results.Add(new SourceGeneratorInfo(
                     group.Key,
@@ -49,7 +50,9 @@ public static class GetSourceGeneratorsLogic
 
         if (objIndex >= 0 && objIndex + 3 < parts.Length)
         {
+#pragma warning disable HLQ013
             for (var i = objIndex + 3; i < parts.Length - 1; i++)
+#pragma warning restore HLQ013
             {
                 var segment = parts[i];
                 if (!segment.Equals("generated", StringComparison.OrdinalIgnoreCase)

@@ -25,6 +25,7 @@ A Roslyn-based MCP server that provides 21 semantic code intelligence tools for 
 - **find_unused_symbols** — Dead code detection via reference analysis
 - **get_source_generators** — List source generators and their output per project
 - **get_generated_code** — Inspect generated source code from source generators
+- **rebuild_solution** — Force a full reload of the analyzed solution
 
 ## Installation
 
@@ -70,25 +71,27 @@ All type lookups use pre-built reverse inheritance maps, member indexes, and att
 
 | Tool | Latency | Memory |
 |------|--------:|-------:|
-| `get_project_dependencies` | 325 ns | 1.2 KB |
-| `find_circular_dependencies` | 336 ns | 1.3 KB |
-| `go_to_definition` | 389 ns | 528 B |
-| `find_implementations` | 705 ns | 624 B |
-| `get_type_hierarchy` | 755 ns | 816 B |
-| `get_symbol_context` | 1.3 µs | 1.0 KB |
-| `find_attribute_usages` | 8.9 µs | 312 B |
-| `get_diagnostics` | 35 µs | 23 KB |
-| `get_complexity_metrics` | 64 µs | 5.7 KB |
-| `get_di_registrations` | 73 µs | 13 KB |
-| `get_nuget_dependencies` | 77 µs | 16 KB |
-| `find_large_classes` | 77 µs | 1.2 KB |
-| `find_reflection_usage` | 97 µs | 15 KB |
-| `find_callers` | 211 µs | 38 KB |
-| `search_symbols` | 603 µs | 2.3 KB |
-| `find_references` | 1.1 ms | 208 KB |
-| `find_unused_symbols` | 1.3 ms | 212 KB |
-| `find_naming_violations` | 39 ms | 671 KB |
-| Solution loading (one-time) | ~1.1 s | 8 MB |
+| `find_circular_dependencies` | 288 ns | 1.3 KB |
+| `get_project_dependencies` | 299 ns | 1.2 KB |
+| `go_to_definition` | 442 ns | 568 B |
+| `get_type_hierarchy` | 720 ns | 856 B |
+| `find_implementations` | 804 ns | 704 B |
+| `get_symbol_context` | 1.1 µs | 1.0 KB |
+| `get_source_generators` | 2.6 µs | 8.3 KB |
+| `find_attribute_usages` | 6.8 µs | 312 B |
+| `get_generated_code` | 13 µs | 9.8 KB |
+| `get_diagnostics` | 27 µs | 23 KB |
+| `get_complexity_metrics` | 50 µs | 5.8 KB |
+| `find_large_classes` | 60 µs | 1.2 KB |
+| `get_di_registrations` | 60 µs | 13 KB |
+| `get_nuget_dependencies` | 62 µs | 16 KB |
+| `find_reflection_usage` | 82 µs | 15 KB |
+| `find_callers` | 182 µs | 38 KB |
+| `search_symbols` | 517 µs | 2.4 KB |
+| `find_references` | 927 µs | 208 KB |
+| `find_unused_symbols` | 1.1 ms | 212 KB |
+| `find_naming_violations` | 5.0 ms | 670 KB |
+| Solution loading (one-time) | ~928 ms | 8 MB |
 
 ## Hot Reload
 

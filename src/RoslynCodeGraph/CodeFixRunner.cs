@@ -36,7 +36,7 @@ public static class CodeFixRunner
             }
             catch (Exception ex)
             {
-                await Console.Error.WriteLineAsync($"[roslyn-codegraph] CodeFix registration failed ({provider.GetType().Name}): {ex.Message}").ConfigureAwait(false);
+                await Console.Error.WriteLineAsync($"[roslyn-codegraph] CodeFix registration failed ({provider.GetType().Name}): {ex}").ConfigureAwait(false);
                 continue;
             }
 
@@ -125,7 +125,7 @@ public static class CodeFixRunner
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[roslyn-codegraph] Failed to load analyzer assembly '{fullPath}': {ex.Message}");
+            Console.Error.WriteLine($"[roslyn-codegraph] Failed to load analyzer assembly '{fullPath}': {ex}");
             return null;
         }
 
@@ -139,7 +139,7 @@ public static class CodeFixRunner
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[roslyn-codegraph] Failed to get types from '{fullPath}': {ex.Message}");
+            Console.Error.WriteLine($"[roslyn-codegraph] Failed to get types from '{fullPath}': {ex}");
             return null;
         }
     }
@@ -167,7 +167,7 @@ public static class CodeFixRunner
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[roslyn-codegraph] Failed to create CodeFix provider '{type.Name}': {ex.Message}");
+                Console.Error.WriteLine($"[roslyn-codegraph] Failed to create CodeFix provider '{type.Name}': {ex}");
                 continue;
             }
 

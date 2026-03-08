@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using RoslynCodeGraph.Models;
 
@@ -25,7 +26,7 @@ public static class SearchSymbolsLogic
             if (!simpleName.Contains(query, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            foreach (var type in types)
+            foreach (var type in CollectionsMarshal.AsSpan(types))
             {
                 var (file, line) = resolver.GetFileAndLine(type);
                 if (string.IsNullOrEmpty(file))
@@ -56,7 +57,7 @@ public static class SearchSymbolsLogic
             if (!memberName.Contains(query, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            foreach (var member in members)
+            foreach (var member in CollectionsMarshal.AsSpan(members))
             {
                 var (file, line) = resolver.GetFileAndLine(member);
                 if (string.IsNullOrEmpty(file))

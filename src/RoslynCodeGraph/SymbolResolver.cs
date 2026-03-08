@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeGraph;
@@ -52,7 +53,7 @@ public class SymbolResolver
         var bySimple = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
         var byFull = new Dictionary<string, INamedTypeSymbol>(StringComparer.Ordinal);
 
-        foreach (var type in allTypes)
+        foreach (var type in CollectionsMarshal.AsSpan(allTypes))
         {
             byFull[type.ToDisplayString()] = type;
 
@@ -94,7 +95,7 @@ public class SymbolResolver
         var implementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
         var derived = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
 
-        foreach (var type in allTypes)
+        foreach (var type in CollectionsMarshal.AsSpan(allTypes))
         {
             foreach (var iface in type.AllInterfaces)
             {
@@ -124,7 +125,7 @@ public class SymbolResolver
 
     private void BuildMemberAndAttributeIndexes()
     {
-        foreach (var type in _allTypes)
+        foreach (var type in CollectionsMarshal.AsSpan(_allTypes))
         {
             IndexAttributes(type);
 

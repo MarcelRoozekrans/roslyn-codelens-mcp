@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeGraph;
@@ -125,7 +126,7 @@ public sealed class FileChangeTracker : IDisposable
 
         if (_reverseDeps.TryGetValue(projectId, out var dependents))
         {
-            foreach (var dep in dependents)
+            foreach (var dep in CollectionsMarshal.AsSpan(dependents))
                 MarkStaleTransitive(dep);
         }
     }

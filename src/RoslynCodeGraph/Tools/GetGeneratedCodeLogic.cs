@@ -59,7 +59,9 @@ public static class GetGeneratedCodeLogic
 
         if (objIndex >= 0 && objIndex + 3 < parts.Length)
         {
+#pragma warning disable HLQ013
             for (var i = objIndex + 3; i < parts.Length - 1; i++)
+#pragma warning restore HLQ013
             {
                 var segment = parts[i];
                 if (!segment.Equals("generated", StringComparison.OrdinalIgnoreCase)

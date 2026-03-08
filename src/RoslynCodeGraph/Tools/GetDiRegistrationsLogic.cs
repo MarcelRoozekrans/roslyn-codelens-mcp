@@ -85,8 +85,10 @@ public static class GetDiRegistrationsLogic
             return string.Equals(fullName, symbol, StringComparison.Ordinal);
 
         var lastDot = fullName.LastIndexOf('.');
-        var simpleName = lastDot >= 0 ? fullName.AsSpan(lastDot + 1) : fullName.AsSpan();
-        return simpleName.SequenceEqual(symbol.AsSpan());
+        if (lastDot >= 0)
+            return string.Compare(fullName, lastDot + 1, symbol, 0, symbol.Length, StringComparison.Ordinal) == 0
+                   && fullName.Length - lastDot - 1 == symbol.Length;
+        return string.Equals(fullName, symbol, StringComparison.Ordinal);
     }
 
     private static string ExtractLifetime(string methodName)

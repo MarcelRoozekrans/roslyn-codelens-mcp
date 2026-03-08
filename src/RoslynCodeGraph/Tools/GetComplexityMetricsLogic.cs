@@ -70,7 +70,8 @@ public static class GetComplexityMetricsLogic
 
         foreach (var token in method.DescendantTokens())
         {
-            switch (token.Kind())
+            var kind = token.Kind();
+            switch (kind)
             {
                 case SyntaxKind.AmpersandAmpersandToken:
                 case SyntaxKind.BarBarToken:

@@ -128,7 +128,8 @@ public static class FindUnusedSymbolsLogic
         // Skip static classes with extension methods (likely DI setup)
         if (type.IsStatic)
         {
-            var hasExtensionMethods = type.GetMembers()
+            var members = type.GetMembers();
+            var hasExtensionMethods = members
                 .OfType<IMethodSymbol>()
                 .Any(m => m.IsExtensionMethod);
             if (hasExtensionMethods)
@@ -136,7 +137,8 @@ public static class FindUnusedSymbolsLogic
         }
 
         // Skip types containing a "Main" method (entry points)
-        if (type.GetMembers("Main").Any())
+        var mainMembers = type.GetMembers("Main");
+        if (mainMembers.Any())
             return true;
 
         return false;

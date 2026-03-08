@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using RoslynCodeGraph.Models;
@@ -126,7 +127,7 @@ public static class FindCircularDependenciesLogic
 
         if (adjacency.TryGetValue(node, out var neighbors))
         {
-            foreach (var neighbor in neighbors)
+            foreach (var neighbor in CollectionsMarshal.AsSpan(neighbors))
             {
                 if (!visited.Contains(neighbor))
                 {

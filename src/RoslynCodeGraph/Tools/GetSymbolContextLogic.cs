@@ -35,7 +35,8 @@ public static class GetSymbolContextLogic
             .ToList();
 
         // Public members (skip constructors and implicit members)
-        var publicMembers = target.GetMembers()
+        var allMembers = target.GetMembers();
+        var publicMembers = allMembers
             .Where(m => m.DeclaredAccessibility == Accessibility.Public
                         && !m.IsImplicitlyDeclared
                         && m is not IMethodSymbol { MethodKind: MethodKind.Constructor })
