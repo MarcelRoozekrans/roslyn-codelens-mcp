@@ -52,4 +52,31 @@ public class TopologicalSortTests
         Assert.Single(levels[1]);
         Assert.Equal("A", levels[1][0].Name);
     }
+
+    [Fact]
+    public void GetCompilationLevels_HandlesCircularReferences()
+    {
+        var workspace = new AdhocWorkspace();
+        var idA = ProjectId.CreateNewId();
+        var idB = ProjectId.CreateNewId();
+
+        var solution = workspace.CurrentSolution
+            .AddProject(ProjectInfo.Create(idA, VersionStamp.Default, "A", "A", LanguageNames.CSharp)
+                .WithProjectReferences([new ProjectReference(idB)]))
+            .AddProject(ProjectInfo.Create(idB, VersionStamp.Default, "B", "B", LanguageNames.CSharp)
+                .WithProjectReferences([new ProjectReference(idA)]));
+
+        // Should not throw or hang — just returns some valid grouping
+        var levels = SolutionLoader.GetCompilationLevels(solution);
+        Assert.True(levels.Count > 0);
+        Assert.Equal(2, levels.SelectMany(l => l).Count());
+    }
+
+    [Fact]
+    public void GetCompilationLevels_EmptySolution()
+    {
+        var workspace = new AdhocWorkspace();
+        var levels = SolutionLoader.GetCompilationLevels(workspace.CurrentSolution);
+        Assert.Empty(levels);
+    }
 }

@@ -75,11 +75,15 @@ public class SolutionLoader
         var projects = solution.Projects.ToList();
         var projectIds = new HashSet<ProjectId>(projects.Select(p => p.Id));
         var assigned = new Dictionary<ProjectId, int>();
+        var visiting = new HashSet<ProjectId>();
 
         int GetLevel(Project project)
         {
             if (assigned.TryGetValue(project.Id, out var cached))
                 return cached;
+
+            if (!visiting.Add(project.Id))
+                return 0;
 
             var maxDep = -1;
             foreach (var dep in project.ProjectReferences)
@@ -93,13 +97,17 @@ public class SolutionLoader
 
             var level = maxDep + 1;
             assigned[project.Id] = level;
+            visiting.Remove(project.Id);
             return level;
         }
 
         foreach (var project in projects)
             GetLevel(project);
 
-        var maxLevel = assigned.Count > 0 ? assigned.Values.Max() : 0;
+        if (assigned.Count == 0)
+            return [];
+
+        var maxLevel = assigned.Values.Max();
         var levels = new List<List<Project>>(maxLevel + 1);
         for (var i = 0; i <= maxLevel; i++)
             levels.Add(new List<Project>());
