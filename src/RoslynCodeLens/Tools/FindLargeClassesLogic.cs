@@ -23,7 +23,11 @@ public static class FindLargeClassesLogic
                 !projectName.Equals(project, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            var memberCount = type.GetMembers().Count(m => !m.IsImplicitlyDeclared);
+            var memberCount = 0;
+            foreach (var m in type.GetMembers())
+            {
+                if (!m.IsImplicitlyDeclared) memberCount++;
+            }
             var lineCount = GetLineCount(type);
 
             if (memberCount >= maxMembers || lineCount >= maxLines)

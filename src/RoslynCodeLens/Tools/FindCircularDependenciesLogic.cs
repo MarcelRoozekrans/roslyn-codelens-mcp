@@ -70,9 +70,10 @@ public static class FindCircularDependenciesLogic
                     }
 
                     // Add file-level usings (will filter to defined namespaces later)
-                    foreach (var u in fileUsings.Where(u => !string.Equals(u, nsName, StringComparison.Ordinal)))
+                    foreach (ref readonly var u in CollectionsMarshal.AsSpan(fileUsings))
                     {
-                        deps.Add(u);
+                        if (!string.Equals(u, nsName, StringComparison.Ordinal))
+                            deps.Add(u);
                     }
 
                     // Add namespace-level usings
@@ -127,7 +128,7 @@ public static class FindCircularDependenciesLogic
 
         if (adjacency.TryGetValue(node, out var neighbors))
         {
-            foreach (var neighbor in CollectionsMarshal.AsSpan(neighbors))
+            foreach (ref readonly var neighbor in CollectionsMarshal.AsSpan(neighbors))
             {
                 if (!visited.Contains(neighbor))
                 {
@@ -137,7 +138,7 @@ public static class FindCircularDependenciesLogic
                 {
                     // Found a cycle - extract it from the stack
                     var cycleStart = stack.IndexOf(neighbor);
-                    var cycle = stack.Skip(cycleStart).ToList();
+                    var cycle = stack.GetRange(cycleStart, stack.Count - cycleStart);
                     cycle.Add(neighbor); // close the cycle
                     cycles.Add(new CircularDependency(level, cycle));
                 }

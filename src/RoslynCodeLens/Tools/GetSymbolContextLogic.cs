@@ -35,13 +35,16 @@ public static class GetSymbolContextLogic
             .ToList();
 
         // Public members (skip constructors and implicit members)
-        var allMembers = target.GetMembers();
-        var publicMembers = allMembers
-            .Where(m => m.DeclaredAccessibility == Accessibility.Public
-                        && !m.IsImplicitlyDeclared
-                        && m is not IMethodSymbol { MethodKind: MethodKind.Constructor })
-            .Select(m => m.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat))
-            .ToList();
+        var publicMembers = new List<string>();
+        foreach (var m in target.GetMembers())
+        {
+            if (m.DeclaredAccessibility == Accessibility.Public
+                && !m.IsImplicitlyDeclared
+                && m is not IMethodSymbol { MethodKind: MethodKind.Constructor })
+            {
+                publicMembers.Add(m.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat));
+            }
+        }
 
         return new SymbolContext(
             target.ToDisplayString(),

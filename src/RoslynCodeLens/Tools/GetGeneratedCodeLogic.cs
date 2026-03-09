@@ -28,15 +28,16 @@ public static class GetGeneratedCodeLogic
 
                 var semanticModel = compilation.GetSemanticModel(tree);
                 var root = tree.GetRoot();
-                var definedTypes = root.DescendantNodes()
-                    .Where(n => n is Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax)
-                    .Select(n =>
-                    {
-                        var symbol = semanticModel.GetDeclaredSymbol(n);
-                        return symbol?.ToDisplayString() ?? "";
-                    })
-                    .Where(s => !string.IsNullOrEmpty(s))
-                    .ToList();
+                var definedTypes = new List<string>();
+                foreach (var n in root.DescendantNodes())
+                {
+                    if (n is not Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax)
+                        continue;
+                    var symbol = semanticModel.GetDeclaredSymbol(n);
+                    var displayString = symbol?.ToDisplayString();
+                    if (!string.IsNullOrEmpty(displayString))
+                        definedTypes.Add(displayString);
+                }
 
                 var sourceText = tree.GetText().ToString();
 

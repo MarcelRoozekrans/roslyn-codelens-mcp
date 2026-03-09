@@ -48,16 +48,19 @@ public class SolutionLoader
         var dir = new DirectoryInfo(startDirectory);
         while (dir != null)
         {
-            var slnFiles = dir.GetFiles("*.sln")
-                .Concat(dir.GetFiles("*.slnx"))
-                .ToArray();
-            if (slnFiles.Length > 0)
+            FileInfo? shortest = null;
+            foreach (var f in dir.GetFiles("*.sln"))
             {
-                return slnFiles
-                    .OrderBy(f => f.FullName.Length)
-                    .First()
-                    .FullName;
+                if (shortest == null || f.FullName.Length < shortest.FullName.Length)
+                    shortest = f;
             }
+            foreach (var f in dir.GetFiles("*.slnx"))
+            {
+                if (shortest == null || f.FullName.Length < shortest.FullName.Length)
+                    shortest = f;
+            }
+            if (shortest != null)
+                return shortest.FullName;
             dir = dir.Parent;
         }
         return null;

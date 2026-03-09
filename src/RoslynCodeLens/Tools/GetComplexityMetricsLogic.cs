@@ -70,7 +70,9 @@ public static class GetComplexityMetricsLogic
 
         foreach (var token in method.DescendantTokens())
         {
+#pragma warning disable EPS06
             var kind = token.Kind();
+#pragma warning restore EPS06
             switch (kind)
             {
                 case SyntaxKind.AmpersandAmpersandToken:

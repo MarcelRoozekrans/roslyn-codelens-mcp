@@ -24,8 +24,9 @@ public static class CodeFixRunner
 
         var suggestions = new List<CodeFixSuggestion>();
 
-        foreach (var provider in providers)
+        for (var i = 0; i < providers.Count; i++)
         {
+            var provider = providers[i];
             var actions = new List<CodeAction>();
             var context = new CodeFixContext(document, diagnostic,
                 (action, _) => actions.Add(action), ct);
@@ -40,8 +41,9 @@ public static class CodeFixRunner
                 continue;
             }
 
-            foreach (var action in actions)
+            for (var j = 0; j < actions.Count; j++)
             {
+                var action = actions[j];
                 var edits = await ExtractTextEdits(action, project, ct).ConfigureAwait(false);
                 if (edits.Count > 0)
                 {

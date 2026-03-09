@@ -52,8 +52,9 @@ public static class GetCodeFixesLogic
 
         var results = new List<CodeFixSuggestion>();
 
-        foreach (var diagnostic in matchingDiagnostics)
+        for (var i = 0; i < matchingDiagnostics.Count; i++)
         {
+            var diagnostic = matchingDiagnostics[i];
             var fixes = await CodeFixRunner.GetFixesAsync(targetProject, diagnostic, ct).ConfigureAwait(false);
             results.AddRange(fixes);
         }

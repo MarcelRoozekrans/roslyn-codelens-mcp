@@ -24,6 +24,10 @@ public static class GetProjectDependenciesLogic
             }
         }
 
+        var projectsByName = new Dictionary<string, Microsoft.CodeAnalysis.Project>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in loaded.Solution.Projects)
+            projectsByName[p.Name] = p;
+
         var transitive = new List<ProjectRef>();
         var visited = new HashSet<string>(direct.Select(d => d.Name), StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<ProjectRef>(direct);
@@ -31,8 +35,7 @@ public static class GetProjectDependenciesLogic
         while (queue.Count > 0)
         {
             var current = queue.Dequeue();
-            var currentProject = loaded.Solution.Projects
-                .FirstOrDefault(p => p.Name.Equals(current.Name, StringComparison.OrdinalIgnoreCase));
+            projectsByName.TryGetValue(current.Name, out var currentProject);
 
             if (currentProject == null)
                 continue;

@@ -126,7 +126,7 @@ public sealed class FileChangeTracker : IDisposable
 
         if (_reverseDeps.TryGetValue(projectId, out var dependents))
         {
-            foreach (var dep in CollectionsMarshal.AsSpan(dependents))
+            foreach (ref readonly var dep in CollectionsMarshal.AsSpan(dependents))
                 MarkStaleTransitive(dep);
         }
     }
@@ -166,7 +166,7 @@ public sealed class FileChangeTracker : IDisposable
                 else
                 {
                     // Unknown file — mark all projects stale
-                    foreach (var pid in _fileToProject.Values.Distinct())
+                    foreach (var pid in _fileToProject.Values)
                         _staleProjects.Add(pid);
                 }
             }

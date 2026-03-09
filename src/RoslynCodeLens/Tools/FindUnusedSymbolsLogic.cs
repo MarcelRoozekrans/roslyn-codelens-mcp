@@ -138,7 +138,7 @@ public static class FindUnusedSymbolsLogic
 
         // Skip types containing a "Main" method (entry points)
         var mainMembers = type.GetMembers("Main");
-        if (mainMembers.Any())
+        if (mainMembers.Length > 0)
             return true;
 
         return false;

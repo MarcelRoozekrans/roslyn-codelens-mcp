@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using RoslynCodeLens.Models;
 
@@ -18,25 +17,30 @@ public static class GetSourceGeneratorsLogic
             if (!loaded.Compilations.TryGetValue(proj.Id, out var compilation))
                 continue;
 
-            var generatedFiles = compilation.SyntaxTrees
-                .Where(t => resolver.IsGenerated(t.FilePath))
-                .Select(t => t.FilePath)
-                .ToList();
+            var byGenerator = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var tree in compilation.SyntaxTrees)
+            {
+                if (!resolver.IsGenerated(tree.FilePath))
+                    continue;
+                var genName = InferGeneratorName(tree.FilePath);
+                if (!byGenerator.TryGetValue(genName, out var fileList))
+                {
+                    fileList = new List<string>();
+                    byGenerator[genName] = fileList;
+                }
+                fileList.Add(tree.FilePath);
+            }
 
-            if (generatedFiles.Count == 0)
+            if (byGenerator.Count == 0)
                 continue;
 
-            var byGenerator = generatedFiles
-                .GroupBy(f => InferGeneratorName(f), StringComparer.Ordinal)
-                .ToList();
-
-            foreach (var group in CollectionsMarshal.AsSpan(byGenerator))
+            foreach (var (genName, files) in byGenerator)
             {
                 results.Add(new SourceGeneratorInfo(
-                    group.Key,
+                    genName,
                     proj.Name,
-                    group.Count(),
-                    group.ToList()));
+                    files.Count,
+                    files));
             }
         }
 
