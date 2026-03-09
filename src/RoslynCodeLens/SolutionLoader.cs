@@ -65,4 +65,48 @@ public class SolutionLoader
         }
         return null;
     }
+
+    /// <summary>
+    /// Returns projects grouped by dependency level (leaves first).
+    /// Level 0 = no project dependencies, Level 1 = depends only on level 0, etc.
+    /// </summary>
+    public static List<List<Project>> GetCompilationLevels(Solution solution)
+    {
+        var projects = solution.Projects.ToList();
+        var projectIds = new HashSet<ProjectId>(projects.Select(p => p.Id));
+        var assigned = new Dictionary<ProjectId, int>();
+
+        int GetLevel(Project project)
+        {
+            if (assigned.TryGetValue(project.Id, out var cached))
+                return cached;
+
+            var maxDep = -1;
+            foreach (var dep in project.ProjectReferences)
+            {
+                if (!projectIds.Contains(dep.ProjectId))
+                    continue;
+                var depProject = solution.GetProject(dep.ProjectId);
+                if (depProject != null)
+                    maxDep = Math.Max(maxDep, GetLevel(depProject));
+            }
+
+            var level = maxDep + 1;
+            assigned[project.Id] = level;
+            return level;
+        }
+
+        foreach (var project in projects)
+            GetLevel(project);
+
+        var maxLevel = assigned.Count > 0 ? assigned.Values.Max() : 0;
+        var levels = new List<List<Project>>(maxLevel + 1);
+        for (var i = 0; i <= maxLevel; i++)
+            levels.Add(new List<Project>());
+
+        foreach (var project in projects)
+            levels[assigned[project.Id]].Add(project);
+
+        return levels;
+    }
 }
