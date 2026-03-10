@@ -1,6 +1,23 @@
-# Roslyn CodeLens MCP Server
+<p align="center">
+  <img src="icon.svg" width="128" height="128" alt="Roslyn CodeLens MCP">
+</p>
 
-A Roslyn-based MCP server that provides 22 semantic code intelligence tools for .NET codebases. Designed for use with Claude Code to understand type hierarchies, call sites, DI registrations, and reflection usage.
+<h1 align="center">Roslyn CodeLens MCP Server</h1>
+
+<p align="center">
+  <a href="https://www.nuget.org/packages/RoslynCodeLens.Mcp"><img src="https://img.shields.io/nuget/v/RoslynCodeLens.Mcp?style=flat-square&logo=nuget&color=blue" alt="NuGet"></a>
+  <a href="https://www.nuget.org/packages/RoslynCodeLens.Mcp"><img src="https://img.shields.io/nuget/dt/RoslynCodeLens.Mcp?style=flat-square&color=green" alt="NuGet Downloads"></a>
+  <a href="https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/actions"><img src="https://img.shields.io/github/actions/workflow/status/MarcelRoozekrans/roslyn-codelens-mcp/ci.yml?branch=main&style=flat-square&logo=github" alt="Build Status"></a>
+  <a href="https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MarcelRoozekrans/roslyn-codelens-mcp?style=flat-square" alt="License"></a>
+</p>
+
+<p align="center">
+  A Roslyn-based MCP server that gives AI agents deep semantic understanding of .NET codebases — type hierarchies, call graphs, DI registrations, diagnostics, and more.
+</p>
+
+<!-- mcp-name: io.github.marcelroozekrans/roslyn-codelens -->
+
+---
 
 ## Features
 
@@ -27,23 +44,37 @@ A Roslyn-based MCP server that provides 22 semantic code intelligence tools for 
 - **get_generated_code** — Inspect generated source code from source generators
 - **rebuild_solution** — Force a full reload of the analyzed solution
 
-## Installation
+## Quick Start
 
-### As a Claude Code Plugin
+### VS Code / Visual Studio (via dnx)
+
+Add to your MCP settings (`.vscode/mcp.json` or VS settings):
+
+```json
+{
+  "servers": {
+    "roslyn-codelens": {
+      "type": "stdio",
+      "command": "dnx",
+      "args": ["RoslynCodeLens.Mcp", "--yes"]
+    }
+  }
+}
+```
+
+### Claude Code Plugin
 
 ```bash
 claude install gh:MarcelRoozekrans/roslyn-codelens-mcp
 ```
 
-### As a .NET Global Tool
+### .NET Global Tool
 
 ```bash
 dotnet tool install -g RoslynCodeLens.Mcp
 ```
 
-### Manual MCP Configuration
-
-Add to your Claude Code MCP settings:
+Then add to your MCP client config:
 
 ```json
 {
