@@ -36,6 +36,26 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- Stamp the package version into .mcp/server.json before packing -->
+  <UsingTask TaskName="StampMcpVersion" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FilePath ParameterType="System.String" Required="true" />
+      <PackageVersion ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Code Type="Fragment" Language="cs">
+        var content = File.ReadAllText(FilePath);
+        content = System.Text.RegularExpressions.Regex.Replace(
+            content, @"""version""\s*:\s*""[^""]*""", $@"""version"": ""{PackageVersion}""");
+        File.WriteAllText(FilePath, content);
+      </Code>
+    </Task>
+  </UsingTask>
+  <Target Name="StampMcpServerJsonVersion" BeforeTargets="GenerateNuspec">
+    <StampMcpVersion FilePath="$(MSBuildProjectDirectory)/.mcp/server.json" PackageVersion="$(Version)" />
+  </Target>
+
   <!-- MSBuild.Locator requires these to be excluded from runtime -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Build" Version="17.14.28" ExcludeAssets="runtime" PrivateAssets="all" />
