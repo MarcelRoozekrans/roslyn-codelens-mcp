@@ -15,6 +15,10 @@
   A Roslyn-based MCP server that gives AI agents deep semantic understanding of .NET codebases — type hierarchies, call graphs, DI registrations, diagnostics, and more.
 </p>
 
+<a href="https://glama.ai/mcp/servers/MarcelRoozekrans/roslyn-codelens-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/MarcelRoozekrans/roslyn-codelens-mcp/badge" alt="roslyn-codelens-mcp MCP server" />
+</a>
+
 <!-- mcp-name: io.github.marcelroozekrans/roslyn-codelens -->
 
 ---
