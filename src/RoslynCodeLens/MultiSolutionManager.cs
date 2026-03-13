@@ -78,7 +78,7 @@ public sealed class MultiSolutionManager : IDisposable
                 }
                 catch
                 {
-                    status = "loading";
+                    status = "unknown";
                 }
                 return new SolutionInfo(kvp.Key, kvp.Key == activeKey, projectCount, status);
             })
