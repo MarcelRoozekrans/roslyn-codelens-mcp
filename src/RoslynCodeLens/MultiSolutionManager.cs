@@ -20,7 +20,8 @@ public sealed class MultiSolutionManager : IDisposable
         foreach (var path in solutionPaths)
         {
             var normalised = Path.GetFullPath(path);
-            managers[normalised] = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
+            if (!managers.ContainsKey(normalised))
+                managers[normalised] = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
         }
 
         var firstKey = Path.GetFullPath(solutionPaths[0]);

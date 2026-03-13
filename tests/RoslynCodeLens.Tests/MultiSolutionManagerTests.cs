@@ -48,4 +48,12 @@ public class MultiSolutionManagerTests : IAsyncLifetime
         Assert.Throws<InvalidOperationException>((Action)(() => multi.EnsureLoaded()));
         multi.Dispose();
     }
+
+    [Fact]
+    public async Task CreateAsync_DuplicatePaths_DoesNotThrow()
+    {
+        var multi = await MultiSolutionManager.CreateAsync([_solutionPath, _solutionPath]);
+        multi.EnsureLoaded();
+        multi.Dispose();
+    }
 }
