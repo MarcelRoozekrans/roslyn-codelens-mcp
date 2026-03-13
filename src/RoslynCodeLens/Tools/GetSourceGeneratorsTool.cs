@@ -10,7 +10,7 @@ public static class GetSourceGeneratorsTool
     [McpServerTool(Name = "get_source_generators"),
      Description("List source generators and their output per project")]
     public static IReadOnlyList<SourceGeneratorInfo> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null)
     {
         manager.EnsureLoaded();

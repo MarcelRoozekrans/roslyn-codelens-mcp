@@ -10,7 +10,7 @@ public static class FindImplementationsTool
     [McpServerTool(Name = "find_implementations"),
      Description("Find all classes/structs implementing an interface or extending a class")]
     public static IReadOnlyList<SymbolLocation> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Type name (simple or fully qualified)")] string symbol)
     {
         manager.EnsureLoaded();

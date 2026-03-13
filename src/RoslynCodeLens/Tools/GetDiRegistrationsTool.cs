@@ -10,7 +10,7 @@ public static class GetDiRegistrationsTool
     [McpServerTool(Name = "get_di_registrations"),
      Description("Scan IServiceCollection extension methods for DI registrations of a type")]
     public static IReadOnlyList<DiRegistration> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Type name to search for (simple or fully qualified)")] string symbol)
     {
         manager.EnsureLoaded();

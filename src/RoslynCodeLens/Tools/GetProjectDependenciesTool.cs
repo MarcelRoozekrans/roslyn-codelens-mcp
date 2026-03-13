@@ -10,7 +10,7 @@ public static class GetProjectDependenciesTool
     [McpServerTool(Name = "get_project_dependencies"),
      Description("Return the project reference graph (direct and transitive dependencies)")]
     public static ProjectDependencyGraph? Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Project name or .csproj filename")] string project)
     {
         manager.EnsureLoaded();

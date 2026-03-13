@@ -8,7 +8,7 @@ public static class RebuildSolutionTool
 {
     [McpServerTool(Name = "rebuild_solution"),
      Description("Force a full reload of the analyzed solution — re-opens the .sln, recompiles all projects, and rebuilds all indexes. Use after changing Directory.Build.props, adding/removing NuGet packages, or when diagnostics seem stale.")]
-    public static async Task<string> Execute(SolutionManager manager)
+    public static async Task<string> Execute(MultiSolutionManager manager)
     {
         manager.EnsureLoaded();
         var (projectCount, elapsed) = await manager.ForceReloadAsync().ConfigureAwait(false);

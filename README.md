@@ -86,11 +86,17 @@ Then add to your MCP client config:
 
 ## Usage
 
-The server automatically discovers `.sln` files by walking up from the current directory. You can also pass a solution path directly:
+The server automatically discovers `.sln` files by walking up from the current directory. You can also pass one or more solution paths directly:
 
 ```bash
+# Single solution
 roslyn-codelens-mcp /path/to/MySolution.sln
+
+# Multiple solutions — switch between them with set_active_solution
+roslyn-codelens-mcp /path/to/A.sln /path/to/B.sln
 ```
+
+When multiple solutions are loaded, use `list_solutions` to see what's available and `set_active_solution("B")` to switch context. The first path is active by default.
 
 ## Performance
 

@@ -66,6 +66,8 @@ Use these tools **instead of Grep/Glob and instead of MSBuild** whenever you nee
 
 ### Solution Management
 
+- Use `list_solutions` to see all loaded solutions, which one is active, how many projects each has, and their status.
+- Use `set_active_solution` to switch the active solution by partial name (e.g. `set_active_solution("ProjectB")`). Call this at the start of a session when multiple solutions are loaded.
 - Use `rebuild_solution` to force a full reload of the analyzed solution — re-opens the `.sln`, recompiles all projects, and rebuilds all indexes. Use after changing `Directory.Build.props`, adding/removing NuGet packages or analyzers, or when diagnostics seem stale.
 
 ### Planning Changes
@@ -110,4 +112,6 @@ Reference concrete types, interfaces, and call sites in your analysis. Example: 
 | `find_circular_dependencies` | "Any circular dependencies?" |
 | `get_source_generators` | "What source generators are active?" / "List generators for this project" |
 | `get_generated_code` | "Show generated code" / "What did this generator produce?" |
+| `list_solutions` | "What solutions are loaded?" / "Which solution is active?" |
+| `set_active_solution` | "Switch to project B" / "Use the other solution" |
 | `rebuild_solution` | "Reload the solution" / "Pick up new analyzers" / "Diagnostics are stale" |

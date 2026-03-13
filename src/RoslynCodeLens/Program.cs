@@ -7,25 +7,27 @@ using RoslynCodeLens;
 
 MSBuildLocator.RegisterDefaults();
 
-var solutionPath = args.Length > 0
-    ? args[0]
-    : SolutionLoader.FindSolutionFile(Directory.GetCurrentDirectory());
+MultiSolutionManager multiManager;
 
-SolutionManager manager;
+var solutionPaths = args.Length > 0
+    ? args.ToList()
+    : SolutionLoader.FindSolutionFile(Directory.GetCurrentDirectory()) is { } found
+        ? [found]
+        : [];
 
-if (solutionPath != null)
+if (solutionPaths.Count > 0)
 {
-    manager = await SolutionManager.CreateAsync(solutionPath).ConfigureAwait(false);
+    multiManager = await MultiSolutionManager.CreateAsync(solutionPaths).ConfigureAwait(false);
 }
 else
 {
     await Console.Error.WriteLineAsync("[roslyn-codelens] No .sln file found. Tools will return errors.").ConfigureAwait(false);
-    manager = SolutionManager.CreateEmpty();
+    multiManager = MultiSolutionManager.CreateEmpty();
 }
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.ClearProviders();
-builder.Services.AddSingleton(manager);
+builder.Services.AddSingleton(multiManager);
 
 builder.Services
     .AddMcpServer()

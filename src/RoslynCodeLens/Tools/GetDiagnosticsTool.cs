@@ -10,7 +10,7 @@ public static class GetDiagnosticsTool
     [McpServerTool(Name = "get_diagnostics"),
      Description("List compiler errors and warnings across the solution, optionally including analyzer diagnostics")]
     public static async Task<IReadOnlyList<DiagnosticInfo>> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null,
         [Description("Minimum severity: 'error' or 'warning' (default: warning)")] string? severity = null,
         [Description("Include analyzer diagnostics (default: true)")] bool includeAnalyzers = true,

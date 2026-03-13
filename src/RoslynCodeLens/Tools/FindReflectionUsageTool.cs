@@ -10,7 +10,7 @@ public static class FindReflectionUsageTool
     [McpServerTool(Name = "find_reflection_usage"),
      Description("Detect dynamic/reflection-based usage like Type.GetType, Activator.CreateInstance, MethodInfo.Invoke")]
     public static IReadOnlyList<ReflectionUsage> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Optional type name to filter results (omit to scan entire solution)")] string? symbol = null)
     {
         manager.EnsureLoaded();

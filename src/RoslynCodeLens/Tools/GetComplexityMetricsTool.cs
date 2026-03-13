@@ -10,7 +10,7 @@ public static class GetComplexityMetricsTool
     [McpServerTool(Name = "get_complexity_metrics"),
      Description("Calculate cyclomatic complexity for methods. Returns methods exceeding the threshold, sorted by complexity.")]
     public static IReadOnlyList<ComplexityMetric> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null,
         [Description("Minimum complexity threshold (default: 10)")] int threshold = 10)
     {

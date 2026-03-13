@@ -10,7 +10,7 @@ public static class GoToDefinitionTool
     [McpServerTool(Name = "go_to_definition"),
      Description("Find the source file and line where a symbol is defined")]
     public static IReadOnlyList<SymbolLocation> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Symbol name: simple type (MyClass), fully qualified (Namespace.MyClass), or member (MyClass.DoWork)")] string symbol)
     {
         manager.EnsureLoaded();

@@ -10,7 +10,7 @@ public static class GetNugetDependenciesTool
     [McpServerTool(Name = "get_nuget_dependencies"),
      Description("List NuGet package references for projects in the solution")]
     public static NugetDependencyGraph? Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Optional project name filter (omit to list all)")] string? project = null)
     {
         manager.EnsureLoaded();

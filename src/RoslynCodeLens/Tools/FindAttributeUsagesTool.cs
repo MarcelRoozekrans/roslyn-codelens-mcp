@@ -10,7 +10,7 @@ public static class FindAttributeUsagesTool
     [McpServerTool(Name = "find_attribute_usages"),
      Description("Find all types and members decorated with a specific attribute (e.g., Obsolete, Authorize, Serializable)")]
     public static IReadOnlyList<AttributeUsageInfo> Execute(
-        SolutionManager manager,
+        MultiSolutionManager manager,
         [Description("Attribute name to search for (with or without 'Attribute' suffix)")] string attribute)
     {
         manager.EnsureLoaded();
