@@ -143,6 +143,17 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 ### Diagnostics (**instead of `dotnet build`**)
 - `get_diagnostics` — compiler errors, warnings, analyzer diagnostics. Replaces `dotnet build` output.
 - `get_code_fixes` — structured edits for a diagnostic.
+
+#### Trust model for analyzer diagnostics
+
+`get_diagnostics` defaults to `includeAnalyzers=false` (compiler diagnostics only). If the user asks for analyzer warnings (StyleCop, Microsoft.CodeAnalysis.Analyzers, CA-prefixed rules, etc.) — OR if you need to call `get_code_fixes` for an analyzer-rule diagnostic:
+
+1. Call `get_diagnostics(includeAnalyzers=true)`.
+2. If the server returns an *"untrusted solution"* error: **ask the user before calling `trust_solution`**. Phrase the question to make it clear that analyzer DLLs run as in-process code with the user's privileges. They should only trust solutions they wrote or fully vetted.
+3. Prefer `scope="session"` for one-off reviews. Use `scope="persistent"` only when the user confirms they regularly use this solution. Use `scope="addRoot"` to trust an entire directory tree (e.g., `c:\projects\`).
+4. Use `list_trusted_paths` to inspect current state when the user asks "is X trusted?". Use `revoke_trust` to drop entries.
+
+Solutions passed on the CLI at server startup are auto-trusted in session scope — `get_diagnostics(includeAnalyzers=true)` against them works without an extra prompt.
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default.
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).

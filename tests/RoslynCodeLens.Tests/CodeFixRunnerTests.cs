@@ -23,7 +23,8 @@ public class CodeFixRunnerTests : IAsyncLifetime
         var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib", StringComparison.Ordinal));
         var compilation = _loaded.Compilations[project.Id];
 
-        var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, CancellationToken.None);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("all", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+        var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, allowlist, CancellationToken.None);
         var fixable = diagnostics.FirstOrDefault(d => d.Location.IsInSource);
 
         if (fixable == null) return;
