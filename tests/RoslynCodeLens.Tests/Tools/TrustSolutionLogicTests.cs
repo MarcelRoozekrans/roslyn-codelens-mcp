@@ -36,9 +36,11 @@ public class TrustSolutionLogicTests : IDisposable
     public void AddRootScope_AddsTrustedRoot()
     {
         var store = new TrustStore(_tempFile);
-        var result = TrustSolutionLogic.Execute(store, "c:\\projects\\", "addRoot");
+        var rootDir = Path.Combine(Path.GetTempPath(), $"trust-root-{Guid.NewGuid():N}") + Path.DirectorySeparatorChar;
+        var childSln = Path.Combine(rootDir, "anyrepo", "foo.sln");
+        var result = TrustSolutionLogic.Execute(store, rootDir, "addRoot");
         Assert.Equal("addRoot", result.Scope);
-        Assert.True(store.IsTrusted("c:\\projects\\anyrepo\\foo.sln"));
+        Assert.True(store.IsTrusted(childSln));
     }
 
     [Fact]
