@@ -85,6 +85,18 @@ Metadata-origin symbols (from NuGet packages and referenced assemblies) are firs
 
 Location-returning results include an `Origin` field (`source` or `metadata`) and an `IsGenerated` flag to distinguish hand-written code from closed-source or generated output.
 
+## Security: Trust Model
+
+`get_diagnostics` and `get_code_fixes` can load Roslyn analyzers — DLLs that execute in-process. To prevent untrusted analyzers from running automatically, this server uses a VS/Rider-style trust model:
+
+- **Solutions passed on the CLI at startup** are auto-trusted for the current session.
+- **Other solutions** must be explicitly trusted via the `trust_solution` MCP tool.
+- **Analyzer DLLs** must come from the user's NuGet global packages folder, the dotnet SDK install dir, or the solution's own `bin`/`obj`. Other paths are skipped.
+
+Use the `list_trusted_paths` and `revoke_trust` tools to inspect and manage trust state. Persistent trust is stored at `%APPDATA%\roslyn-codelens\trust.json`.
+
+See [SECURITY.md](SECURITY.md) for the full threat model.
+
 ## Quick Start
 
 ### VS Code / Visual Studio (via dnx)
