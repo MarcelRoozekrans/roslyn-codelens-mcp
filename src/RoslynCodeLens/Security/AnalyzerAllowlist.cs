@@ -9,14 +9,15 @@ public sealed class AnalyzerAllowlist
     private readonly string _nugetGlobal;
     private readonly string? _dotnetSdkRoot;
 
-    public AnalyzerAllowlist(string policy, string? dotnetSdkRoot)
+    public AnalyzerAllowlist(string policy, string nugetGlobal, string? dotnetSdkRoot)
     {
         _policy = policy;
-        _nugetGlobal = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".nuget", "packages");
+        _nugetGlobal = nugetGlobal;
         _dotnetSdkRoot = dotnetSdkRoot;
     }
+
+    public static string DefaultNugetGlobal() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
 
     public bool IsAllowed(string analyzerDllPath, string solutionDir)
     {

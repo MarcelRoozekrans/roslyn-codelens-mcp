@@ -28,6 +28,11 @@ else
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services.AddSingleton(multiManager);
+builder.Services.AddSingleton(new RoslynCodeLens.Security.TrustStore(RoslynCodeLens.Security.TrustStore.DefaultFilePath()));
+builder.Services.AddSingleton(new RoslynCodeLens.Security.AnalyzerAllowlist(
+    "nuget-and-solution-bin",
+    RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(),
+    dotnetSdkRoot: null));
 
 builder.Services
     .AddMcpServer()

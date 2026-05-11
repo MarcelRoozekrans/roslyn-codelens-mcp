@@ -22,7 +22,7 @@ public class AnalyzerRunnerTests : IAsyncLifetime
         var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib", StringComparison.Ordinal));
         var compilation = _loaded.Compilations[project.Id];
 
-        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("all", dotnetSdkRoot: null);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("all", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
         var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, allowlist, CancellationToken.None);
 
         Assert.NotEmpty(diagnostics);
@@ -35,31 +35,24 @@ public class AnalyzerRunnerTests : IAsyncLifetime
         var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib2", StringComparison.Ordinal));
         var compilation = _loaded.Compilations[project.Id];
 
-        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("all", dotnetSdkRoot: null);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("all", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
         var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, allowlist, CancellationToken.None);
 
         Assert.False(diagnostics.IsDefault);
     }
 
     [Fact]
-    public async Task RunAnalyzersAsync_WithStrictAllowlist_NugetUnreachable_FiltersAll()
+    public async Task RunAnalyzersAsync_WithStrictAllowlist_FiltersAllAnalyzers()
     {
         var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib", StringComparison.Ordinal));
         var compilation = _loaded.Compilations[project.Id];
 
-        // Point the allowlist at impossible NuGet/SDK roots so the test analyzers fail every check.
-        var prevHome = Environment.GetEnvironmentVariable("USERPROFILE");
-        try
-        {
-            Environment.SetEnvironmentVariable("USERPROFILE",
-                OperatingSystem.IsWindows() ? "Z:\\nope-nuget-root" : "/nope-nuget-root");
-            var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("strict", dotnetSdkRoot: "/nope-sdk");
-            var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, allowlist, CancellationToken.None);
-            Assert.Empty(diagnostics);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("USERPROFILE", prevHome);
-        }
+        // strict policy with impossible NuGet and SDK roots → no analyzer DLL should pass.
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist(
+            "strict",
+            nugetGlobal: OperatingSystem.IsWindows() ? "Z:\\nope-nuget-root" : "/nope-nuget-root",
+            dotnetSdkRoot: "/nope-sdk");
+        var diagnostics = await AnalyzerRunner.RunAnalyzersAsync(project, compilation, allowlist, CancellationToken.None);
+        Assert.Empty(diagnostics);
     }
 }

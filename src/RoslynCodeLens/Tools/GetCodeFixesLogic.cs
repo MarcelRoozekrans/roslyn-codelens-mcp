@@ -8,6 +8,7 @@ public static class GetCodeFixesLogic
     public static async Task<IReadOnlyList<CodeFixSuggestion>> ExecuteAsync(
         LoadedSolution loaded, SymbolResolver resolver,
         string diagnosticId, string filePath, int line,
+        Security.TrustStore trustStore, Security.AnalyzerAllowlist allowlist,
         CancellationToken ct)
     {
         var normalizedPath = Path.GetFullPath(filePath);
@@ -35,8 +36,17 @@ public static class GetCodeFixesLogic
         if (!loaded.Compilations.TryGetValue(targetProject.Id, out var compilation))
             return [];
 
+        var solutionPath = loaded.Solution.FilePath;
+        if (solutionPath is null || !trustStore.IsTrusted(solutionPath))
+        {
+            throw new InvalidOperationException(
+                $"Solution '{solutionPath ?? "<unknown>"}' is not trusted for analyzer execution. " +
+                $"'get_code_fixes' loads analyzer DLLs to discover available fixes — these run as in-process code. " +
+                $"Ask the user, then call the 'trust_solution' tool with this path.");
+        }
+
         var allDiagnostics = compilation.GetDiagnostics()
-            .Concat(await AnalyzerRunner.RunAnalyzersAsync(targetProject, compilation, ct).ConfigureAwait(false));
+            .Concat(await AnalyzerRunner.RunAnalyzersAsync(targetProject, compilation, allowlist, ct).ConfigureAwait(false));
 
         var matchingDiagnostics = allDiagnostics
             .Where(d => string.Equals(d.Id, diagnosticId, StringComparison.Ordinal) &&

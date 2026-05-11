@@ -56,8 +56,14 @@ public class GetDiagnosticsToolTests
     [Fact]
     public async Task GetDiagnostics_WithAnalyzers_IncludesAnalyzerDiagnostics()
     {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        trustStore.AddSessionTrust(_loaded.Solution.FilePath!);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+
         var results = await GetDiagnosticsLogic.ExecuteAsync(
-            _loaded, _resolver, null, null, includeAnalyzers: true);
+            _loaded, _resolver, null, null, includeAnalyzers: true,
+            trustStore, allowlist, CancellationToken.None);
 
         // Any analyzer diagnostics should have Source starting with "analyzer"
         _ = results.Where(d => d.Source.StartsWith("analyzer", StringComparison.Ordinal)).ToList();
@@ -73,9 +79,73 @@ public class GetDiagnosticsToolTests
     [Fact]
     public async Task GetDiagnostics_WithoutAnalyzers_OnlyCompilerDiagnostics()
     {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+
         var results = await GetDiagnosticsLogic.ExecuteAsync(
-            _loaded, _resolver, null, null, includeAnalyzers: false);
+            _loaded, _resolver, null, null, includeAnalyzers: false,
+            trustStore, allowlist, CancellationToken.None);
 
         Assert.All(results, d => Assert.Equal("compiler", d.Source));
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_UntrustedSolution_ThrowsWhenAnalyzersRequested()
+    {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await GetDiagnosticsLogic.ExecuteAsync(
+                _loaded, _resolver, null, null, includeAnalyzers: true,
+                trustStore, allowlist, CancellationToken.None);
+        });
+        Assert.Contains("not trusted", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("trust_solution", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_UntrustedSolution_StillReturnsCompilerDiagnosticsWithoutAnalyzers()
+    {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+
+        var results = await GetDiagnosticsLogic.ExecuteAsync(
+            _loaded, _resolver, null, null, includeAnalyzers: false,
+            trustStore, allowlist, CancellationToken.None);
+
+        Assert.All(results, d => Assert.Equal("compiler", d.Source));
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_TrustedSolution_RunsAnalyzers()
+    {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        trustStore.AddSessionTrust(_loaded.Solution.FilePath!);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
+
+        var results = await GetDiagnosticsLogic.ExecuteAsync(
+            _loaded, _resolver, null, null, includeAnalyzers: true,
+            trustStore, allowlist, CancellationToken.None);
+
+        Assert.Contains(results, d => d.Source.StartsWith("analyzer:", StringComparison.Ordinal));
+    }
+
+    private sealed class TempTrustFile : IDisposable
+    {
+        public string Path { get; }
+        public TempTrustFile()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"trust-{Guid.NewGuid():N}.json");
+        }
+        public void Dispose()
+        {
+            if (File.Exists(Path)) File.Delete(Path);
+        }
     }
 }

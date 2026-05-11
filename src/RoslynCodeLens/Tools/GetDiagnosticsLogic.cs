@@ -16,47 +16,59 @@ public static class GetDiagnosticsLogic
         string? project,
         string? severity,
         bool includeAnalyzers,
+        Security.TrustStore trustStore,
+        Security.AnalyzerAllowlist allowlist,
         CancellationToken ct = default)
     {
         var results = CollectCompilerDiagnostics(loaded, resolver, project, severity);
 
-        if (includeAnalyzers)
+        if (!includeAnalyzers)
+            return results;
+
+        var solutionPath = loaded.Solution.FilePath;
+        if (solutionPath is null || !trustStore.IsTrusted(solutionPath))
         {
+            throw new InvalidOperationException(
+                $"Solution '{solutionPath ?? "<unknown>"}' is not trusted for analyzer execution. " +
+                $"Analyzer DLLs run as in-process code, so the user must explicitly authorize them. " +
+                $"Ask the user, then call the 'trust_solution' tool with this path. " +
+                $"To get compiler-only diagnostics, retry with includeAnalyzers=false.");
+        }
 
-            var minSeverity = ParseMinSeverity(severity);
+        var minSeverity = ParseMinSeverity(severity);
 
-            foreach (var (projectId, compilation) in loaded.Compilations)
+        foreach (var (projectId, compilation) in loaded.Compilations)
+        {
+            var projectName = resolver.GetProjectName(projectId);
+
+            if (project != null &&
+                !projectName.Contains(project, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var roslynProject = loaded.Solution.GetProject(projectId);
+            if (roslynProject == null)
+                continue;
+
+            var analyzerDiagnostics = await AnalyzerRunner.RunAnalyzersAsync(
+                roslynProject, compilation, allowlist, ct).ConfigureAwait(false);
+
+            foreach (var diagnostic in analyzerDiagnostics)
             {
-                var projectName = resolver.GetProjectName(projectId);
-
-                if (project != null &&
-                    !projectName.Contains(project, StringComparison.OrdinalIgnoreCase))
+                if (diagnostic.Severity < minSeverity)
                     continue;
 
-                var roslynProject = loaded.Solution.GetProject(projectId);
-                if (roslynProject == null)
-                    continue;
+                var lineSpan = diagnostic.Location.GetLineSpan();
+                var file = lineSpan.Path ?? "";
+                var line = lineSpan.StartLinePosition.Line + 1;
 
-                var analyzerDiagnostics = await AnalyzerRunner.RunAnalyzersAsync(roslynProject, compilation, ct).ConfigureAwait(false);
-
-                foreach (var diagnostic in analyzerDiagnostics)
-                {
-                    if (diagnostic.Severity < minSeverity)
-                        continue;
-
-                    var lineSpan = diagnostic.Location.GetLineSpan();
-                    var file = lineSpan.Path ?? "";
-                    var line = lineSpan.StartLinePosition.Line + 1;
-
-                    results.Add(new DiagnosticInfo(
-                        diagnostic.Id,
-                        diagnostic.Severity.ToString(),
-                        diagnostic.GetMessage(),
-                        file,
-                        line,
-                        projectName,
-                        $"analyzer:{diagnostic.Id}"));
-                }
+                results.Add(new DiagnosticInfo(
+                    diagnostic.Id,
+                    diagnostic.Severity.ToString(),
+                    diagnostic.GetMessage(),
+                    file,
+                    line,
+                    projectName,
+                    $"analyzer:{diagnostic.Id}"));
             }
         }
 
