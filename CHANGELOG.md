@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.16.0...v1.17.0) (2026-05-11)
+
+
+### Features
+
+* **security:** trust gate + analyzer allowlist for GHSA-552p-8f74-6x7q ([#168](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/168)) ([eab0164](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/eab01643e3c7ee874804b6a9752ae1811008764a))
+
 ## [1.16.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.15.0...v1.16.0) (2026-05-04)
 
 
