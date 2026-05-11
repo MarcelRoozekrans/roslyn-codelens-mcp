@@ -136,6 +136,15 @@ public class GetDiagnosticsToolTests
         Assert.Contains(results, d => d.Source.StartsWith("analyzer:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void GetDiagnosticsTool_IncludeAnalyzers_DefaultsToFalse()
+    {
+        var method = typeof(GetDiagnosticsTool).GetMethod(nameof(GetDiagnosticsTool.Execute))!;
+        var param = method.GetParameters().Single(p => p.Name == "includeAnalyzers");
+        Assert.True(param.HasDefaultValue);
+        Assert.Equal(false, param.DefaultValue);
+    }
+
     private sealed class TempTrustFile : IDisposable
     {
         public string Path { get; }
