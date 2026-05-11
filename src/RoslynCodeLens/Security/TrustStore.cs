@@ -32,7 +32,9 @@ public sealed class TrustStore
             foreach (var root in _persistent.TrustedRoots)
             {
                 var normRoot = Normalize(root);
-                if (normalized.StartsWith(normRoot, PathComparison)) return true;
+                if (normalized.Equals(normRoot, PathComparison)) return true;
+                var rootWithSep = normRoot.EndsWith(Path.DirectorySeparatorChar) ? normRoot : normRoot + Path.DirectorySeparatorChar;
+                if (normalized.StartsWith(rootWithSep, PathComparison)) return true;
             }
             return false;
         }
@@ -96,14 +98,21 @@ public sealed class TrustStore
 
     private TrustStoreModel LoadFromDisk()
     {
+        if (!File.Exists(_filePath)) return new TrustStoreModel();
         try
         {
-            if (!File.Exists(_filePath)) return new TrustStoreModel();
             var json = File.ReadAllText(_filePath);
-            return JsonSerializer.Deserialize<TrustStoreModel>(json, TrustStoreModel.JsonOptions) ?? new TrustStoreModel();
+            var model = JsonSerializer.Deserialize<TrustStoreModel>(json, TrustStoreModel.JsonOptions);
+            if (model is null)
+            {
+                Console.Error.WriteLine($"[roslyn-codelens] trust.json could not be loaded (deserialized to null); treating as empty.");
+                return new TrustStoreModel();
+            }
+            return model;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[roslyn-codelens] trust.json could not be loaded ({ex.GetType().Name}: {ex.Message}); treating as empty.");
             return new TrustStoreModel();
         }
     }
@@ -112,7 +121,9 @@ public sealed class TrustStore
     {
         var dir = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(_filePath, JsonSerializer.Serialize(_persistent, TrustStoreModel.JsonOptions));
+        var tmp = _filePath + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(_persistent, TrustStoreModel.JsonOptions));
+        File.Move(tmp, _filePath, overwrite: true);
     }
 
     private static string Normalize(string path)

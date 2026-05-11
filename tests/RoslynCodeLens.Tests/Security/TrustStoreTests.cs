@@ -103,4 +103,44 @@ public class TrustStoreTests : IDisposable
         Assert.Contains(snapshot.PersistentSolutions, s => s.Path.Equals("c:\\repos\\b.sln", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(snapshot.TrustedRoots, r => r.Equals("c:\\projects\\", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void TrustedRoot_DoesNotMatch_SiblingPrefixDirectory()
+    {
+        // Regression test for prefix-bypass: trusting "c:\projects" must NOT trust "c:\projects-evil\..."
+        var store = new TrustStore(_trustFile);
+        store.AddTrustedRoot("c:\\projects");  // no trailing slash — natural user input
+        Assert.False(store.IsTrusted("c:\\projects-evil\\malicious.sln"));
+        Assert.True(store.IsTrusted("c:\\projects\\repo\\foo.sln"));  // genuine child still works
+    }
+
+    [Fact]
+    public void AddPersistentTrust_IsIdempotent()
+    {
+        var store = new TrustStore(_trustFile);
+        store.AddPersistentTrust("c:\\repos\\foo.sln");
+        store.AddPersistentTrust("c:\\repos\\foo.sln");
+
+        var snapshot = store.GetSnapshot();
+        Assert.Single(snapshot.PersistentSolutions);
+    }
+
+    [Fact]
+    public void LoadFromDisk_CorruptFile_ReturnsEmptyAndLogsToStderr()
+    {
+        File.WriteAllText(_trustFile, "{ not valid json");
+        var prevErr = Console.Error;
+        using var captured = new StringWriter();
+        Console.SetError(captured);
+        try
+        {
+            var store = new TrustStore(_trustFile);
+            Assert.False(store.IsTrusted("c:\\anything"));
+            Assert.Contains("trust.json", captured.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Console.SetError(prevErr);
+        }
+    }
 }
