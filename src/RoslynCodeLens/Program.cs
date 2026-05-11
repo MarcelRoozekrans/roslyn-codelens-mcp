@@ -4,8 +4,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using RoslynCodeLens;
+using RoslynCodeLens.Security;
 
-MSBuildLocator.RegisterDefaults();
+var instance = MSBuildLocator.RegisterDefaults();
+var dotnetSdkRoot = instance.MSBuildPath is not null
+    ? Path.GetFullPath(Path.Combine(instance.MSBuildPath, "..", "..", ".."))
+    : null;
 
 MultiSolutionManager multiManager;
 
@@ -25,14 +29,17 @@ else
     multiManager = MultiSolutionManager.CreateEmpty();
 }
 
+var trustStore = new TrustStore(TrustStore.DefaultFilePath());
+foreach (var sln in solutionPaths)
+    trustStore.AddSessionTrust(Path.GetFullPath(sln));
+
+var allowlist = new AnalyzerAllowlist(trustStore.AnalyzerPolicy, AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot);
+
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services.AddSingleton(multiManager);
-builder.Services.AddSingleton(new RoslynCodeLens.Security.TrustStore(RoslynCodeLens.Security.TrustStore.DefaultFilePath()));
-builder.Services.AddSingleton(new RoslynCodeLens.Security.AnalyzerAllowlist(
-    "nuget-and-solution-bin",
-    RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(),
-    dotnetSdkRoot: null));
+builder.Services.AddSingleton(trustStore);
+builder.Services.AddSingleton(allowlist);
 
 builder.Services
     .AddMcpServer()
