@@ -35,7 +35,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.3.0" />
     <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
     <PackageReference Include="ICSharpCode.Decompiler" Version="10.0.1.8346" />
   </ItemGroup>
 
