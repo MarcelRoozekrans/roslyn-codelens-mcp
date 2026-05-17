@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.17.0...v1.17.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* gracefully handle legacy non-SDK csproj projects ([#175](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/175)) ([#178](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/178)) ([8963e78](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/8963e78b8ef7987356558e1a3c8ef20adb23a840))
+
 ## [1.17.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.16.0...v1.17.0) (2026-05-11)
 
 
