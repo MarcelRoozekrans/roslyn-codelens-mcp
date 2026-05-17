@@ -49,9 +49,10 @@ public sealed class SolutionManager : IDisposable
     {
         var loader = new SolutionLoader();
         Solution solution;
+        IReadOnlyList<SkippedProject> skipped;
         try
         {
-            (solution, _) = await loader.OpenAsync(solutionPath).ConfigureAwait(false);
+            (solution, _, skipped) = await loader.OpenAsync(solutionPath).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -63,11 +64,12 @@ public sealed class SolutionManager : IDisposable
         var emptyLoaded = new LoadedSolution
         {
             Solution = solution,
-            Compilations = new ConcurrentDictionary<ProjectId, Compilation>()
+            Compilations = new ConcurrentDictionary<ProjectId, Compilation>(),
+            SkippedProjects = skipped
         };
 
         var manager = new SolutionManager(emptyLoaded, solutionPath);
-        manager._warmupTask = manager.WarmupAsync(loader, solution);
+        manager._warmupTask = manager.WarmupAsync(loader, solution, skipped);
         return manager;
     }
 
@@ -76,7 +78,7 @@ public sealed class SolutionManager : IDisposable
         return new SolutionManager(LoadedSolution.Empty, null);
     }
 
-    private async Task WarmupAsync(SolutionLoader loader, Solution solution)
+    private async Task WarmupAsync(SolutionLoader loader, Solution solution, IReadOnlyList<SkippedProject> skipped)
     {
         try
         {
@@ -86,7 +88,8 @@ public sealed class SolutionManager : IDisposable
             var newLoaded = new LoadedSolution
             {
                 Solution = solution,
-                Compilations = compilations
+                Compilations = compilations,
+                SkippedProjects = skipped
             };
             var newResolver = new SymbolResolver(newLoaded);
             var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
@@ -209,11 +212,8 @@ public sealed class SolutionManager : IDisposable
 
     private async Task RebuildStaleProjects(IReadOnlySet<ProjectId> staleIds)
     {
-        var workspace = MSBuildWorkspace.Create();
-        workspace.WorkspaceFailed += (_, e) =>
-            Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
-
-        var solution = await workspace.OpenSolutionAsync(_solutionPath!).ConfigureAwait(false);
+        var loader = new SolutionLoader();
+        var (solution, _, skipped) = await loader.OpenAsync(_solutionPath!).ConfigureAwait(false);
         var compilations = new ConcurrentDictionary<ProjectId, Compilation>(_loaded.Compilations);
 
         var staleProjects = solution.Projects.Where(p => staleIds.Contains(p.Id)).ToList();
@@ -229,7 +229,8 @@ public sealed class SolutionManager : IDisposable
         var newLoaded = new LoadedSolution
         {
             Solution = solution,
-            Compilations = compilations
+            Compilations = compilations,
+            SkippedProjects = skipped
         };
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
@@ -255,9 +256,10 @@ public sealed class SolutionManager : IDisposable
 
         var loader = new SolutionLoader();
         Solution solution;
+        IReadOnlyList<SkippedProject> skipped;
         try
         {
-            (solution, _) = await loader.OpenAsync(_solutionPath).ConfigureAwait(false);
+            (solution, _, skipped) = await loader.OpenAsync(_solutionPath).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -268,7 +270,8 @@ public sealed class SolutionManager : IDisposable
         var newLoaded = new LoadedSolution
         {
             Solution = solution,
-            Compilations = compilations
+            Compilations = compilations,
+            SkippedProjects = skipped
         };
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);

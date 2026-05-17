@@ -7,19 +7,91 @@ namespace RoslynCodeLens;
 
 public class SolutionLoader
 {
-    public async Task<(Solution Solution, MSBuildWorkspace Workspace)> OpenAsync(string solutionPath)
+    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath)
     {
-        var workspace = MSBuildWorkspace.Create();
+        var classified = ProjectClassifier.EnumerateProjects(solutionPath);
+        var legacyOrMissing = classified
+            .Where(p => p.Kind is ProjectClassifier.ProjectKind.Legacy
+                     or ProjectClassifier.ProjectKind.Missing
+                     or ProjectClassifier.ProjectKind.Unknown)
+            .ToList();
 
+        var preFilter = legacyOrMissing.Any(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
+        if (preFilter)
+        {
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
+                .ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+        }
+
+        var workspace = MSBuildWorkspace.Create();
         workspace.WorkspaceFailed += (_, e) =>
         {
             Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
         };
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
-        var solution = await workspace.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
 
-        return (solution, workspace);
+        Solution solution;
+        try
+        {
+            solution = await workspace.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Fallback: solution-level open threw (often a legacy project we did not classify, or
+            // an SDK project with a broken import). Reuse per-project loading so we still surface
+            // whatever can be loaded plus a list of what was skipped.
+            workspace.Dispose();
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
+                .ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+        }
+
+        return (solution, workspace, Array.Empty<SkippedProject>());
+    }
+
+    private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
+        string solutionPath,
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified)
+    {
+        var workspace = MSBuildWorkspace.Create();
+        var skipped = new List<SkippedProject>();
+
+        workspace.WorkspaceFailed += (_, e) =>
+        {
+            Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
+        };
+
+        foreach (var entry in classified)
+        {
+            if (entry.Kind == ProjectClassifier.ProjectKind.SdkStyle)
+            {
+                try
+                {
+                    await workspace.OpenProjectAsync(entry.Path).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    await Console.Error.WriteLineAsync(
+                        $"[roslyn-codelens] Skipping project {entry.Name}: {ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
+                    skipped.Add(new SkippedProject(entry.Path, entry.Name, "Failed",
+                        $"{ex.GetType().Name}: {ex.Message}"));
+                }
+            }
+            else
+            {
+                var kind = entry.Kind.ToString();
+                var reason = entry.Reason ?? "Unsupported project format.";
+                await Console.Error.WriteLineAsync(
+                    $"[roslyn-codelens] Skipping {kind} project {entry.Name}: {reason}").ConfigureAwait(false);
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, kind, reason));
+            }
+        }
+
+        return (workspace.CurrentSolution, workspace, skipped);
     }
 
     public async Task<ConcurrentDictionary<ProjectId, Compilation>> CompileAllParallelAsync(Solution solution)
@@ -54,16 +126,17 @@ public class SolutionLoader
 
     public async Task<LoadedSolution> LoadAsync(string solutionPath)
     {
-        var (solution, _) = await OpenAsync(solutionPath).ConfigureAwait(false);
+        var (solution, _, skipped) = await OpenAsync(solutionPath).ConfigureAwait(false);
         var compilations = await CompileAllParallelAsync(solution).ConfigureAwait(false);
 
         await Console.Error.WriteLineAsync(
-            $"[roslyn-codelens] Ready. {compilations.Count} projects compiled.").ConfigureAwait(false);
+            $"[roslyn-codelens] Ready. {compilations.Count} projects compiled, {skipped.Count} skipped.").ConfigureAwait(false);
 
         return new LoadedSolution
         {
             Solution = solution,
-            Compilations = compilations
+            Compilations = compilations,
+            SkippedProjects = skipped
         };
     }
 

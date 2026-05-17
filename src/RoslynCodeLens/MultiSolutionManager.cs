@@ -88,6 +88,7 @@ public sealed class MultiSolutionManager : IDisposable
                 var m = kvp.Value;
                 int projectCount = 0;
                 string status;
+                IReadOnlyList<SkippedProjectInfo> skipped = Array.Empty<SkippedProjectInfo>();
                 if (m.HasLoadFailure)
                 {
                     status = "error";
@@ -99,6 +100,9 @@ public sealed class MultiSolutionManager : IDisposable
                         var loaded = m.GetLoadedSolution();
                         projectCount = loaded.Compilations.Count;
                         status = loaded.IsEmpty ? "empty" : "ready";
+                        skipped = loaded.SkippedProjects
+                            .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
+                            .ToList();
                     }
                     catch (InvalidOperationException ex) when (ex.Message.Contains("warmup failed", StringComparison.OrdinalIgnoreCase))
                     {
@@ -110,9 +114,23 @@ public sealed class MultiSolutionManager : IDisposable
                         status = "unknown";
                     }
                 }
-                return new SolutionInfo(kvp.Key, string.Equals(kvp.Key, activeKey, StringComparison.Ordinal), projectCount, status);
+                return new SolutionInfo(kvp.Key, string.Equals(kvp.Key, activeKey, StringComparison.Ordinal), projectCount, status, skipped);
             })
             .ToList();
+    }
+
+    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects()
+    {
+        try
+        {
+            return Active.GetLoadedSolution().SkippedProjects
+                .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<SkippedProjectInfo>();
+        }
     }
 
     public string SetActiveSolution(string name)

@@ -19,72 +19,77 @@ public class LegacySolutionHandlingTests
     public async Task SolutionManager_CreateAsync_DoesNotThrowOnLegacyProject()
     {
         var manager = await SolutionManager.CreateAsync(LegacySolutionPath);
-
-        Assert.True(manager.HasLoadFailure);
-        Assert.NotNull(manager.LoadFailureMessage);
         manager.Dispose();
     }
 
     [Fact]
-    public async Task SolutionManager_FailedLoad_SurfacesFriendlyErrorOnAccess()
+    public async Task SolutionManager_LegacyProject_PopulatesSkippedList()
     {
         var manager = await SolutionManager.CreateAsync(LegacySolutionPath);
+        await manager.WaitForWarmupAsync();
 
-        var ex = Assert.Throws<InvalidOperationException>(() => manager.GetLoadedSolution());
-        Assert.Contains("Failed to load solution", ex.Message, StringComparison.OrdinalIgnoreCase);
+        var loaded = manager.GetLoadedSolution();
+        Assert.NotEmpty(loaded.SkippedProjects);
+        Assert.Contains(loaded.SkippedProjects, p => string.Equals(p.Kind, "Legacy", StringComparison.Ordinal));
+        Assert.Contains(loaded.SkippedProjects, p => p.Reason.Contains("non-SDK", StringComparison.OrdinalIgnoreCase));
+
         manager.Dispose();
     }
 
     [Fact]
-    public async Task SolutionManager_FailedLoad_FriendlyMessageMentionsLegacyProjects()
+    public async Task MultiSolutionManager_LegacyOnly_LoadsWithSkippedReported()
     {
-        var manager = await SolutionManager.CreateAsync(LegacySolutionPath);
+        var manager = await MultiSolutionManager.CreateAsync(new[] { LegacySolutionPath });
 
-        Assert.NotNull(manager.LoadFailureMessage);
-        Assert.Contains("non-SDK-style", manager.LoadFailureMessage!, StringComparison.OrdinalIgnoreCase);
+        var solutions = manager.ListSolutions();
+        var solution = Assert.Single(solutions);
+        Assert.NotEmpty(solution.SkippedProjects);
+        Assert.Contains(solution.SkippedProjects, p => string.Equals(p.Kind, "Legacy", StringComparison.Ordinal));
+
         manager.Dispose();
     }
 
     [Fact]
-    public async Task MultiSolutionManager_CreateAsync_TolerateLegacySolutionAlongsideValidOne()
+    public async Task MultiSolutionManager_MixedSolutions_LoadsValidAndReportsLegacySkipped()
     {
         var manager = await MultiSolutionManager.CreateAsync(new[] { LegacySolutionPath, ValidSolutionPath });
 
         var solutions = manager.ListSolutions();
         Assert.Equal(2, solutions.Count);
-        Assert.Contains(solutions, s => s.Status == "error");
-        Assert.Contains(solutions, s => s.Status == "ready" || s.Status == "empty");
 
-        var active = solutions.Single(s => s.IsActive);
-        Assert.NotEqual("error", active.Status);
+        var legacy = solutions.Single(s => s.Path.EndsWith("Legacy.sln", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(legacy.SkippedProjects);
 
-        manager.Dispose();
-    }
-
-    [Fact]
-    public async Task MultiSolutionManager_CreateAsync_OnlyLegacySolution_DoesNotThrow()
-    {
-        var manager = await MultiSolutionManager.CreateAsync(new[] { LegacySolutionPath });
-
-        var solutions = manager.ListSolutions();
-        Assert.Single(solutions);
-        Assert.Equal("error", solutions[0].Status);
+        var valid = solutions.Single(s => s.Path.EndsWith("TestSolution.slnx", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(valid.SkippedProjects);
+        Assert.Equal("ready", valid.Status);
 
         manager.Dispose();
     }
 
     [Fact]
-    public async Task LoadSolutionTool_LegacySolution_ReturnsFriendlyError()
+    public async Task LoadSolutionTool_LegacySolution_ReturnsSkippedSummary()
     {
         var manager = MultiSolutionManager.CreateEmpty();
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => LoadSolutionTool.Execute(manager, LegacySolutionPath));
+        var result = await LoadSolutionTool.Execute(manager, LegacySolutionPath);
 
-        Assert.Contains("Failed to load solution", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Loaded and activated", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Skipped", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Legacy", result, StringComparison.OrdinalIgnoreCase);
 
-        // The failed solution must not have been retained.
-        Assert.Empty(manager.ListSolutions());
         manager.Dispose();
+    }
+
+    [Fact]
+    public void ProjectClassifier_DetectsLegacyAndSdkStyle()
+    {
+        var classified = ProjectClassifier.EnumerateProjects(LegacySolutionPath);
+        Assert.NotEmpty(classified);
+        Assert.Contains(classified, c => c.Kind == ProjectClassifier.ProjectKind.Legacy);
+
+        var validClassified = ProjectClassifier.EnumerateProjects(ValidSolutionPath);
+        Assert.NotEmpty(validClassified);
+        Assert.All(validClassified, c => Assert.Equal(ProjectClassifier.ProjectKind.SdkStyle, c.Kind));
     }
 }
