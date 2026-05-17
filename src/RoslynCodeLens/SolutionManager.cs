@@ -17,6 +17,8 @@ public sealed class SolutionManager : IDisposable
     private volatile bool _rebuilding;
     private Task? _warmupTask;
     private Exception? _warmupException;
+    private readonly Exception? _loadException;
+    private readonly string? _loadFailureMessage;
     private readonly PEFileCache _peCache = new();
     private readonly IlDisassemblerAdapter _ilAdapter;
 
@@ -29,10 +31,34 @@ public sealed class SolutionManager : IDisposable
         _ilAdapter = new IlDisassemblerAdapter(_peCache);
     }
 
+    private SolutionManager(string solutionPath, Exception loadException)
+    {
+        _loaded = LoadedSolution.Empty;
+        _solutionPath = solutionPath;
+        _resolver = new SymbolResolver(_loaded);
+        _metadataResolver = new MetadataSymbolResolver(_loaded, _resolver);
+        _ilAdapter = new IlDisassemblerAdapter(_peCache);
+        _loadException = loadException;
+        _loadFailureMessage = SolutionLoadFailure.Describe(solutionPath, loadException);
+    }
+
+    public bool HasLoadFailure => _loadException != null;
+    public string? LoadFailureMessage => _loadFailureMessage;
+
     public static async Task<SolutionManager> CreateAsync(string solutionPath)
     {
         var loader = new SolutionLoader();
-        var (solution, _) = await loader.OpenAsync(solutionPath).ConfigureAwait(false);
+        Solution solution;
+        try
+        {
+            (solution, _) = await loader.OpenAsync(solutionPath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] {SolutionLoadFailure.Describe(solutionPath, ex)}").ConfigureAwait(false);
+            return new SolutionManager(solutionPath, ex);
+        }
 
         var emptyLoaded = new LoadedSolution
         {
@@ -95,6 +121,7 @@ public sealed class SolutionManager : IDisposable
 
     public LoadedSolution GetLoadedSolution()
     {
+        ThrowIfLoadFailed();
         _warmupTask?.GetAwaiter().GetResult();
         if (_warmupException != null)
             throw new InvalidOperationException("Solution warmup failed.", _warmupException);
@@ -104,6 +131,7 @@ public sealed class SolutionManager : IDisposable
 
     public SymbolResolver GetResolver()
     {
+        ThrowIfLoadFailed();
         _warmupTask?.GetAwaiter().GetResult();
         if (_warmupException != null)
             throw new InvalidOperationException("Solution warmup failed.", _warmupException);
@@ -113,6 +141,7 @@ public sealed class SolutionManager : IDisposable
 
     public MetadataSymbolResolver GetMetadataResolver()
     {
+        ThrowIfLoadFailed();
         _warmupTask?.GetAwaiter().GetResult();
         if (_warmupException != null)
             throw new InvalidOperationException("Solution warmup failed.", _warmupException);
@@ -124,6 +153,7 @@ public sealed class SolutionManager : IDisposable
 
     public void EnsureLoaded()
     {
+        ThrowIfLoadFailed();
         _warmupTask?.GetAwaiter().GetResult();
         if (_warmupException != null)
             throw new InvalidOperationException("Solution warmup failed.", _warmupException);
@@ -131,6 +161,12 @@ public sealed class SolutionManager : IDisposable
             throw new InvalidOperationException(
                 "No .sln file found. Either run from a directory containing a .sln/.slnx file, " +
                 "or pass the solution path as argument: roslyn-codelens-mcp /path/to/Solution.sln");
+    }
+
+    private void ThrowIfLoadFailed()
+    {
+        if (_loadException != null)
+            throw new InvalidOperationException(_loadFailureMessage!, _loadException);
     }
 
     private void RebuildIfStale()
@@ -218,7 +254,15 @@ public sealed class SolutionManager : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var loader = new SolutionLoader();
-        var (solution, _) = await loader.OpenAsync(_solutionPath).ConfigureAwait(false);
+        Solution solution;
+        try
+        {
+            (solution, _) = await loader.OpenAsync(_solutionPath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(SolutionLoadFailure.Describe(_solutionPath, ex), ex);
+        }
         var compilations = await loader.CompileAllParallelAsync(solution).ConfigureAwait(false);
 
         var newLoaded = new LoadedSolution
