@@ -23,15 +23,32 @@ public sealed class MultiSolutionManager : IDisposable
             return CreateEmpty();
 
         var managers = new ConcurrentDictionary<string, SolutionManager>(StringComparer.OrdinalIgnoreCase);
+        string? firstSuccessfulKey = null;
         foreach (var path in solutionPaths)
         {
             var normalised = Path.GetFullPath(path);
-            if (!managers.ContainsKey(normalised))
-                managers[normalised] = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
+            if (managers.ContainsKey(normalised))
+                continue;
+
+            SolutionManager manager;
+            try
+            {
+                manager = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await Console.Error.WriteLineAsync(
+                    $"[roslyn-codelens] Skipping solution '{Path.GetFileName(normalised)}': {ex.Message}").ConfigureAwait(false);
+                continue;
+            }
+
+            managers[normalised] = manager;
+            if (firstSuccessfulKey == null && !manager.HasLoadFailure)
+                firstSuccessfulKey = normalised;
         }
 
-        var firstKey = Path.GetFullPath(solutionPaths[0]);
-        return new MultiSolutionManager(managers, firstKey);
+        var activeKey = firstSuccessfulKey ?? (managers.IsEmpty ? null : Path.GetFullPath(solutionPaths[0]));
+        return new MultiSolutionManager(managers, activeKey);
     }
 
     public static MultiSolutionManager CreateEmpty() =>
@@ -71,24 +88,49 @@ public sealed class MultiSolutionManager : IDisposable
                 var m = kvp.Value;
                 int projectCount = 0;
                 string status;
-                try
-                {
-                    var loaded = m.GetLoadedSolution();
-                    projectCount = loaded.Compilations.Count;
-                    status = loaded.IsEmpty ? "empty" : "ready";
-                }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("warmup failed", StringComparison.OrdinalIgnoreCase))
+                IReadOnlyList<SkippedProjectInfo> skipped = Array.Empty<SkippedProjectInfo>();
+                if (m.HasLoadFailure)
                 {
                     status = "error";
                 }
-                catch (Exception ex)
+                else
                 {
-                    Console.Error.WriteLine($"[roslyn-codelens] Error reading solution status ({kvp.Key}): {ex}");
-                    status = "unknown";
+                    try
+                    {
+                        var loaded = m.GetLoadedSolution();
+                        projectCount = loaded.Compilations.Count;
+                        status = loaded.IsEmpty ? "empty" : "ready";
+                        skipped = loaded.SkippedProjects
+                            .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
+                            .ToList();
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("warmup failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        status = "error";
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[roslyn-codelens] Error reading solution status ({kvp.Key}): {ex}");
+                        status = "unknown";
+                    }
                 }
-                return new SolutionInfo(kvp.Key, string.Equals(kvp.Key, activeKey, StringComparison.Ordinal), projectCount, status);
+                return new SolutionInfo(kvp.Key, string.Equals(kvp.Key, activeKey, StringComparison.Ordinal), projectCount, status, skipped);
             })
             .ToList();
+    }
+
+    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects()
+    {
+        try
+        {
+            return Active.GetLoadedSolution().SkippedProjects
+                .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
+                .ToList();
+        }
+        catch
+        {
+            return Array.Empty<SkippedProjectInfo>();
+        }
     }
 
     public string SetActiveSolution(string name)
@@ -127,6 +169,13 @@ public sealed class MultiSolutionManager : IDisposable
         }
 
         var manager = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
+
+        if (manager.HasLoadFailure)
+        {
+            var message = manager.LoadFailureMessage!;
+            manager.Dispose();
+            throw new InvalidOperationException(message);
+        }
 
         lock (_lock)
         {

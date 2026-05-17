@@ -35,4 +35,23 @@ Full benchmark results are in the [repository](https://github.com/MarcelRoozekra
 
 ## What .NET versions are supported?
 
-The server targets .NET 10 and can analyse solutions targeting any .NET version (net48, net6.0, net8.0, net10.0, etc.).
+The server targets .NET 10 and can analyse solutions targeting any .NET version (net48, net6.0, net8.0, net10.0, etc.) — **as long as the projects use the SDK-style csproj format** (`<Project Sdk="...">`).
+
+## Are legacy (non-SDK-style) .NET Framework projects supported?
+
+**No, and they will be skipped — but the rest of the solution still loads.**
+
+Legacy projects use the old MSBuild XML format (`<Project ToolsVersion="..." xmlns="http://schemas.microsoft.com/developer/msbuild/2003">`) and rely on the .NET Framework MSBuild that ships with Visual Studio. The .NET SDK does not include those targets, so MSBuildWorkspace cannot load them under `dotnet run`.
+
+What the server does when it encounters them:
+
+- Pre-classifies every `.csproj` in the solution before invoking MSBuild.
+- Loads all SDK-style projects normally — every tool works for those.
+- Records each legacy project in `LoadedSolution.SkippedProjects`.
+- Exposes the skipped list through `list_solutions` (the `SkippedProjects` array, with `Name`, `Path`, `Kind`, and `Reason` per project), and includes a summary in the return message of `load_solution`.
+
+To analyse a legacy project, either convert it to SDK-style csproj format, or run the server from a Visual Studio Developer Command Prompt where the full MSBuild toolchain is on `PATH`.
+
+## Why is `list_solutions` showing `SkippedProjects` for my solution?
+
+Those are projects that couldn't be loaded by MSBuildWorkspace. Each entry tells you the reason — typically `Legacy` (non-SDK-style) or `Missing` (referenced from the `.sln` but the file doesn't exist on disk). All other projects in the solution loaded normally and can be queried by any tool.

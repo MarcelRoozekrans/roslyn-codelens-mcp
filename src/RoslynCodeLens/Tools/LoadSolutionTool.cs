@@ -19,6 +19,12 @@ public static class LoadSolutionTool
             throw new FileNotFoundException($"Solution file not found: {path}");
 
         var normalised = await manager.LoadSolutionAsync(path).ConfigureAwait(false);
-        return $"Loaded and activated: {normalised}";
+        var skipped = manager.GetActiveSkippedProjects();
+        if (skipped.Count == 0)
+            return $"Loaded and activated: {normalised}";
+
+        var summary = string.Join(", ", skipped.Select(s => $"{s.Name} ({s.Kind})"));
+        return $"Loaded and activated: {normalised}. Skipped {skipped.Count} project(s): {summary}. " +
+               $"Call list_solutions for per-project reason details.";
     }
 }

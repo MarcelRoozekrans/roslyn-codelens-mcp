@@ -227,11 +227,13 @@ peek_il("Microsoft.Extensions.DependencyInjection.ServiceDescriptor..ctor(System
 Limitations: abstract methods, interface instance members, and properties-as-whole (target the getter/setter accessor instead) are not supported.
 
 ### Solution Management
-- `list_solutions` — loaded solutions, which is active.
+- `list_solutions` — loaded solutions, which is active. Includes a `SkippedProjects` array per solution: projects MSBuildWorkspace could not load (legacy non-SDK-style csproj, missing files), with `Kind` and `Reason`.
 - `set_active_solution` — switch active solution by partial name.
-- `load_solution` — load a `.sln`/`.slnx` at runtime.
+- `load_solution` — load a `.sln`/`.slnx` at runtime. Returns a confirmation; when projects were skipped, the message summarises them and points to `list_solutions` for per-project reasons.
 - `unload_solution` — free memory.
 - `rebuild_solution` — full reload (after `Directory.Build.props` changes, new analyzers/packages, or stale diagnostics).
+
+**Legacy project handling:** when a solution contains non-SDK-style projects (`<Project ToolsVersion="..." xmlns=".../msbuild/2003">`, typically older .NET Framework projects), the server pre-filters them out before MSBuild sees them. Those projects appear in `SkippedProjects` with `Kind: "Legacy"`. The SDK-style projects in the same solution load normally and remain fully queryable — partial load, not all-or-nothing. If a tool returns "no results" for what should be a legacy project, check `list_solutions` first.
 
 ### Planning a Change — standard order
 1. `get_type_overview` — context + hierarchy + diagnostics.

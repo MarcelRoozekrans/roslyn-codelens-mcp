@@ -26,7 +26,7 @@ public class SolutionLoaderTests
         fixturePath = Path.GetFullPath(fixturePath);
 
         var loader = new SolutionLoader();
-        var (solution, workspace) = await loader.OpenAsync(fixturePath);
+        var (solution, workspace, _) = await loader.OpenAsync(fixturePath);
 
         Assert.NotNull(solution);
         Assert.True(solution.Projects.Count() >= 2);
@@ -40,7 +40,7 @@ public class SolutionLoaderTests
         fixturePath = Path.GetFullPath(fixturePath);
 
         var loader = new SolutionLoader();
-        var (solution, workspace) = await loader.OpenAsync(fixturePath);
+        var (solution, workspace, _) = await loader.OpenAsync(fixturePath);
         var compilations = await loader.CompileAllParallelAsync(solution);
 
         Assert.True(compilations.Count >= 2);
