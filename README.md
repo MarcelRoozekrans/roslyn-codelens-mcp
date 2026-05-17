@@ -210,6 +210,22 @@ Location-returning tools include an `IsGenerated` flag to distinguish source-gen
 - .NET 10 SDK
 - A .NET solution with compilable projects
 
+## Project compatibility
+
+The server analyses every project that MSBuildWorkspace can load under the .NET SDK runtime.
+
+**Supported:** SDK-style projects (`<Project Sdk="...">`), any target framework — `net48`, `net6.0`, `net8.0`, `net10.0`, etc. .NET Framework targets work fine *as long as the csproj uses the SDK-style format*.
+
+**Skipped (with a warning, not a crash):** legacy non-SDK-style projects (`<Project ToolsVersion="..." xmlns="http://schemas.microsoft.com/developer/msbuild/2003">`, typically `.NET Framework` projects authored in older versions of Visual Studio). These rely on `Microsoft.Common.props` imports from the .NET Framework MSBuild that ships with Visual Studio, which is not available in the .NET SDK MSBuild runtime.
+
+When a solution contains legacy projects, the server:
+
+1. Loads every SDK-style project normally — all tools work for those.
+2. Skips each legacy project and records it in `LoadedSolution.SkippedProjects`.
+3. Surfaces the skipped list via `list_solutions` (the `SkippedProjects` array on each `SolutionInfo`) and in the return message of `load_solution`. Each entry includes the project name, kind (`Legacy`), and reason.
+
+**To analyse a legacy project,** convert it to SDK-style format (see [Microsoft's migration guide](https://learn.microsoft.com/en-us/dotnet/core/porting/project-structure)) or open the solution from a Visual Studio Developer Command Prompt so the full Visual Studio MSBuild is on `PATH`.
+
 ## Development
 
 ```bash
