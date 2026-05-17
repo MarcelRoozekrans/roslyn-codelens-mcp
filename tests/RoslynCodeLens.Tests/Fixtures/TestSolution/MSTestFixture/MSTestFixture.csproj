@@ -3,7 +3,7 @@
     <ProjectReference Include="..\TestLib\TestLib.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="MSTest.TestFramework" Version="4.2.2" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.2.3" />
   </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
