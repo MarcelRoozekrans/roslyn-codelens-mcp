@@ -3,7 +3,7 @@
     <ProjectReference Include="..\TestLib\TestLib.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="NUnit" Version="4.6.0" />
+    <PackageReference Include="NUnit" Version="4.6.1" />
   </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
