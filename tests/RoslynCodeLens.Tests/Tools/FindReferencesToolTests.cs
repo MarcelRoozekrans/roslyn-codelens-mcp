@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -54,5 +55,40 @@ public class FindReferencesToolTests
 
         Assert.NotEmpty(results);
         Assert.All(results, r => Assert.True(!string.IsNullOrEmpty(r.File)));
+    }
+
+    [Fact]
+    public void Sort_OrdersByFileThenLine()
+    {
+        var input = new List<SymbolReference>
+        {
+            new("Read", "b.cs", 1, "x", "P"),
+            new("Read", "a.cs", 9, "x", "P"),
+            new("Read", "a.cs", 2, "x", "P"),
+        };
+
+        var sorted = FindReferencesTool.Sort(input);
+
+        Assert.Collection(sorted,
+            r => { Assert.Equal("a.cs", r.File); Assert.Equal(2, r.Line); },
+            r => { Assert.Equal("a.cs", r.File); Assert.Equal(9, r.Line); },
+            r => { Assert.Equal("b.cs", r.File); Assert.Equal(1, r.Line); });
+    }
+
+    [Fact]
+    public void BuildSummary_GroupsByProject()
+    {
+        var input = new List<SymbolReference>
+        {
+            new("Read", "a.cs", 1, "x", "Foo"),
+            new("Read", "a.cs", 2, "x", "Foo"),
+            new("Read", "b.cs", 1, "x", "Bar"),
+        };
+
+        var summary = FindReferencesTool.BuildSummary(input);
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"Foo\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"Bar\":1", json, StringComparison.Ordinal);
     }
 }

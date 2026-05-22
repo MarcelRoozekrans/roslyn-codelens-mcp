@@ -1,3 +1,4 @@
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
 
@@ -29,5 +30,23 @@ public class GetSourceGeneratorsToolTests
         var results = GetSourceGeneratorsLogic.Execute(_loaded, _resolver, projectName);
         Assert.NotNull(results);
         Assert.All(results, r => Assert.Equal(projectName, r.Project));
+    }
+
+    [Fact]
+    public void Sort_OrdersByProjectThenGeneratorName()
+    {
+        var input = new List<SourceGeneratorInfo>
+        {
+            new("ZGen", "Foo", 0, Array.Empty<string>()),
+            new("AGen", "Foo", 0, Array.Empty<string>()),
+            new("MGen", "Bar", 0, Array.Empty<string>()),
+        };
+
+        var sorted = GetSourceGeneratorsTool.Sort(input);
+
+        Assert.Collection(sorted,
+            s => { Assert.Equal("Bar", s.Project); Assert.Equal("MGen", s.GeneratorName); },
+            s => { Assert.Equal("Foo", s.Project); Assert.Equal("AGen", s.GeneratorName); },
+            s => { Assert.Equal("Foo", s.Project); Assert.Equal("ZGen", s.GeneratorName); });
     }
 }

@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -43,5 +44,23 @@ public class FindImplementationsToolTests
             _loaded, _resolver, _metadata, "System.IDisposable");
 
         Assert.Contains(results, r => r.FullName.EndsWith("Greeter", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Sort_OrdersByFileThenLine()
+    {
+        var input = new List<SymbolLocation>
+        {
+            new("class", "B", "b.cs", 1, "P"),
+            new("class", "A2", "a.cs", 9, "P"),
+            new("class", "A1", "a.cs", 2, "P"),
+        };
+
+        var sorted = FindImplementationsTool.Sort(input);
+
+        Assert.Collection(sorted,
+            s => { Assert.Equal("a.cs", s.File); Assert.Equal(2, s.Line); },
+            s => { Assert.Equal("a.cs", s.File); Assert.Equal(9, s.Line); },
+            s => { Assert.Equal("b.cs", s.File); Assert.Equal(1, s.Line); });
     }
 }

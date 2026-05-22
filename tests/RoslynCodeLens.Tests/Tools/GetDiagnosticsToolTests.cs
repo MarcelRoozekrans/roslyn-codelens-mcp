@@ -145,6 +145,86 @@ public class GetDiagnosticsToolTests
         Assert.Equal(false, param.DefaultValue);
     }
 
+    [Fact]
+    public void GetDiagnosticsTool_Limit_DefaultsToNull()
+    {
+        var method = typeof(GetDiagnosticsTool).GetMethod(nameof(GetDiagnosticsTool.Execute))!;
+        var param = method.GetParameters().Single(p => p.Name == "limit");
+        Assert.True(param.HasDefaultValue);
+        Assert.Null(param.DefaultValue);
+    }
+
+    [Fact]
+    public void SortBySeverityFileLine_OrdersErrorsBeforeWarningsBeforeInfo()
+    {
+        var input = new List<DiagnosticInfo>
+        {
+            new("CS0001", "Info",    "i", "a.cs", 1, "P"),
+            new("CS0002", "Warning", "w", "a.cs", 1, "P"),
+            new("CS0003", "Error",   "e", "a.cs", 1, "P"),
+        };
+
+        var sorted = GetDiagnosticsTool.SortBySeverityFileLine(input);
+
+        Assert.Collection(sorted,
+            d => Assert.Equal("Error", d.Severity),
+            d => Assert.Equal("Warning", d.Severity),
+            d => Assert.Equal("Info", d.Severity));
+    }
+
+    [Fact]
+    public void SortBySeverityFileLine_TieBreaksByFileThenLine()
+    {
+        var input = new List<DiagnosticInfo>
+        {
+            new("CS", "Error", "x", "b.cs", 5, "P"),
+            new("CS", "Error", "x", "a.cs", 9, "P"),
+            new("CS", "Error", "x", "a.cs", 2, "P"),
+        };
+
+        var sorted = GetDiagnosticsTool.SortBySeverityFileLine(input);
+
+        Assert.Collection(sorted,
+            d => { Assert.Equal("a.cs", d.File); Assert.Equal(2, d.Line); },
+            d => { Assert.Equal("a.cs", d.File); Assert.Equal(9, d.Line); },
+            d => { Assert.Equal("b.cs", d.File); Assert.Equal(5, d.Line); });
+    }
+
+    [Fact]
+    public void BuildSummary_CountsBySeverity()
+    {
+        var input = new List<DiagnosticInfo>
+        {
+            new("CS1", "Error",   "e", "a.cs", 1, "P"),
+            new("CS2", "Error",   "e", "a.cs", 2, "P"),
+            new("CS3", "Warning", "w", "a.cs", 3, "P"),
+            new("CS4", "Info",    "i", "a.cs", 4, "P"),
+            new("CS5", "Info",    "i", "a.cs", 5, "P"),
+            new("CS6", "Info",    "i", "a.cs", 6, "P"),
+            new("CS7", "Hidden",  "h", "a.cs", 7, "P"),
+        };
+
+        var summary = GetDiagnosticsTool.BuildSummary(input);
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"error\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"warning\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"info\":3", json, StringComparison.Ordinal);
+        Assert.Contains("\"hidden\":1", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildSummary_EmptyList_ReturnsAllZeros()
+    {
+        var summary = GetDiagnosticsTool.BuildSummary(Array.Empty<DiagnosticInfo>());
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"error\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"warning\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"info\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"hidden\":0", json, StringComparison.Ordinal);
+    }
+
     private sealed class TempTrustFile : IDisposable
     {
         public string Path { get; }

@@ -5,6 +5,32 @@ description: Use when working with any .NET / C# code (.cs/.csproj/.sln/.slnx fi
 
 # Roslyn CodeLens — Semantic .NET Intelligence
 
+## Response shape
+
+All list-returning tools wrap their results in an envelope:
+
+```json
+{
+  "items": [...],
+  "totalCount": 142,
+  "truncated": false,
+  "limit": 500,
+  "summary": { ... }
+}
+```
+
+When `truncated` is `true`, `items` are the **top N by the tool's natural sort order** (severity-first, worst-first, by-project, etc.) — usually that's what you want. Raise `limit` only if the truncated tail matters for the task.
+
+Tools that include a `summary` aggregate:
+
+- `get_diagnostics` — `{ error, warning, info, hidden }` counts
+- `find_references`, `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
+- `search_symbols`, `find_unused_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
+- `find_naming_violations` — `{ byRule: {...} }`
+- `get_complexity_metrics` — `{ max, avg, overThreshold }`
+
+Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) are unchanged — they return their bespoke shape directly.
+
 ## Detection
 
 If `find_implementations` is not available as an MCP tool, this skill is inert — do nothing, no errors.

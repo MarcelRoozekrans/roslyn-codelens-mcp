@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -35,5 +36,40 @@ public class FindCallersToolTests
             "Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped");
 
         Assert.NotEmpty(results);
+    }
+
+    [Fact]
+    public void Sort_OrdersByFileThenLine()
+    {
+        var input = new List<CallerInfo>
+        {
+            new("Caller", "b.cs", 1, "x", "P"),
+            new("Caller", "a.cs", 9, "x", "P"),
+            new("Caller", "a.cs", 2, "x", "P"),
+        };
+
+        var sorted = FindCallersTool.Sort(input);
+
+        Assert.Collection(sorted,
+            c => { Assert.Equal("a.cs", c.File); Assert.Equal(2, c.Line); },
+            c => { Assert.Equal("a.cs", c.File); Assert.Equal(9, c.Line); },
+            c => { Assert.Equal("b.cs", c.File); Assert.Equal(1, c.Line); });
+    }
+
+    [Fact]
+    public void BuildSummary_GroupsByProject()
+    {
+        var input = new List<CallerInfo>
+        {
+            new("Caller", "a.cs", 1, "x", "Foo"),
+            new("Caller", "a.cs", 2, "x", "Foo"),
+            new("Caller", "b.cs", 1, "x", "Bar"),
+        };
+
+        var summary = FindCallersTool.BuildSummary(input);
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"Foo\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"Bar\":1", json, StringComparison.Ordinal);
     }
 }

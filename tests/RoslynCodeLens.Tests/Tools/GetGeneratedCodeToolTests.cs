@@ -1,3 +1,4 @@
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
 
@@ -27,5 +28,23 @@ public class GetGeneratedCodeToolTests
     {
         var results = GetGeneratedCodeLogic.Execute(_loaded, _resolver, "NonExistentGenerator", null);
         Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Sort_OrdersByProjectThenFilePath()
+    {
+        var input = new List<GeneratedFileInfo>
+        {
+            new("z.g.cs", "Bar", null, Array.Empty<string>(), ""),
+            new("b.g.cs", "Foo", null, Array.Empty<string>(), ""),
+            new("a.g.cs", "Foo", null, Array.Empty<string>(), ""),
+        };
+
+        var sorted = GetGeneratedCodeTool.Sort(input);
+
+        Assert.Collection(sorted,
+            g => Assert.Equal("Bar", g.Project),
+            g => { Assert.Equal("Foo", g.Project); Assert.Equal("a.g.cs", g.FilePath); },
+            g => { Assert.Equal("Foo", g.Project); Assert.Equal("b.g.cs", g.FilePath); });
     }
 }

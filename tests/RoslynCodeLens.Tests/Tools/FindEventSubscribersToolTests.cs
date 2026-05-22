@@ -134,4 +134,22 @@ public class FindEventSubscribersToolTests
             Assert.NotEmpty(r.Project);
         }
     }
+
+    [Fact]
+    public void Sort_OrdersByFilePathThenLine()
+    {
+        var input = new List<EventSubscriberInfo>
+        {
+            new("E", "H", SubscriptionKind.Subscribe, "b.cs", 1, "x", "P", false),
+            new("E", "H", SubscriptionKind.Subscribe, "a.cs", 9, "x", "P", false),
+            new("E", "H", SubscriptionKind.Subscribe, "a.cs", 2, "x", "P", false),
+        };
+
+        var sorted = FindEventSubscribersTool.Sort(input);
+
+        Assert.Collection(sorted,
+            e => { Assert.Equal("a.cs", e.FilePath); Assert.Equal(2, e.Line); },
+            e => { Assert.Equal("a.cs", e.FilePath); Assert.Equal(9, e.Line); },
+            e => { Assert.Equal("b.cs", e.FilePath); Assert.Equal(1, e.Line); });
+    }
 }
