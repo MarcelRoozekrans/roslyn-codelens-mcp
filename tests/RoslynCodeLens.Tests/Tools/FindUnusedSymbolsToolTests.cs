@@ -20,15 +20,15 @@ public class FindUnusedSymbolsToolTests
     [Fact]
     public void FindUnusedSymbols_ReturnsResults()
     {
-        var results = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, null, false);
-        Assert.NotNull(results);
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, null, false);
+        Assert.NotNull(items);
     }
 
     [Fact]
     public void FindUnusedSymbols_ProjectFilter_FiltersResults()
     {
-        var results = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
-        Assert.All(results, r => Assert.Contains("TestLib", r.Project, StringComparison.Ordinal));
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.All(items, r => Assert.Contains("TestLib", r.Project, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -59,10 +59,46 @@ public class FindUnusedSymbolsToolTests
             new("Z", "Method", "a.cs", 3, "P"),
         };
 
-        var summary = FindUnusedSymbolsTool.BuildSummary(input);
+        var summary = FindUnusedSymbolsTool.BuildSummary(input, EmptyCounts());
         var json = System.Text.Json.JsonSerializer.Serialize(summary);
 
         Assert.Contains("\"Class\":2", json, StringComparison.Ordinal);
         Assert.Contains("\"Method\":1", json, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void BuildSummary_IncludesFilteredOutWithAllReasonKeys()
+    {
+        var items = new List<UnusedSymbolInfo>
+        {
+            new("X", "Class", "a.cs", 1, "P"),
+        };
+        var filteredCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["testMethod"] = 5,
+            ["testContainer"] = 2,
+            ["mcpTool"] = 8,
+            ["generated"] = 0,
+            ["composition"] = 0,
+            ["interop"] = 0,
+        };
+
+        var summary = FindUnusedSymbolsTool.BuildSummary(items, filteredCounts);
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"Class\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"testMethod\":5", json, StringComparison.Ordinal);
+        Assert.Contains("\"testContainer\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"mcpTool\":8", json, StringComparison.Ordinal);
+        Assert.Contains("\"generated\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"composition\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"interop\":0", json, StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyDictionary<string, int> EmptyCounts()
+        => new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            ["testMethod"] = 0, ["testContainer"] = 0, ["mcpTool"] = 0,
+            ["generated"] = 0, ["composition"] = 0, ["interop"] = 0,
+        };
 }

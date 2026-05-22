@@ -11,7 +11,8 @@ public static class FindUnusedSymbolsTool
 
     [McpServerTool(Name = "find_unused_symbols"),
      Description("Find potentially unused types and members (dead code detection). Checks public symbols for references across the solution. " +
-                 "Returns an envelope with items, totalCount, truncated, limit (default 500), and a byKind summary.")]
+                 "Filters out test methods, MCP tools, source-generator output, MEF-composed services, and interop-laid-out fields. " +
+                 "Returns an envelope with items, totalCount, truncated, limit (default 500), and a summary including byKind + filteredOut counts.")]
     public static ToolListResult<UnusedSymbolInfo> Execute(
         MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null,
@@ -20,10 +21,11 @@ public static class FindUnusedSymbolsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindUnusedSymbolsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project, includeInternal);
+        var (raw, filteredCounts) = FindUnusedSymbolsLogic.Execute(
+            manager.GetLoadedSolution(), manager.GetResolver(), project, includeInternal);
 
         var sorted = Sort(raw);
-        var summary = BuildSummary(raw);
+        var summary = BuildSummary(raw, filteredCounts);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit, summary);
     }
 
@@ -34,11 +36,24 @@ public static class FindUnusedSymbolsTool
             .ThenBy(u => u.Line)
             .ToList();
 
-    internal static object BuildSummary(IReadOnlyList<UnusedSymbolInfo> items)
+    internal static object BuildSummary(
+        IReadOnlyList<UnusedSymbolInfo> items,
+        IReadOnlyDictionary<string, int> filteredCounts)
     {
         var byKind = items
             .GroupBy(u => u.SymbolKind, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        return new { byKind };
+
+        var filteredOut = new
+        {
+            testMethod = filteredCounts.GetValueOrDefault("testMethod", 0),
+            testContainer = filteredCounts.GetValueOrDefault("testContainer", 0),
+            mcpTool = filteredCounts.GetValueOrDefault("mcpTool", 0),
+            generated = filteredCounts.GetValueOrDefault("generated", 0),
+            composition = filteredCounts.GetValueOrDefault("composition", 0),
+            interop = filteredCounts.GetValueOrDefault("interop", 0),
+        };
+
+        return new { byKind, filteredOut };
     }
 }

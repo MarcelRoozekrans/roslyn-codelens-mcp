@@ -15,7 +15,7 @@ public static class GetProjectHealthLogic
         var complexity = GetComplexityMetricsLogic.Execute(loaded, resolver, project, threshold: 10);
         var largeClasses = FindLargeClassesLogic.Execute(loaded, resolver, project, maxMembers: 20, maxLines: 500);
         var naming = FindNamingViolationsLogic.Execute(loaded, resolver, project);
-        var unused = FindUnusedSymbolsLogic.Execute(loaded, resolver, project, includeInternal: false);
+        var (unused, _) = FindUnusedSymbolsLogic.Execute(loaded, resolver, project, includeInternal: false);
         var reflection = FindReflectionUsageLogic.Execute(loaded, resolver, symbol: null);
         var async = FindAsyncViolationsLogic.Execute(loaded, resolver).Violations;
         var disposable = FindDisposableMisuseLogic.Execute(loaded, resolver).Violations;
