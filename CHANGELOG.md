@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.17.1...v1.18.0) (2026-05-22)
+
+
+### Features
+
+* uniform ToolListResult&lt;T&gt; envelope for all list-returning tools ([#189](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/189)) ([7539ffd](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/7539ffd6391efa7badf1bc67c7c4e7c2fffc044a))
+
 ## [1.17.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.17.0...v1.17.1) (2026-05-17)
 
 
