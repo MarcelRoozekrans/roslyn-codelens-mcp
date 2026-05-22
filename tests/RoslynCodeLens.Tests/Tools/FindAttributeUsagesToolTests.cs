@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -65,5 +66,40 @@ public class FindAttributeUsagesToolTests
 
         Assert.NotEmpty(results);
         Assert.Contains(results, r => r.TargetName.Contains("OldGreet", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Sort_OrdersByFileThenLine()
+    {
+        var input = new List<AttributeUsageInfo>
+        {
+            new("Obsolete", "method", "X", "b.cs", 1, "P"),
+            new("Obsolete", "method", "X", "a.cs", 9, "P"),
+            new("Obsolete", "method", "X", "a.cs", 2, "P"),
+        };
+
+        var sorted = FindAttributeUsagesTool.Sort(input);
+
+        Assert.Collection(sorted,
+            a => { Assert.Equal("a.cs", a.File); Assert.Equal(2, a.Line); },
+            a => { Assert.Equal("a.cs", a.File); Assert.Equal(9, a.Line); },
+            a => { Assert.Equal("b.cs", a.File); Assert.Equal(1, a.Line); });
+    }
+
+    [Fact]
+    public void BuildSummary_GroupsByProject()
+    {
+        var input = new List<AttributeUsageInfo>
+        {
+            new("Obsolete", "method", "X", "a.cs", 1, "Foo"),
+            new("Obsolete", "method", "Y", "a.cs", 2, "Foo"),
+            new("Obsolete", "method", "Z", "b.cs", 1, "Bar"),
+        };
+
+        var summary = FindAttributeUsagesTool.BuildSummary(input);
+        var json = System.Text.Json.JsonSerializer.Serialize(summary);
+
+        Assert.Contains("\"Foo\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"Bar\":1", json, StringComparison.Ordinal);
     }
 }
