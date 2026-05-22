@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
 
@@ -35,5 +36,23 @@ public class FindLargeClassesToolTests
     {
         var results = FindLargeClassesLogic.Execute(_loaded, _resolver, "TestLib2", 1, 1);
         Assert.All(results, r => Assert.Equal("TestLib2", r.Project));
+    }
+
+    [Fact]
+    public void Sort_OrdersBySizeDesc()
+    {
+        var input = new List<LargeClassInfo>
+        {
+            new("Small", 5,   50,   "a.cs", 1, "P"),
+            new("Huge",  100, 1000, "b.cs", 1, "P"),
+            new("Mid",   30,  300,  "c.cs", 1, "P"),
+        };
+
+        var sorted = FindLargeClassesTool.Sort(input);
+
+        Assert.Collection(sorted,
+            c => Assert.Equal("Huge", c.TypeName),
+            c => Assert.Equal("Mid", c.TypeName),
+            c => Assert.Equal("Small", c.TypeName));
     }
 }
