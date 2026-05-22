@@ -95,6 +95,66 @@ public class FindUnusedSymbolsToolTests
         Assert.Contains("\"interop\":0", json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FilteredOut_IncludesXUnitFixtureTestMethods()
+    {
+        // XUnitFixture has [Fact]-annotated methods. None should appear in items;
+        // they should be counted under filteredOut.testMethod or testContainer.
+        var (items, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "XUnitFixture", false);
+
+        var fixtureItems = items.Where(i => i.Project == "XUnitFixture").ToList();
+        Assert.True(
+            fixtureItems.All(i => !i.SymbolName.Contains("Test", StringComparison.Ordinal)),
+            $"XUnitFixture test methods leaked into unused list: {string.Join(",", fixtureItems.Select(i => i.SymbolName))}");
+
+        var totalFiltered = counts["testMethod"] + counts["testContainer"];
+        Assert.True(totalFiltered > 0,
+            $"Expected test-related filtering, got counts={string.Join(",", counts.Select(kv => $"{kv.Key}={kv.Value}"))}");
+    }
+
+    [Fact]
+    public void FilteredOut_FixtureProject_HasGeneratedCount()
+    {
+        var (_, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.True(counts["generated"] >= 1, "Expected GeneratedClass / GeneratedMember to be filtered");
+    }
+
+    [Fact]
+    public void FilteredOut_FixtureProject_HasCompositionCount()
+    {
+        var (_, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.True(counts["composition"] >= 1, "Expected ExportedService / ImportHost to be filtered");
+    }
+
+    [Fact]
+    public void FilteredOut_FixtureProject_HasInteropCount()
+    {
+        var (_, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.True(counts["interop"] >= 1, "Expected InteropStruct fields to be filtered");
+    }
+
+    [Fact]
+    public void GeneratedClass_DoesNotAppearAsUnused()
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.DoesNotContain(items,
+            i => i.SymbolName.Contains("GeneratedClass", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void McpToolExecuteMethods_NeverFlaggedUnused()
+    {
+        var (items, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.DoesNotContain(items,
+            i => i.SymbolName.Contains("SyntheticMcpTool", StringComparison.Ordinal));
+        Assert.DoesNotContain(items,
+            i => i.SymbolName.EndsWith(".Execute", StringComparison.Ordinal)
+              && i.SymbolName.Contains("Synthetic", StringComparison.Ordinal));
+
+        Assert.True(counts["mcpTool"] >= 1, "Expected SyntheticMcpTool to be filtered");
+    }
+
     private static IReadOnlyDictionary<string, int> EmptyCounts()
         => new Dictionary<string, int>(StringComparer.Ordinal)
         {
