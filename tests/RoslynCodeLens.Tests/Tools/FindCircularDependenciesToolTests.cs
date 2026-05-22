@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
 
@@ -28,5 +29,23 @@ public class FindCircularDependenciesToolTests
     {
         var results = FindCircularDependenciesLogic.Execute(_loaded, _resolver, "invalid");
         Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Sort_OrdersByCycleLengthDesc()
+    {
+        var input = new List<CircularDependency>
+        {
+            new("project", new[] { "A", "B" }),
+            new("project", new[] { "A", "B", "C", "D" }),
+            new("project", new[] { "A", "B", "C" }),
+        };
+
+        var sorted = FindCircularDependenciesTool.Sort(input);
+
+        Assert.Collection(sorted,
+            c => Assert.Equal(4, c.Cycle.Count),
+            c => Assert.Equal(3, c.Cycle.Count),
+            c => Assert.Equal(2, c.Cycle.Count));
     }
 }
