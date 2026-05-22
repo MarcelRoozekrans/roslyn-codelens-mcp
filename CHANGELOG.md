@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.18.0...v1.19.0) (2026-05-22)
+
+
+### Features
+
+* filter false positives from find_unused_symbols (test/MCP/generated/MEF/interop) ([#191](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/191)) ([c6d204f](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/c6d204fd1417a6e3e1d4bba0ea22a1e6888fbe69))
+
 ## [1.18.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.17.1...v1.18.0) (2026-05-22)
 
 
