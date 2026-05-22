@@ -62,10 +62,10 @@ namespace TestLib.FilterFixtures
 
     // --- Interop filter targets ---
 
-    [StructLayout(LayoutKind.Explicit)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct InteropStruct
     {
-        [FieldOffset(0)] public int Header;
+        [MarshalAs(UnmanagedType.I4)] public int Header;
         public int PlainFieldInLaidOutStruct;
     }
 
