@@ -6,11 +6,107 @@ namespace RoslynCodeLens.Tools;
 
 public static class FindUnusedSymbolsLogic
 {
-    public static IReadOnlyList<UnusedSymbolInfo> Execute(LoadedSolution loaded, SymbolResolver resolver, string? project, bool includeInternal)
+    public static (IReadOnlyList<UnusedSymbolInfo> Items, IReadOnlyDictionary<string, int> FilteredCounts) Execute(
+        LoadedSolution loaded, SymbolResolver resolver, string? project, bool includeInternal)
     {
         var referencedSymbols = CollectReferencedSymbols(loaded);
-        return FindUnusedTypes(resolver, referencedSymbols, project, includeInternal);
+        var (items, counts) = FindUnusedTypesWithFilterCounts(resolver, referencedSymbols, project, includeInternal);
+        return (items, counts);
     }
+
+    private static (List<UnusedSymbolInfo> items, Dictionary<string, int> counts)
+        FindUnusedTypesWithFilterCounts(
+            SymbolResolver resolver, HashSet<ISymbol> referencedSymbols, string? project, bool includeInternal)
+    {
+        var results = new List<UnusedSymbolInfo>();
+        var counts = NewCounts();
+
+        foreach (var type in resolver.AllTypes)
+        {
+            if (!type.Locations.Any(l => l.IsInSource)) continue;
+
+            var projectName = resolver.GetProjectName(type);
+            if (project != null && !projectName.Equals(project, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (ShouldSkipType(type, includeInternal)) continue;
+
+            var typeReason = DeadCodeFilters.Classify(type);
+            if (typeReason != DeadCodeFilters.Reason.None)
+            {
+                counts[KeyFor(typeReason)]++;
+                continue;
+            }
+
+            if (!referencedSymbols.Contains(type))
+            {
+                var (file, line) = resolver.GetFileAndLine(type);
+                results.Add(new UnusedSymbolInfo(
+                    type.ToDisplayString(), type.TypeKind.ToString(),
+                    file, line, projectName, resolver.IsGenerated(file)));
+                continue;
+            }
+
+            CollectUnusedMembers(type, referencedSymbols, includeInternal, projectName, resolver, results, counts);
+        }
+
+        return (results, counts);
+    }
+
+    private static void CollectUnusedMembers(
+        INamedTypeSymbol type, HashSet<ISymbol> referencedSymbols, bool includeInternal,
+        string projectName, SymbolResolver resolver, List<UnusedSymbolInfo> results,
+        Dictionary<string, int> counts)
+    {
+        foreach (var member in type.GetMembers())
+        {
+            if (ShouldSkipMember(member, type, includeInternal)) continue;
+
+            var memberReason = DeadCodeFilters.Classify(member);
+            if (memberReason != DeadCodeFilters.Reason.None)
+            {
+                counts[KeyFor(memberReason)]++;
+                continue;
+            }
+
+            if (!referencedSymbols.Contains(member))
+            {
+                var (file, line) = resolver.GetFileAndLine(member);
+                var kind = member switch
+                {
+                    IMethodSymbol => "Method",
+                    IPropertySymbol => "Property",
+                    IFieldSymbol => "Field",
+                    IEventSymbol => "Event",
+                    _ => member.Kind.ToString(),
+                };
+                var memberSymbol = $"{type.ToDisplayString()}.{member.Name}";
+                results.Add(new UnusedSymbolInfo(
+                    memberSymbol, kind, file, line, projectName, resolver.IsGenerated(file)));
+            }
+        }
+    }
+
+    private static Dictionary<string, int> NewCounts() => new(StringComparer.Ordinal)
+    {
+        ["testMethod"] = 0,
+        ["testContainer"] = 0,
+        ["mcpTool"] = 0,
+        ["generated"] = 0,
+        ["composition"] = 0,
+        ["interop"] = 0,
+    };
+
+    private static string KeyFor(DeadCodeFilters.Reason reason) => reason switch
+    {
+        DeadCodeFilters.Reason.TestMethod => "testMethod",
+        DeadCodeFilters.Reason.TestContainer => "testContainer",
+        DeadCodeFilters.Reason.McpTool => "mcpTool",
+        DeadCodeFilters.Reason.Generated => "generated",
+        DeadCodeFilters.Reason.Composition => "composition",
+        DeadCodeFilters.Reason.Interop => "interop",
+        _ => throw new ArgumentOutOfRangeException(nameof(reason)),
+    };
 
     private static HashSet<ISymbol> CollectReferencedSymbols(LoadedSolution loaded)
     {
@@ -51,64 +147,6 @@ public static class FindUnusedSymbolsLogic
         }
 
         return referencedSymbols;
-    }
-
-    private static List<UnusedSymbolInfo> FindUnusedTypes(
-        SymbolResolver resolver, HashSet<ISymbol> referencedSymbols, string? project, bool includeInternal)
-    {
-        var results = new List<UnusedSymbolInfo>();
-
-        foreach (var type in resolver.AllTypes)
-        {
-            if (!type.Locations.Any(l => l.IsInSource))
-                continue;
-
-            var projectName = resolver.GetProjectName(type);
-
-            if (project != null &&
-                !projectName.Equals(project, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (ShouldSkipType(type, includeInternal))
-                continue;
-
-            if (!referencedSymbols.Contains(type))
-            {
-                var (file, line) = resolver.GetFileAndLine(type);
-                results.Add(new UnusedSymbolInfo(type.ToDisplayString(), type.TypeKind.ToString(), file, line, projectName, resolver.IsGenerated(file)));
-                continue;
-            }
-
-            CollectUnusedMembers(type, referencedSymbols, includeInternal, projectName, resolver, results);
-        }
-
-        return results;
-    }
-
-    private static void CollectUnusedMembers(
-        INamedTypeSymbol type, HashSet<ISymbol> referencedSymbols, bool includeInternal,
-        string projectName, SymbolResolver resolver, List<UnusedSymbolInfo> results)
-    {
-        foreach (var member in type.GetMembers())
-        {
-            if (ShouldSkipMember(member, type, includeInternal))
-                continue;
-
-            if (!referencedSymbols.Contains(member))
-            {
-                var (file, line) = resolver.GetFileAndLine(member);
-                var kind = member switch
-                {
-                    IMethodSymbol => "Method",
-                    IPropertySymbol => "Property",
-                    IFieldSymbol => "Field",
-                    IEventSymbol => "Event",
-                    _ => member.Kind.ToString()
-                };
-                var memberSymbol = $"{type.ToDisplayString()}.{member.Name}";
-                results.Add(new UnusedSymbolInfo(memberSymbol, kind, file, line, projectName, resolver.IsGenerated(file)));
-            }
-        }
     }
 
     private static bool ShouldSkipType(INamedTypeSymbol type, bool includeInternal)

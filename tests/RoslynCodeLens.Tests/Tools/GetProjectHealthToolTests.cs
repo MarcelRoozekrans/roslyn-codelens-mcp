@@ -68,7 +68,7 @@ public class GetProjectHealthToolTests
     [Fact]
     public void Counts_UnusedSymbolsMatchesUnderlyingTool()
     {
-        var direct = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        var (direct, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
         var result = GetProjectHealthLogic.Execute(_loaded, _resolver, project: "TestLib", hotspotsPerDimension: 5);
 
         var entry = Assert.Single(result.Projects);

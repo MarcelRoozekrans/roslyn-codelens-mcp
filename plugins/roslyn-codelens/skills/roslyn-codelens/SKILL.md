@@ -25,7 +25,8 @@ Tools that include a `summary` aggregate:
 
 - `get_diagnostics` — `{ error, warning, info, hidden }` counts
 - `find_references`, `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
-- `search_symbols`, `find_unused_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
+- `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
+- `find_unused_symbols` — `{ byKind: {...}, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
 - `find_naming_violations` — `{ byRule: {...} }`
 - `get_complexity_metrics` — `{ max, avg, overThreshold }`
 
@@ -195,7 +196,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - Inline variable → *"Inline variable"*
 
 ### Code Quality Analysis
-- `find_unused_symbols` — dead code (reference-based).
+- `find_unused_symbols` — dead code (reference-based). Auto-filters test methods, MCP tool entry points, source-generator output, MEF-composed services, and interop-laid-out fields; counts surface in `summary.filteredOut`.
 - `get_complexity_metrics` — cyclomatic complexity per method.
 - `find_naming_violations` — .NET naming conventions.
 - `find_async_violations` — Detects sync-over-async (`.Result`/`.Wait()`/`GetAwaiter().GetResult()`), `async void` outside event handlers, missing awaits in async methods, and fire-and-forget tasks. Severity error/warning per violation. Static analysis; no runtime data.
