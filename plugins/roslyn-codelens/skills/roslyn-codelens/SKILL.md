@@ -381,8 +381,27 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `get_di_registrations` | No — source only | | |
 | `get_nuget_dependencies` | Partial — lists referenced packages, not assemblies directly | Use `inspect_external_assembly` for assembly API | |
 | `find_reflection_usage` | No — source only | | |
+| `find_async_violations` | No — source only | | |
+| `find_disposable_misuse` | No — source only | | |
+| `find_obsolete_usage` | No — source only — but `[Obsolete]` source/metadata attribute type both detected | | |
+| `find_god_objects` | No — source only | | |
+| `find_breaking_changes` | Partial — current side is source; baseline can be a `.dll` from metadata | | |
+| `find_event_subscribers` | Yes — accepts metadata event symbols (e.g. `System.Diagnostics.Process.Exited`); reports source `+=`/`-=` sites | | |
+| `find_tests_for_symbol` | No — production symbol must be source (test methods are source too) | | |
+| `find_uncovered_symbols` | No — source only | | |
+| `generate_test_skeleton` | No — source only | | |
+| `get_call_graph` | No — source only | | |
+| `get_overloads` | Yes — source + metadata overloads, full parameter detail | | |
+| `get_operators` | Yes — source + metadata operators and conversions | | |
+| `get_project_dependencies` | N/A — project-level graph | | |
+| `get_project_health` | No — source only | | |
+| `get_public_api_surface` | No — source only (production projects) | | Use `inspect_external_assembly` for external assembly surfaces |
+| `get_test_summary` | No — source only (test projects) | | |
 | `list_solutions` | N/A | | |
 | `set_active_solution` | N/A | | |
 | `load_solution` | N/A | | |
 | `unload_solution` | N/A | | |
 | `rebuild_solution` | N/A | | |
+| `trust_solution` | N/A — security/lifecycle | | |
+| `list_trusted_paths` | N/A — security/lifecycle | | |
+| `revoke_trust` | N/A — security/lifecycle | | |
