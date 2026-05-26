@@ -15,6 +15,7 @@ public static class GetCodeActionsLogic
 
         foreach (var project in loaded.Solution.Projects)
         {
+            ct.ThrowIfCancellationRequested();
             foreach (var doc in project.Documents)
             {
                 if (doc.FilePath != null &&

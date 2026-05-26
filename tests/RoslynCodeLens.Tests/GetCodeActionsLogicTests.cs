@@ -38,4 +38,19 @@ public class GetCodeActionsLogicTests
 
         Assert.Empty(result);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_PreCancelledToken_ThrowsOperationCancelled()
+    {
+        var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib", StringComparison.Ordinal));
+        var greeterPath = project.Documents.First(d => string.Equals(d.Name, "Greeter.cs", StringComparison.Ordinal)).FilePath!;
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await GetCodeActionsLogic.ExecuteAsync(
+                _loaded, greeterPath, line: 8, column: 5,
+                endLine: null, endColumn: null, cts.Token));
+    }
 }

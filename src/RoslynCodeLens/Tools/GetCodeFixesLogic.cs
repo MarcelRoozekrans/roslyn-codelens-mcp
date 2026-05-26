@@ -17,6 +17,7 @@ public static class GetCodeFixesLogic
 
         foreach (var project in loaded.Solution.Projects)
         {
+            ct.ThrowIfCancellationRequested();
             foreach (var doc in project.Documents)
             {
                 if (doc.FilePath != null &&
@@ -66,6 +67,7 @@ public static class GetCodeFixesLogic
 
         for (var i = 0; i < matchingDiagnostics.Count; i++)
         {
+            ct.ThrowIfCancellationRequested();
             var diagnostic = matchingDiagnostics[i];
             var fixes = await CodeFixRunner.GetFixesAsync(targetProject, diagnostic, ct).ConfigureAwait(false);
             results.AddRange(fixes);

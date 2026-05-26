@@ -123,6 +123,26 @@ public class GetDiagnosticsToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PreCancelledToken_ThrowsOperationCancelled()
+    {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        trustStore.AddSessionTrust(_loaded.Solution.FilePath!);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist(
+            "nuget-and-solution-bin",
+            RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(),
+            dotnetSdkRoot: null);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await GetDiagnosticsLogic.ExecuteAsync(
+                _loaded, _resolver, null, null, includeAnalyzers: true,
+                trustStore, allowlist, cts.Token));
+    }
+
+    [Fact]
     public async Task GetDiagnostics_TrustedSolution_RunsAnalyzers()
     {
         using var tempFile = new TempTrustFile();

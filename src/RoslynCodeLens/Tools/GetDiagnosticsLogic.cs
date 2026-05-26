@@ -41,6 +41,8 @@ public static class GetDiagnosticsLogic
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
+            ct.ThrowIfCancellationRequested();
+
             var projectName = resolver.GetProjectName(projectId);
 
             if (project != null &&

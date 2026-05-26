@@ -66,7 +66,7 @@ public static class CodeActionRunner
 
             return new CodeActionResult(true, matchedAction.Title, edits);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new CodeActionResult(false, actionTitle, [],
                 $"Failed to apply action: {ex.Message}");
@@ -91,7 +91,7 @@ public static class CodeActionRunner
                 var context = new CodeRefactoringContext(document, span, action => actions.Add(action), ct);
                 await provider.ComputeRefactoringsAsync(context).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await Console.Error.WriteLineAsync(
                     $"[roslyn-codelens] Refactoring provider failed ({provider.GetType().Name}): {ex.Message}")
@@ -139,7 +139,7 @@ public static class CodeActionRunner
                         for (var i = countBefore; i < actions.Count; i++)
                             codeFixTitles.Add(actions[i].Title);
                     }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         await Console.Error.WriteLineAsync(
                             $"[roslyn-codelens] CodeFix provider failed ({provider.GetType().Name}): {ex.Message}")

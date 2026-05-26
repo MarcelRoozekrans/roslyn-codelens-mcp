@@ -47,6 +47,25 @@ public class GetCodeFixesToolTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PreCancelledToken_ThrowsOperationCancelled()
+    {
+        var trustStore = new RoslynCodeLens.Security.TrustStore(Path.Combine(Path.GetTempPath(), $"trust-{Guid.NewGuid():N}.json"));
+        trustStore.AddSessionTrust(_loaded.Solution.FilePath!);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist(
+            "all",
+            RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(),
+            dotnetSdkRoot: null);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await GetCodeFixesLogic.ExecuteAsync(
+                _loaded, _resolver, "FAKE999", "NonExistent.cs", 1,
+                trustStore, allowlist, cts.Token));
+    }
+
+    [Fact]
     public async Task GetCodeFixes_UntrustedSolution_ThrowsSolutionNotTrusted()
     {
         // No trust added — but a diagnostic must actually exist at the call site,
