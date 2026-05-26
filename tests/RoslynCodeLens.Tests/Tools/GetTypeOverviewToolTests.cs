@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -33,11 +34,12 @@ public class GetTypeOverviewToolTests
     }
 
     [Fact]
-    public void Execute_ForUnknownType_ReturnsNull()
+    public void Execute_ForUnknownType_ThrowsSymbolNotFound()
     {
-        var result = GetTypeOverviewLogic.Execute(_loaded, _resolver, _metadata, "NonExistentType99");
+        var ex = Assert.Throws<McpToolException>(() =>
+            GetTypeOverviewLogic.Execute(_loaded, _resolver, _metadata, "NonExistentType99"));
 
-        Assert.Null(result);
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
 
     [Fact]

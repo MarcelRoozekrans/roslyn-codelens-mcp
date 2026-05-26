@@ -97,12 +97,13 @@ public class GetDiagnosticsToolTests
         var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
         var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist("nuget-and-solution-bin", RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(), dotnetSdkRoot: null);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var ex = await Assert.ThrowsAsync<McpToolException>(async () =>
         {
             await GetDiagnosticsLogic.ExecuteAsync(
                 _loaded, _resolver, null, null, includeAnalyzers: true,
                 trustStore, allowlist, CancellationToken.None);
         });
+        Assert.Equal(ToolErrorCode.SolutionNotTrusted, ex.Code);
         Assert.Contains("not trusted", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("trust_solution", ex.Message, StringComparison.Ordinal);
     }
@@ -119,6 +120,26 @@ public class GetDiagnosticsToolTests
             trustStore, allowlist, CancellationToken.None);
 
         Assert.All(results, d => Assert.Equal("compiler", d.Source));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PreCancelledToken_ThrowsOperationCancelled()
+    {
+        using var tempFile = new TempTrustFile();
+        var trustStore = new RoslynCodeLens.Security.TrustStore(tempFile.Path);
+        trustStore.AddSessionTrust(_loaded.Solution.FilePath!);
+        var allowlist = new RoslynCodeLens.Security.AnalyzerAllowlist(
+            "nuget-and-solution-bin",
+            RoslynCodeLens.Security.AnalyzerAllowlist.DefaultNugetGlobal(),
+            dotnetSdkRoot: null);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await GetDiagnosticsLogic.ExecuteAsync(
+                _loaded, _resolver, null, null, includeAnalyzers: true,
+                trustStore, allowlist, cts.Token));
     }
 
     [Fact]

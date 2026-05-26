@@ -11,15 +11,13 @@ public static class GetTypeOverviewLogic
     /// list is empty by construction (the compiler does not attach diagnostics to
     /// closed-source assemblies) and derived types are source-only.
     /// </summary>
-    public static TypeOverview? Execute(
+    public static TypeOverview Execute(
         LoadedSolution loaded,
         SymbolResolver resolver,
         MetadataSymbolResolver metadata,
         string typeName)
     {
         var context = GetSymbolContextLogic.Execute(loaded, resolver, metadata, typeName);
-        if (context == null)
-            return null;
 
         var hierarchy = GetTypeHierarchyLogic.Execute(resolver, metadata, typeName);
 

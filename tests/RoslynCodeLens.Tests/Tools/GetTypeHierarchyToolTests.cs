@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -50,11 +51,12 @@ public class GetTypeHierarchyToolTests
     }
 
     [Fact]
-    public void GetHierarchy_ForUnknownType_ReturnsNull()
+    public void GetHierarchy_ForUnknownType_ThrowsSymbolNotFound()
     {
-        var result = GetTypeHierarchyLogic.Execute(_resolver, _metadata, "NonExistentType");
+        var ex = Assert.Throws<McpToolException>(() =>
+            GetTypeHierarchyLogic.Execute(_resolver, _metadata, "NonExistentType"));
 
-        Assert.Null(result);
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
 
     [Fact]

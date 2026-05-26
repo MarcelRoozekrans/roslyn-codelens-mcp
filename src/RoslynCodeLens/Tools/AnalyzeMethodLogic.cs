@@ -7,11 +7,11 @@ namespace RoslynCodeLens.Tools;
 
 public static class AnalyzeMethodLogic
 {
-    public static MethodAnalysis? Execute(LoadedSolution loaded, SymbolResolver resolver, MetadataSymbolResolver metadata, string symbol)
+    public static MethodAnalysis Execute(LoadedSolution loaded, SymbolResolver resolver, MetadataSymbolResolver metadata, string symbol)
     {
         var methods = resolver.FindMethods(symbol);
         if (methods.Count == 0)
-            return null;
+            throw new McpToolException(ToolErrorCode.SymbolNotFound, $"Method '{symbol}' not found.", new { symbol });
 
         var target = methods[0];
         var (file, line) = resolver.GetFileAndLine(target);

@@ -28,17 +28,21 @@ public static class GetDiagnosticsLogic
         var solutionPath = loaded.Solution.FilePath;
         if (solutionPath is null || !trustStore.IsTrusted(solutionPath))
         {
-            throw new InvalidOperationException(
+            throw new McpToolException(
+                ToolErrorCode.SolutionNotTrusted,
                 $"Solution '{solutionPath ?? "<unknown>"}' is not trusted for analyzer execution. " +
                 $"Analyzer DLLs run as in-process code, so the user must explicitly authorize them. " +
                 $"Ask the user, then call the 'trust_solution' tool with this path. " +
-                $"To get compiler-only diagnostics, retry with includeAnalyzers=false.");
+                $"To get compiler-only diagnostics, retry with includeAnalyzers=false.",
+                new { solutionPath });
         }
 
         var minSeverity = ParseMinSeverity(severity);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
+            ct.ThrowIfCancellationRequested();
+
             var projectName = resolver.GetProjectName(projectId);
 
             if (project != null &&

@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -41,10 +42,11 @@ public class AnalyzeMethodToolTests
     }
 
     [Fact]
-    public void Execute_ForUnknownMethod_ReturnsNull()
+    public void Execute_ForUnknownMethod_ThrowsSymbolNotFound()
     {
-        var result = AnalyzeMethodLogic.Execute(_loaded, _resolver, _metadata, "NoSuchClass.NoSuchMethod");
+        var ex = Assert.Throws<McpToolException>(() =>
+            AnalyzeMethodLogic.Execute(_loaded, _resolver, _metadata, "NoSuchClass.NoSuchMethod"));
 
-        Assert.Null(result);
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
 }

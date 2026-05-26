@@ -17,6 +17,7 @@ public static class GetCodeFixesLogic
 
         foreach (var project in loaded.Solution.Projects)
         {
+            ct.ThrowIfCancellationRequested();
             foreach (var doc in project.Documents)
             {
                 if (doc.FilePath != null &&
@@ -39,10 +40,12 @@ public static class GetCodeFixesLogic
         var solutionPath = loaded.Solution.FilePath;
         if (solutionPath is null || !trustStore.IsTrusted(solutionPath))
         {
-            throw new InvalidOperationException(
+            throw new McpToolException(
+                ToolErrorCode.SolutionNotTrusted,
                 $"Solution '{solutionPath ?? "<unknown>"}' is not trusted for analyzer execution. " +
                 $"'get_code_fixes' loads analyzer DLLs to discover available fixes — these run as in-process code. " +
-                $"Ask the user, then call the 'trust_solution' tool with this path.");
+                $"Ask the user, then call the 'trust_solution' tool with this path.",
+                new { solutionPath });
         }
 
         var allDiagnostics = compilation.GetDiagnostics()
@@ -64,6 +67,7 @@ public static class GetCodeFixesLogic
 
         for (var i = 0; i < matchingDiagnostics.Count; i++)
         {
+            ct.ThrowIfCancellationRequested();
             var diagnostic = matchingDiagnostics[i];
             var fixes = await CodeFixRunner.GetFixesAsync(targetProject, diagnostic, ct).ConfigureAwait(false);
             results.AddRange(fixes);

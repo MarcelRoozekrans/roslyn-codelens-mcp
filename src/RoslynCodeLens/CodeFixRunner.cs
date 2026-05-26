@@ -26,6 +26,7 @@ public static class CodeFixRunner
 
         for (var i = 0; i < providers.Count; i++)
         {
+            ct.ThrowIfCancellationRequested();
             var provider = providers[i];
             var actions = new List<CodeAction>();
             var context = new CodeFixContext(document, diagnostic,
@@ -35,7 +36,7 @@ public static class CodeFixRunner
             {
                 await provider.RegisterCodeFixesAsync(context).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await Console.Error.WriteLineAsync($"[roslyn-codelens] CodeFix registration failed ({provider.GetType().Name}): {ex}").ConfigureAwait(false);
                 continue;

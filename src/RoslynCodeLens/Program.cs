@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
+using ModelContextProtocol.Server;
 using RoslynCodeLens;
 using RoslynCodeLens.Security;
 
@@ -45,5 +46,17 @@ builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
+
+// Wrap every registered tool with StructuredErrorToolWrapper so thrown exceptions
+// surface as CallToolResult { IsError = true } carrying structured JSON.
+// OperationCanceledException intentionally bubbles unchanged.
+builder.Services.PostConfigure<McpServerOptions>(options =>
+{
+    var coll = options.ToolCollection;
+    if (coll is null) return;
+    var wrapped = coll.Select(t => (McpServerTool)new StructuredErrorToolWrapper(t)).ToList();
+    coll.Clear();
+    foreach (var t in wrapped) coll.Add(t);
+});
 
 await builder.Build().RunAsync().ConfigureAwait(false);

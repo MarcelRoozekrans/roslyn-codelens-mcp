@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
 
@@ -34,11 +35,12 @@ public class GetFileOverviewToolTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_InvalidFile_ReturnsNull()
+    public async Task ExecuteAsync_InvalidFile_ThrowsFileNotFound()
     {
-        var result = await GetFileOverviewLogic.ExecuteAsync(
-            _loaded, _resolver, "nonexistent.cs", CancellationToken.None);
+        var ex = await Assert.ThrowsAsync<McpToolException>(() =>
+            GetFileOverviewLogic.ExecuteAsync(
+                _loaded, _resolver, "nonexistent.cs", CancellationToken.None));
 
-        Assert.Null(result);
+        Assert.Equal(ToolErrorCode.FileNotFound, ex.Code);
     }
 }

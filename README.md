@@ -105,6 +105,30 @@ Tools that include a `summary` aggregate today:
 
 Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) return their bespoke shape directly — the envelope only wraps list-returning tools.
 
+## Error responses
+
+When a tool can't proceed (symbol not resolved, solution not trusted, file not found, ambiguous match, etc.), the response is an `isError: true` content block carrying a structured JSON body:
+
+```json
+{
+  "code": "SolutionNotTrusted",
+  "message": "Solution 'Foo.sln' is not trusted for analyzer execution. ...",
+  "details": { "solutionPath": "C:\\Foo.sln" }
+}
+```
+
+Error codes (switch on `code` to handle each):
+
+- `SymbolNotFound` — type / method / property could not be resolved.
+- `SolutionNotTrusted` — `get_diagnostics` or `get_code_fixes` requested analyzers but the solution hasn't been authorized via `trust_solution`.
+- `AmbiguousMatch` — `set_active_solution` / `unload_solution` matched multiple solutions; `details.matches` lists them.
+- `FileNotFound` — file path or baseline doesn't exist (or isn't in any loaded project).
+- `ProjectNotFound` — solution name didn't match any loaded solution.
+- `InvalidArgument` — caller-supplied input was malformed, unsupported, or out of range.
+- `Internal` — unexpected error not modeled above; `message` carries the underlying exception text.
+
+**Cancellation:** the MCP framework's native cancellation is honored. Cancelling a `tools/call` request mid-flight terminates the operation; long-running tools (`get_diagnostics` with analyzers, `get_code_actions`, `apply_code_action`, `get_code_fixes`) check the token at hot-loop boundaries.
+
 ## External Assemblies
 
 Metadata-origin symbols (from NuGet packages and referenced assemblies) are first-class citizens:

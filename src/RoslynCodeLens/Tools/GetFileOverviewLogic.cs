@@ -6,7 +6,7 @@ namespace RoslynCodeLens.Tools;
 
 public static class GetFileOverviewLogic
 {
-    public static async Task<FileOverview?> ExecuteAsync(
+    public static async Task<FileOverview> ExecuteAsync(
         LoadedSolution loaded, SymbolResolver resolver, string filePath, CancellationToken ct)
     {
         var normalizedPath = Path.GetFullPath(filePath);
@@ -29,7 +29,7 @@ public static class GetFileOverviewLogic
         }
 
         if (targetDocument == null || targetProject == null)
-            return null;
+            throw new McpToolException(ToolErrorCode.FileNotFound, $"File '{filePath}' not found in any loaded project.", new { filePath });
 
         // Types defined in this file
         var syntaxTree = await targetDocument.GetSyntaxTreeAsync(ct).ConfigureAwait(false);

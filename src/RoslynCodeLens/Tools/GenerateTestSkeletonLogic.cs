@@ -17,7 +17,10 @@ public static class GenerateTestSkeletonLogic
     {
         var symbols = resolver.FindSymbols(symbol);
         if (symbols.Count == 0)
-            throw new InvalidOperationException($"Symbol not found: {symbol}");
+            throw new McpToolException(
+                ToolErrorCode.SymbolNotFound,
+                $"Symbol not found: {symbol}",
+                new { symbol });
 
         var first = symbols[0];
         INamedTypeSymbol targetType;
@@ -33,14 +36,18 @@ public static class GenerateTestSkeletonLogic
                 targetMethods = new List<IMethodSymbol> { method };
                 break;
             default:
-                throw new InvalidOperationException(
-                    $"Symbol must be a type or method, got {first.Kind}: {symbol}");
+                throw new McpToolException(
+                    ToolErrorCode.InvalidArgument,
+                    $"Symbol must be a type or method, got {first.Kind}: {symbol}",
+                    new { symbol, kind = first.Kind.ToString() });
         }
 
         var sourceTree = targetType.Locations.FirstOrDefault(l => l.IsInSource)?.SourceTree;
         if (sourceTree is not null && GeneratedCodeDetector.IsGenerated(sourceTree))
-            throw new InvalidOperationException(
-                $"Symbol '{symbol}' is in generated code; refusing to generate a test skeleton.");
+            throw new McpToolException(
+                ToolErrorCode.InvalidArgument,
+                $"Symbol '{symbol}' is in generated code; refusing to generate a test skeleton.",
+                new { symbol });
 
         var fw = ResolveFramework(loaded, framework);
         var todoNotes = new List<string>();
@@ -82,8 +89,10 @@ public static class GenerateTestSkeletonLogic
                 "xunit" => TestFramework.XUnit,
                 "nunit" => TestFramework.NUnit,
                 "mstest" => TestFramework.MSTest,
-                _ => throw new InvalidOperationException(
-                    $"Unknown framework override '{overrideName}'. Use xunit, nunit, or mstest."),
+                _ => throw new McpToolException(
+                    ToolErrorCode.InvalidArgument,
+                    $"Unknown framework override '{overrideName}'. Use xunit, nunit, or mstest.",
+                    new { framework = overrideName }),
             };
         }
 

@@ -13,7 +13,7 @@ public static class GetTypeHierarchyLogic
     /// of a metadata interface will only be listed when they live in the loaded
     /// solution's source.
     /// </summary>
-    public static TypeHierarchy? Execute(
+    public static TypeHierarchy Execute(
         SymbolResolver resolver, MetadataSymbolResolver metadata, string symbol)
     {
         INamedTypeSymbol? target = null;
@@ -32,7 +32,7 @@ public static class GetTypeHierarchyLogic
         }
 
         if (target == null)
-            return null;
+            throw new McpToolException(ToolErrorCode.SymbolNotFound, $"Symbol '{symbol}' not found.", new { symbol });
 
         var bases = CollectBaseTypes(target, resolver);
         var interfaces = CollectInterfaces(target, resolver);

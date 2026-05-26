@@ -61,10 +61,12 @@ public sealed class MultiSolutionManager : IDisposable
             string? key;
             lock (_lock) { key = _activeKey; }
             if (key == null || !_managers.TryGetValue(key, out var m))
-                throw new InvalidOperationException(
+                throw new McpToolException(
+                    ToolErrorCode.InvalidArgument,
                     key == null
                         ? "No solution loaded. Pass a .sln/.slnx path as argument."
-                        : $"Active solution key '{key}' not found in loaded solutions.");
+                        : $"Active solution key '{key}' not found in loaded solutions.",
+                    new { activeKey = key });
             return m;
         }
     }
@@ -140,12 +142,16 @@ public sealed class MultiSolutionManager : IDisposable
             .ToList();
 
         if (matches.Count == 0)
-            throw new InvalidOperationException(
-                $"No solution matching '{name}'. Available: {string.Join(", ", _managers.Keys.Select(Path.GetFileName))}");
+            throw new McpToolException(
+                ToolErrorCode.ProjectNotFound,
+                $"No solution matching '{name}'. Available: {string.Join(", ", _managers.Keys.Select(Path.GetFileName))}",
+                new { name, available = _managers.Keys.Select(Path.GetFileName).ToArray() });
 
         if (matches.Count > 1)
-            throw new InvalidOperationException(
-                $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}");
+            throw new McpToolException(
+                ToolErrorCode.AmbiguousMatch,
+                $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
+                new { name, matches });
 
         lock (_lock) { _activeKey = matches[0]; }
         return matches[0];
@@ -174,7 +180,10 @@ public sealed class MultiSolutionManager : IDisposable
         {
             var message = manager.LoadFailureMessage!;
             manager.Dispose();
-            throw new InvalidOperationException(message);
+            throw new McpToolException(
+                ToolErrorCode.InvalidArgument,
+                message,
+                new { solutionPath = normalised, reason = message });
         }
 
         lock (_lock)
@@ -213,12 +222,16 @@ public sealed class MultiSolutionManager : IDisposable
                 .ToList();
 
             if (matches.Count == 0)
-                throw new InvalidOperationException(
-                    $"No solution matching '{name}'. Available: {string.Join(", ", keysSnapshot.Select(Path.GetFileName))}");
+                throw new McpToolException(
+                    ToolErrorCode.ProjectNotFound,
+                    $"No solution matching '{name}'. Available: {string.Join(", ", keysSnapshot.Select(Path.GetFileName))}",
+                    new { name, available = keysSnapshot.Select(Path.GetFileName).ToArray() });
 
             if (matches.Count > 1)
-                throw new InvalidOperationException(
-                    $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}");
+                throw new McpToolException(
+                    ToolErrorCode.AmbiguousMatch,
+                    $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
+                    new { name, matches });
 
             key = matches[0];
 

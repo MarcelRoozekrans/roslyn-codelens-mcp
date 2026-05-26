@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -29,6 +30,15 @@ public class GetSymbolContextToolTests
         Assert.Contains(result.InjectedDependencies, d => d.Contains("IGreeter", StringComparison.Ordinal));
         Assert.Contains(result.PublicMembers, m => m.Contains("SayHello", StringComparison.Ordinal));
         Assert.Equal("source", result.Origin?.Kind);
+    }
+
+    [Fact]
+    public void GetContext_ForUnknownType_ThrowsSymbolNotFound()
+    {
+        var ex = Assert.Throws<McpToolException>(() =>
+            GetSymbolContextLogic.Execute(_loaded, _resolver, _metadata, "NonExistentType99"));
+
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
 
     [Fact]

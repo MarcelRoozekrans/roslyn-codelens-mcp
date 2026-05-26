@@ -137,7 +137,10 @@ public static class FindBreakingChangesLogic
     private static IReadOnlyList<PublicApiEntry> LoadBaseline(string baselinePath)
     {
         if (!File.Exists(baselinePath))
-            throw new FileNotFoundException($"Baseline not found: {baselinePath}", baselinePath);
+            throw new McpToolException(
+                ToolErrorCode.FileNotFound,
+                $"Baseline not found: {baselinePath}",
+                new { baselinePath });
 
         var ext = Path.GetExtension(baselinePath);
         if (string.Equals(ext, ".json", StringComparison.OrdinalIgnoreCase))
@@ -145,8 +148,10 @@ public static class FindBreakingChangesLogic
         if (string.Equals(ext, ".dll", StringComparison.OrdinalIgnoreCase))
             return LoadBaselineFromAssembly(baselinePath);
 
-        throw new InvalidOperationException(
-            $"Unsupported baseline file extension: '{ext}'. Expected .json or .dll.");
+        throw new McpToolException(
+            ToolErrorCode.InvalidArgument,
+            $"Unsupported baseline file extension: '{ext}'. Expected .json or .dll.",
+            new { baselinePath, extension = ext });
     }
 
     private static IReadOnlyList<PublicApiEntry> LoadBaselineFromJson(string path)
@@ -159,8 +164,10 @@ public static class FindBreakingChangesLogic
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException(
-                $"Baseline JSON is not a valid get_public_api_surface result: {ex.Message}", ex);
+            throw new McpToolException(
+                ToolErrorCode.InvalidArgument,
+                $"Baseline JSON is not a valid get_public_api_surface result: {ex.Message}",
+                new { baselinePath = path, reason = ex.Message });
         }
     }
 
@@ -180,8 +187,10 @@ public static class FindBreakingChangesLogic
             references: bclRefs.Append(reference));
 
         if (compilation.GetAssemblyOrModuleSymbol(reference) is not IAssemblySymbol assembly)
-            throw new InvalidOperationException(
-                $"Failed to load assembly: {path}");
+            throw new McpToolException(
+                ToolErrorCode.InvalidArgument,
+                $"Failed to load assembly: {path}",
+                new { baselinePath = path, reason = "GetAssemblyOrModuleSymbol returned null" });
 
         var projectName = Path.GetFileNameWithoutExtension(path);
         return PublicApiSurfaceExtractor.Extract(assembly, projectName, requireSourceLocation: false);
