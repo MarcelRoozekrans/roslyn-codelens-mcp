@@ -168,12 +168,13 @@ public class GenerateTestSkeletonToolTests
     [Fact]
     public void UnknownSymbol_Throws()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.Throws<McpToolException>(() =>
             GenerateTestSkeletonLogic.Execute(
                 _loaded, _resolver,
                 symbol: "TestLib.DoesNotExist",
                 framework: "xunit"));
 
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -194,12 +195,13 @@ public class GenerateTestSkeletonToolTests
     [Fact]
     public void GeneratedCodeSymbol_IsRejected()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.Throws<McpToolException>(() =>
             GenerateTestSkeletonLogic.Execute(
                 _loaded, _resolver,
                 symbol: "TestLib.GeneratedTarget",
                 framework: "xunit"));
 
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
         Assert.Contains("generated", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 

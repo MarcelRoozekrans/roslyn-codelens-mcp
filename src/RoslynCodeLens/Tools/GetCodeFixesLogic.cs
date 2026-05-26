@@ -39,10 +39,12 @@ public static class GetCodeFixesLogic
         var solutionPath = loaded.Solution.FilePath;
         if (solutionPath is null || !trustStore.IsTrusted(solutionPath))
         {
-            throw new InvalidOperationException(
+            throw new McpToolException(
+                ToolErrorCode.SolutionNotTrusted,
                 $"Solution '{solutionPath ?? "<unknown>"}' is not trusted for analyzer execution. " +
                 $"'get_code_fixes' loads analyzer DLLs to discover available fixes — these run as in-process code. " +
-                $"Ask the user, then call the 'trust_solution' tool with this path.");
+                $"Ask the user, then call the 'trust_solution' tool with this path.",
+                new { solutionPath });
         }
 
         var allDiagnostics = compilation.GetDiagnostics()

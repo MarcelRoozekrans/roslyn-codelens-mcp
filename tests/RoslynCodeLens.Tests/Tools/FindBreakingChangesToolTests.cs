@@ -296,8 +296,9 @@ public class FindBreakingChangesToolTests
     public void MissingBaselineFile_ThrowsFileNotFound()
     {
         var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
-        Assert.Throws<FileNotFoundException>(() =>
+        var ex = Assert.Throws<McpToolException>(() =>
             FindBreakingChangesLogic.Execute(_loaded, _resolver, path));
+        Assert.Equal(ToolErrorCode.FileNotFound, ex.Code);
     }
 
     [Fact]
@@ -307,8 +308,9 @@ public class FindBreakingChangesToolTests
         File.WriteAllText(path, "{ this is not valid json");
         try
         {
-            Assert.Throws<InvalidOperationException>(() =>
+            var ex = Assert.Throws<McpToolException>(() =>
                 FindBreakingChangesLogic.Execute(_loaded, _resolver, path));
+            Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
         }
         finally
         {
@@ -323,8 +325,9 @@ public class FindBreakingChangesToolTests
         File.WriteAllText(path, "<root/>");
         try
         {
-            Assert.Throws<InvalidOperationException>(() =>
+            var ex = Assert.Throws<McpToolException>(() =>
                 FindBreakingChangesLogic.Execute(_loaded, _resolver, path));
+            Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
         }
         finally
         {

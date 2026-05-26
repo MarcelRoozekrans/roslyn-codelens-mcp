@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 
 namespace RoslynCodeLens.Tests;
 
@@ -48,7 +49,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public void CreateEmpty_EnsureLoaded_Throws()
     {
         var multi = MultiSolutionManager.CreateEmpty();
-        Assert.Throws<InvalidOperationException>((Action)(() => multi.EnsureLoaded()));
+        var ex = Assert.Throws<McpToolException>((Action)(() => multi.EnsureLoaded()));
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
         multi.Dispose();
     }
 
@@ -98,7 +100,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task SetActiveSolution_UnknownName_Throws()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        Assert.Throws<InvalidOperationException>(() => multi.SetActiveSolution("DoesNotExist"));
+        var ex = Assert.Throws<McpToolException>(() => multi.SetActiveSolution("DoesNotExist"));
+        Assert.Equal(ToolErrorCode.ProjectNotFound, ex.Code);
         multi.Dispose();
     }
 
@@ -107,7 +110,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath, _altSolutionPath]);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => multi.SetActiveSolution("TestSolution"));
+        var ex = Assert.Throws<McpToolException>(() => multi.SetActiveSolution("TestSolution"));
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
         Assert.Contains("Ambiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
         multi.Dispose();
     }
@@ -231,7 +235,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public void UnloadSolution_UnknownName_Throws()
     {
         var multi = MultiSolutionManager.CreateEmpty();
-        Assert.Throws<InvalidOperationException>(() => multi.UnloadSolution("DoesNotExist"));
+        var ex = Assert.Throws<McpToolException>(() => multi.UnloadSolution("DoesNotExist"));
+        Assert.Equal(ToolErrorCode.ProjectNotFound, ex.Code);
         multi.Dispose();
     }
 
@@ -243,7 +248,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
         await multi.LoadSolutionAsync(_solutionPath);
         await multi.LoadSolutionAsync(_altSolutionPath);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => multi.UnloadSolution("TestSolution"));
+        var ex = Assert.Throws<McpToolException>(() => multi.UnloadSolution("TestSolution"));
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
         Assert.Contains("Ambiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
         multi.Dispose();
     }
