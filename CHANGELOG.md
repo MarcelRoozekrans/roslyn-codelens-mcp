@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.19.0...v2.0.0) (2026-05-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **errors:** structured tool errors + cancellation pass-through ([#200](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/200))
+
+### Features
+
+* **errors:** structured tool errors + cancellation pass-through ([#200](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/200)) ([6cad043](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/6cad043f163f6c2a3a0e6dceab84eae618f69a67))
+
 ## [1.19.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.18.0...v1.19.0) (2026-05-22)
 
 
