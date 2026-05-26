@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 
 namespace RoslynCodeLens.Tests.Tools;
@@ -22,11 +23,12 @@ public class UnloadSolutionToolTests
     }
 
     [Fact]
-    public void Execute_UnknownName_PropagatesException()
+    public void Execute_UnknownName_ThrowsProjectNotFound()
     {
         var manager = MultiSolutionManager.CreateEmpty();
 
-        Assert.Throws<InvalidOperationException>(() => UnloadSolutionTool.Execute(manager, "DoesNotExist"));
+        var ex = Assert.Throws<McpToolException>(() => UnloadSolutionTool.Execute(manager, "DoesNotExist"));
+        Assert.Equal(ToolErrorCode.ProjectNotFound, ex.Code);
 
         manager.Dispose();
     }
