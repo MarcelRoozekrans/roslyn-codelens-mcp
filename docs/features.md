@@ -8,7 +8,7 @@
 
 | Dimension | sharplens-mcp | roslyn-codelens-mcp |
 |-----------|---------------|----------------------|
-| Tools | ~58 | 36 |
+| Tools | ~58 | 54 |
 | Architecture | Monolithic `RoslynService.cs` (~5 000 lines) | Modular Tool + Logic split per feature |
 | API paradigm | Position-based `(filePath, line, col)` | Symbol-name-based (`"IGreeter.Greet"`) |
 | Refactoring | 13 dedicated write/mutate tools | `get_code_actions` + `apply_code_action` (generic engine) |

@@ -40,3 +40,13 @@ Then add to your `.mcp.json`:
 ```
 
 See [Installation](getting-started/installation) for full setup details.
+
+## Working with results
+
+List-returning tools (everything that produces "all X" or "every Y") cap their items at a per-tool default and wrap them in an envelope:
+
+```json
+{ "items": [ ... ], "totalCount": 142, "truncated": false, "limit": 500, "summary": { ... } }
+```
+
+If `truncated` is `true`, `items` is the top N by the tool's natural sort order (errors first, worst-first, most-relevant-first). Raise `limit` only if the tail matters for what you're doing — usually it won't.

@@ -52,7 +52,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_disposable_misuse** — `IDisposable`/`IAsyncDisposable` instances not wrapped in `using`/`await using`/returned/assigned to field; severity error/warning per violation.
 - **find_large_classes** — Find oversized types by member or line count
 - **find_god_objects** — Types combining high size with high cross-namespace coupling; sharper signal than raw size for SRP violations
-- **find_unused_symbols** — Dead code detection via reference analysis
+- **find_unused_symbols** — Dead code detection via reference analysis. Auto-filters test methods (xUnit/NUnit/MSTest), MCP tool entry points, source-generator output, MEF-composed services, and interop-laid-out fields; filter counts surface in `summary.filteredOut`
 - **get_project_health** — Composite audit aggregating 7 quality dimensions per project (complexity, large classes, naming, unused symbols, reflection, async violations, disposable misuse) with counts and top-N hotspots inline
 - **get_source_generators** — List source generators and their output per project
 - **get_generated_code** — Inspect generated source code from source generators
@@ -65,6 +65,9 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution
 - **unload_solution** — Unload a loaded solution to free memory
 - **rebuild_solution** — Force a full reload of the analyzed solution
+- **trust_solution** — Authorize a solution to run Roslyn analyzers (required before `get_diagnostics` with `includeAnalyzers: true`)
+- **list_trusted_paths** — Inspect the persistent trust store + session-trusted solutions
+- **revoke_trust** — Revoke a previously-granted trust for a solution path
 - **analyze_data_flow** — Variable read/write/capture analysis within a statement range (declared, read, written, always assigned, captured, flows in/out)
 - **analyze_control_flow** — Branch/loop reachability analysis within a statement range (start/end reachability, return statements, exit points)
 - **analyze_change_impact** — Show all files, projects, and call sites affected by changing a symbol — combines find_references and find_callers
@@ -74,6 +77,33 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **get_operators** — Every user-defined operator and conversion operator on a type (source + metadata) with kind, signature, parameters, and source location. Includes synthesized record equality and .NET 7+ checked variants
 - **get_call_graph** — Transitive caller/callee graph for a method, depth-bounded with cycle detection
 - **get_file_overview** — Compound tool: types defined in a file + file-scoped diagnostics in one call
+
+## Response shape
+
+All list-returning tools wrap their results in a uniform envelope:
+
+```json
+{
+  "items": [ ... ],
+  "totalCount": 142,
+  "truncated": false,
+  "limit": 500,
+  "summary": { ... }
+}
+```
+
+When `truncated` is `true`, the items are the **top N by the tool's natural sort order** (severity-first, worst-first, by-project, etc.) — usually that's exactly what you want. Raise `limit` only if the missing tail items matter for the task.
+
+Tools that include a `summary` aggregate today:
+
+- `get_diagnostics` — `{ error, warning, info, hidden }` counts
+- `find_references`, `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
+- `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
+- `find_unused_symbols` — `{ byKind, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
+- `find_naming_violations` — `{ byRule: {...} }`
+- `get_complexity_metrics` — `{ max, avg, overThreshold }`
+
+Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) return their bespoke shape directly — the envelope only wraps list-returning tools.
 
 ## External Assemblies
 
