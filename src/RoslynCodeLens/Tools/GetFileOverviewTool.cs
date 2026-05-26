@@ -10,7 +10,7 @@ public static class GetFileOverviewTool
     [McpServerTool(Name = "get_file_overview"),
      Description("Get a summary of a C# file: which types are defined in it and any compiler diagnostics. " +
                  "Useful for quickly understanding a file's contents without reading it.")]
-    public static async Task<FileOverview?> Execute(
+    public static async Task<FileOverview> Execute(
         MultiSolutionManager manager,
         [Description("Full path to the C# source file")] string filePath,
         CancellationToken ct = default)

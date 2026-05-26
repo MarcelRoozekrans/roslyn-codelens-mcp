@@ -11,7 +11,7 @@ public static class GetTypeOverviewTool
      Description("Get a comprehensive overview of a type in one call: full context (namespace, base class, interfaces, " +
                  "members, DI dependencies), type hierarchy (bases, interfaces, derived types), and diagnostics in the file. " +
                  "More efficient than calling get_symbol_context + get_type_hierarchy + get_diagnostics separately.")]
-    public static TypeOverview? Execute(
+    public static TypeOverview Execute(
         MultiSolutionManager manager,
         [Description("Type name (simple name or fully qualified)")] string typeName)
     {

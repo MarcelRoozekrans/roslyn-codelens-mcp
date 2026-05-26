@@ -6,7 +6,7 @@ namespace RoslynCodeLens.Tools;
 
 public static class GetSymbolContextLogic
 {
-    public static SymbolContext? Execute(
+    public static SymbolContext Execute(
         LoadedSolution loaded,
         SymbolResolver resolver,
         MetadataSymbolResolver metadata,
@@ -22,7 +22,7 @@ public static class GetSymbolContextLogic
         if (resolved?.Symbol is INamedTypeSymbol metadataType)
             return BuildMetadataContext(metadataType, resolved.Origin);
 
-        return null;
+        throw new McpToolException(ToolErrorCode.SymbolNotFound, $"Symbol '{symbol}' not found.", new { symbol });
     }
 
     private static SymbolContext BuildContext(SymbolResolver resolver, INamedTypeSymbol target, SymbolOrigin origin)
