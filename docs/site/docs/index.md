@@ -50,3 +50,5 @@ List-returning tools (everything that produces "all X" or "every Y") cap their i
 ```
 
 If `truncated` is `true`, `items` is the top N by the tool's natural sort order (errors first, worst-first, most-relevant-first). Raise `limit` only if the tail matters for what you're doing — usually it won't.
+
+**When a tool can't proceed,** the response is an `isError: true` content block whose JSON body has `{ code, message, details? }`. Codes are stable: `SymbolNotFound`, `SolutionNotTrusted`, `AmbiguousMatch`, `FileNotFound`, `ProjectNotFound`, `InvalidArgument`, `Internal`. See the [main README](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp#error-responses) for examples.

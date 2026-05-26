@@ -32,6 +32,22 @@ Tools that include a `summary` aggregate:
 
 Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) are unchanged — they return their bespoke shape directly.
 
+## Error responses
+
+When a tool can't proceed, the response is `isError: true` with content carrying a JSON body of `{ code, message, details? }`. Switch on `code`:
+
+| Code | Meaning | Common source |
+|---|---|---|
+| `SymbolNotFound` | type/method/property not resolved | `analyze_method`, `get_symbol_context`, `get_type_overview`, `get_type_hierarchy`, `generate_test_skeleton` |
+| `SolutionNotTrusted` | analyzers blocked until `trust_solution` is called | `get_diagnostics` (`includeAnalyzers: true`), `get_code_fixes` |
+| `AmbiguousMatch` | name matched multiple solutions; `details.matches` lists candidates | `set_active_solution`, `unload_solution` |
+| `FileNotFound` | file path / baseline doesn't exist or isn't in solution | `get_file_overview`, `find_breaking_changes` |
+| `ProjectNotFound` | solution name didn't match | `set_active_solution`, `unload_solution` |
+| `InvalidArgument` | malformed / unsupported caller input | various |
+| `Internal` | unexpected; `message` carries exception text | fallback |
+
+If `code: SolutionNotTrusted`, the right next step is calling `trust_solution` after asking the user. Don't catch and retry blindly — the user has to authorize analyzer execution.
+
 ## Detection
 
 If `find_implementations` is not available as an MCP tool, this skill is inert — do nothing, no errors.
