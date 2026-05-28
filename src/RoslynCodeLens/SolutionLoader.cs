@@ -66,10 +66,13 @@ public class SolutionLoader
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
-        Solution solution;
+        Solution? solution;
         try
         {
-            solution = await workspace.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
+            solution = await RunWithTimeoutAsync<Solution>(
+                innerCt => workspace.OpenSolutionAsync(solutionPath, cancellationToken: innerCt),
+                GetOpenProjectTimeoutSec(),
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -79,6 +82,15 @@ public class SolutionLoader
             workspace.Dispose();
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
+                .ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
+        }
+
+        if (solution is null)
+        {
+            workspace.Dispose();
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
                 .ConfigureAwait(false);
             return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
         }
