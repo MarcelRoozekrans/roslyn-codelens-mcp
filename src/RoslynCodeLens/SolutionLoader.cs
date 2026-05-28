@@ -7,7 +7,40 @@ namespace RoslynCodeLens;
 
 public class SolutionLoader
 {
-    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath)
+    private const int DefaultOpenProjectTimeoutSec = 300;
+
+    internal static int GetOpenProjectTimeoutSec() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("ROSLYN_CODELENS_OPEN_PROJECT_TIMEOUT_SECONDS"),
+            out var n) && n > 0
+                ? n
+                : DefaultOpenProjectTimeoutSec;
+
+    internal static async Task<T?> RunWithTimeoutAsync<T>(
+        Func<CancellationToken, Task<T?>> work,
+        int timeoutSec,
+        CancellationToken outerCt) where T : class
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSec));
+
+        try
+        {
+            return await work(timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!outerCt.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancellation — surface a plain OperationCanceledException so callers
+            // can distinguish internal timeout (null return) from user-requested cancellation.
+            throw new OperationCanceledException(outerCt);
+        }
+    }
+
+    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
         var legacyOrMissing = classified
@@ -22,7 +55,7 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
         }
 
         var workspace = MSBuildWorkspace.Create();
@@ -33,10 +66,13 @@ public class SolutionLoader
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
-        Solution solution;
+        Solution? solution;
         try
         {
-            solution = await workspace.OpenSolutionAsync(solutionPath).ConfigureAwait(false);
+            solution = await RunWithTimeoutAsync<Solution>(
+                innerCt => workspace.OpenSolutionAsync(solutionPath, cancellationToken: innerCt),
+                GetOpenProjectTimeoutSec(),
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -47,7 +83,16 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
+        }
+
+        if (solution is null)
+        {
+            workspace.Dispose();
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
+                .ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
         }
 
         return (solution, workspace, Array.Empty<SkippedProject>());
@@ -55,7 +100,8 @@ public class SolutionLoader
 
     private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
         string solutionPath,
-        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified)
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
+        CancellationToken ct)
     {
         var workspace = MSBuildWorkspace.Create();
         var skipped = new List<SkippedProject>();
@@ -69,9 +115,14 @@ public class SolutionLoader
         {
             if (entry.Kind == ProjectClassifier.ProjectKind.SdkStyle)
             {
+                var timeoutSec = GetOpenProjectTimeoutSec();
+                Project? loaded;
                 try
                 {
-                    await workspace.OpenProjectAsync(entry.Path).ConfigureAwait(false);
+                    loaded = await RunWithTimeoutAsync<Project>(
+                        innerCt => workspace.OpenProjectAsync(entry.Path, cancellationToken: innerCt),
+                        timeoutSec,
+                        ct).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -79,6 +130,16 @@ public class SolutionLoader
                         $"[roslyn-codelens] Skipping project {entry.Name}: {ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
                     skipped.Add(new SkippedProject(entry.Path, entry.Name, "Failed",
                         $"{ex.GetType().Name}: {ex.Message}"));
+                    continue;
+                }
+
+                if (loaded is null)
+                {
+                    await Console.Error.WriteLineAsync(
+                        $"[roslyn-codelens] Timeout loading project {entry.Name} (exceeded {timeoutSec}s).").ConfigureAwait(false);
+                    skipped.Add(new SkippedProject(entry.Path, entry.Name, "Timeout",
+                        $"Project load exceeded {timeoutSec}s. " +
+                        $"Set ROSLYN_CODELENS_OPEN_PROJECT_TIMEOUT_SECONDS to override."));
                 }
             }
             else

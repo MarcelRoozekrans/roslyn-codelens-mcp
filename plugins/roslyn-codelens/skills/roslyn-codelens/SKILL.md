@@ -339,6 +339,9 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `unload_solution` | "Free memory for this solution" |
 | `set_active_solution` | "Switch to project B" |
 | `rebuild_solution` | "Reload the solution" / "Diagnostics are stale" |
+| `start_background_task` | "Kick off a long rebuild without blocking" |
+| `get_task_status` | "Check on a queued background task" |
+| `list_running_tasks` | "What background work is in flight?" |
 | `analyze_data_flow` | "What variables are read/written here?" |
 | `analyze_control_flow` | "Is this code reachable?" |
 | `analyze_change_impact` | "What breaks if I change this?" |
