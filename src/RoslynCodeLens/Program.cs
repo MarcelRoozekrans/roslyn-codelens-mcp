@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using RoslynCodeLens;
+using RoslynCodeLens.BackgroundTasks;
 using RoslynCodeLens.Security;
 
 var instance = MSBuildLocator.RegisterDefaults();
@@ -41,6 +42,7 @@ builder.Logging.ClearProviders();
 builder.Services.AddSingleton(multiManager);
 builder.Services.AddSingleton(trustStore);
 builder.Services.AddSingleton(allowlist);
+builder.Services.AddSingleton<BackgroundTaskStore>();
 
 builder.Services
     .AddMcpServer()

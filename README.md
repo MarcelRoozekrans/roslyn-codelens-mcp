@@ -65,6 +65,9 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution
 - **unload_solution** — Unload a loaded solution to free memory
 - **rebuild_solution** — Force a full reload of the analyzed solution
+- **start_background_task** — Queue a long-running tool (currently `rebuild_solution`) to run in the background; returns a `taskId` to poll
+- **get_task_status** — Get the current status, result, or error of a background task by its `taskId`
+- **list_running_tasks** — List background tasks running or completed within the last 5 minutes
 - **trust_solution** — Authorize a solution to run Roslyn analyzers (required before `get_diagnostics` with `includeAnalyzers: true`)
 - **list_trusted_paths** — Inspect the persistent trust store + session-trusted solutions
 - **revoke_trust** — Revoke a previously-granted trust for a solution path
@@ -138,6 +141,10 @@ Metadata-origin symbols (from NuGet packages and referenced assemblies) are firs
 - **Tier 3 — IL** (`peek_il`): Decompile a specific method to annotated ilasm-style IL using ICSharpCode.Decompiler — useful for understanding the internals of NuGet libraries.
 
 Location-returning results include an `Origin` field (`source` or `metadata`) and an `IsGenerated` flag to distinguish hand-written code from closed-source or generated output.
+
+## Runtime configuration
+
+- `ROSLYN_CODELENS_OPEN_PROJECT_TIMEOUT_SECONDS` — per-project MSBuild load timeout (default `300`). When a project exceeds this duration during workspace open, it's recorded as a `SkippedProjects` entry with `kind: "Timeout"` and the rest of the solution still loads. Useful when a legacy or malformed project wedges the `BuildHost-net472` subprocess.
 
 ## Security: Trust Model
 
