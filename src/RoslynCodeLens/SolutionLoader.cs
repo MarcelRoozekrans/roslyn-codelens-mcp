@@ -7,7 +7,7 @@ namespace RoslynCodeLens;
 
 public class SolutionLoader
 {
-    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath)
+    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
         var legacyOrMissing = classified
@@ -22,7 +22,7 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
         }
 
         var workspace = MSBuildWorkspace.Create();
@@ -47,7 +47,7 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
         }
 
         return (solution, workspace, Array.Empty<SkippedProject>());
@@ -55,7 +55,8 @@ public class SolutionLoader
 
     private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
         string solutionPath,
-        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified)
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
+        CancellationToken ct)
     {
         var workspace = MSBuildWorkspace.Create();
         var skipped = new List<SkippedProject>();
