@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.0.0...v2.1.0) (2026-05-28)
+
+
+### Features
+
+* MSBuild timeout + background task store ([#206](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/206)) ([5403cf8](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/5403cf8358eb50afb969b018f63c3ebb58ba4e61))
+
 ## [2.0.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v1.19.0...v2.0.0) (2026-05-26)
 
 
