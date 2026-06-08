@@ -27,10 +27,9 @@ public static class FindCallersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IMethodSymbol>(targetMethods, SymbolEqualityComparer.Default);
-        // For metadata targets resolved from one compilation, build a name-based fallback
-        // so cross-compilation symbol comparisons work (metadata from different compilations
-        // have different ISymbol instances but the same containing type + name).
+        var targetSet = new HashSet<IMethodSymbol>(targetMethods, SymbolSignatureComparer.Instance);
+        // targetMetadataKeys retains the name-based string fallback for metadata-only symbols
+        // whose containing type may not be in the loaded solution's source at all.
         var targetMetadataKeys = BuildMetadataKeys(targetMethods);
         var results = new List<CallerInfo>();
         var seen = new HashSet<(string, int)>();
@@ -128,7 +127,7 @@ public static class FindCallersLogic
             var containingType = calledMethod.ContainingType;
             var implementation = containingType.FindImplementationForInterfaceMember(targetMethod);
             if (implementation != null &&
-                SymbolEqualityComparer.Default.Equals(implementation, calledMethod))
+                SymbolSignatureComparer.Instance.Equals(implementation, calledMethod))
                 return true;
         }
 
@@ -136,7 +135,7 @@ public static class FindCallersLogic
         if (calledMethod.ContainingType.TypeKind == TypeKind.Interface &&
             targetMethod.ContainingType.TypeKind == TypeKind.Interface)
         {
-            return SymbolEqualityComparer.Default.Equals(
+            return SymbolSignatureComparer.Instance.Equals(
                 calledMethod.ContainingType, targetMethod.ContainingType) &&
                 string.Equals(calledMethod.Name, targetMethod.Name, StringComparison.Ordinal);
         }

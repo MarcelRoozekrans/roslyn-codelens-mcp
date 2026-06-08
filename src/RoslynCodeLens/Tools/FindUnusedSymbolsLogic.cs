@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using RoslynCodeLens.Models;
+using RoslynCodeLens.Symbols;
 
 namespace RoslynCodeLens.Tools;
 
@@ -110,7 +111,7 @@ public static class FindUnusedSymbolsLogic
 
     private static HashSet<ISymbol> CollectReferencedSymbols(LoadedSolution loaded)
     {
-        var referencedSymbols = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        var referencedSymbols = new HashSet<ISymbol>(SymbolSignatureComparer.Instance);
 
         foreach (var (_, compilation) in loaded.Compilations)
         {
@@ -210,7 +211,7 @@ public static class FindUnusedSymbolsLogic
             foreach (var iface in containingType.AllInterfaces)
             {
                 var impl = containingType.FindImplementationForInterfaceMember(method);
-                if (impl != null && SymbolEqualityComparer.Default.Equals(impl, method))
+                if (impl != null && SymbolSignatureComparer.Instance.Equals(impl, method))
                     return true;
             }
         }
@@ -225,7 +226,7 @@ public static class FindUnusedSymbolsLogic
             foreach (var iface in containingType.AllInterfaces)
             {
                 var impl = containingType.FindImplementationForInterfaceMember(prop);
-                if (impl != null && SymbolEqualityComparer.Default.Equals(impl, prop))
+                if (impl != null && SymbolSignatureComparer.Instance.Equals(impl, prop))
                     return true;
             }
         }

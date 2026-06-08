@@ -25,7 +25,7 @@ public static class FindReferencesLogic
 
     private static HashSet<ISymbol> BuildTargetSet(IReadOnlyList<ISymbol> targets)
     {
-        var targetSet = new HashSet<ISymbol>(targets, SymbolEqualityComparer.Default);
+        var targetSet = new HashSet<ISymbol>(targets, SymbolSignatureComparer.Instance);
         foreach (var t in targets)
         {
             if (t.OriginalDefinition != null)
@@ -100,7 +100,7 @@ public static class FindReferencesLogic
                     targetMethod.ContainingType?.TypeKind == TypeKind.Interface)
                 {
                     var impl = method.ContainingType?.FindImplementationForInterfaceMember(targetMethod);
-                    if (impl != null && SymbolEqualityComparer.Default.Equals(impl, method))
+                    if (impl != null && SymbolSignatureComparer.Instance.Equals(impl, method))
                         return true;
                 }
             }
