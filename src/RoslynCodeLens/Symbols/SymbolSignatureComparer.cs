@@ -2,24 +2,13 @@ using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeLens.Symbols;
 
-/// <summary>
-/// Compares <see cref="ISymbol"/> instances by their declared signature rather than object identity.
-/// <para>
-/// <b>Problem solved:</b> Roslyn compiles each project into its own <c>Compilation</c>, so the same
-/// type, method, or member appears as a different <see cref="ISymbol"/> object in each compilation
-/// (a source symbol in the declaring project and a metadata symbol in every referencing project).
-/// <see cref="SymbolEqualityComparer.Default"/> uses reference equality and treats these as different
-/// symbols, causing cross-project lookups (references, unused-symbol detection, caller finding) to miss
-/// matches entirely.
-/// This comparer normalises across that boundary by comparing the structural signature:
-/// containing type (via <see cref="NamedTypeSignatureComparer"/>), member name, and — for methods —
-/// parameter type names to distinguish overloads.
-/// </para>
-/// <para>
-/// <b>Intentional omissions:</b> assembly version and type parameter names are ignored for the same
-/// reasons as in <see cref="NamedTypeSignatureComparer"/>.
-/// </para>
-/// </summary>
+// Compares ISymbol instances by declared signature rather than object identity.
+// Roslyn compiles each project separately, so the same type/method/member appears as a different
+// object in the declaring compilation versus any referencing compilation.
+// SymbolEqualityComparer.Default treats those as different, causing cross-project lookups
+// (references, callers, unused-symbol detection) to miss matches.
+// For methods, parameter type display strings are included to distinguish overloads.
+// Assembly version and type-parameter names are ignored — see NamedTypeSignatureComparer.
 internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 {
 	public static readonly SymbolSignatureComparer Instance = new();
@@ -48,8 +37,6 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		};
 	}
 
-	// ── Named types ──────────────────────────────────────────────────────────
-
 	private static string ContainingTypeKey(ISymbol symbol)
 	{
 		if (symbol.ContainingType is { } ct)
@@ -58,8 +45,6 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 			return ns.ToDisplayString();
 		return string.Empty;
 	}
-
-	// ── Methods ───────────────────────────────────────────────────────────────
 
 	private static bool MethodEquals(IMethodSymbol? x, IMethodSymbol? y)
 	{
@@ -89,8 +74,6 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 			hc.Add(p.Type.ToDisplayString(), StringComparer.Ordinal);
 		return hc.ToHashCode();
 	}
-
-	// ── Other members (property, field, event, …) ────────────────────────────
 
 	private static bool MemberEquals(ISymbol x, ISymbol y)
 	{

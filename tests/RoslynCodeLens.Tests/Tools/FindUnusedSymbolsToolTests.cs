@@ -50,6 +50,19 @@ public class FindUnusedSymbolsToolTests
     }
 
     [Fact]
+    public void FindUnusedSymbols_TypeUsedFromAnotherProject_IsNotReportedAsUnused()
+    {
+        // ICrossProjectOnly is defined in TestLib but has no implementations or usages
+        // within TestLib itself — it is only implemented by CrossProjectGreeter in TestLib2.
+        // Without cross-compilation symbol normalisation, that cross-project usage is not
+        // matched in the referenced-symbol set, causing ICrossProjectOnly to be incorrectly
+        // reported as unused.
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.DoesNotContain(items, i => i.SymbolName.Contains("ICrossProjectOnly", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildSummary_GroupsByKind()
     {
         var input = new List<UnusedSymbolInfo>

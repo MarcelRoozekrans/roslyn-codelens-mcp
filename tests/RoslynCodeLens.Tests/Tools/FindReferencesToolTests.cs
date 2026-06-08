@@ -58,6 +58,17 @@ public class FindReferencesToolTests
     }
 
     [Fact]
+    public void FindReferences_ForInterface_FindsUsagesInReferencingProject()
+    {
+        // IGreeter is defined in TestLib; GreeterConsumer and CrossProjectGreeter in TestLib2 reference it.
+        // Without cross-compilation symbol normalisation, cross-project usages are missed
+        // because the target set is built with reference-equality symbols from one compilation.
+        var results = FindReferencesLogic.Execute(_loaded, _resolver, _metadata, "IGreeter");
+
+        Assert.Contains(results, r => r.File.Contains("TestLib2", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Sort_OrdersByFileThenLine()
     {
         var input = new List<SymbolReference>
