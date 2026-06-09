@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -27,43 +28,43 @@ public static class FindCallersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IMethodSymbol>(targetMethods, SymbolEqualityComparer.Default);
-        // For metadata targets resolved from one compilation, build a name-based fallback
-        // so cross-compilation symbol comparisons work (metadata from different compilations
-        // have different ISymbol instances but the same containing type + name).
-        var targetMetadataKeys = BuildMetadataKeys(targetMethods);
         var results = new List<CallerInfo>();
         var seen = new HashSet<(string, int)>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        foreach (var target in targetMethods)
         {
-            var projectName = source.GetProjectName(projectId);
+            // Roslyn's SymbolFinder.FindCallersAsync handles cross-compilation symbol
+            // identity, virtual-dispatch cascading, and interface→implementation matching.
+            var callerInfos = SymbolFinder.FindCallersAsync(target, loaded.Solution)
+                .GetAwaiter().GetResult();
 
-            foreach (var syntaxTree in compilation.SyntaxTrees)
+            foreach (var callerInfo in callerInfos)
             {
-                var semanticModel = compilation.GetSemanticModel(syntaxTree);
-                var root = syntaxTree.GetRoot();
-
-                foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+                foreach (var location in callerInfo.Locations)
                 {
-                    var symbolInfo = semanticModel.GetSymbolInfo(invocation);
-                    if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
+                    var sourceTree = location.SourceTree;
+                    if (sourceTree == null)
                         continue;
 
-                    if (!IsMethodMatch(calledMethod, targetSet, targetMethods, targetMetadataKeys))
-                        continue;
-
-                    var lineSpan = invocation.GetLocation().GetLineSpan();
+                    var lineSpan = location.GetLineSpan();
                     var file = lineSpan.Path;
                     var line = lineSpan.StartLinePosition.Line + 1;
 
                     if (!seen.Add((file, line)))
                         continue;
 
-                    var callerName = GetCallerName(invocation);
-                    var snippet = invocation.ToString();
+                    var node = sourceTree.GetRoot().FindNode(location.SourceSpan);
+                    var invocation = node.FirstAncestorOrSelf<InvocationExpressionSyntax>();
+                    var snippet = (invocation ?? node).ToString();
+                    var callerName = GetCallerName(callerInfo.CallingSymbol, invocation ?? node);
 
-                    results.Add(new CallerInfo(callerName, file, line, snippet, projectName, source.IsGenerated(file)));
+                    var document = loaded.Solution.GetDocument(sourceTree);
+                    var projectName = document != null
+                        ? source.GetProjectName(document.Project.Id)
+                        : string.Empty;
+
+                    results.Add(new CallerInfo(
+                        callerName, file, line, snippet, projectName, source.IsGenerated(file)));
                 }
             }
         }
@@ -71,81 +72,11 @@ public static class FindCallersLogic
         return results;
     }
 
-    private static HashSet<string> BuildMetadataKeys(IReadOnlyList<IMethodSymbol> methods)
+    private static string GetCallerName(ISymbol? callingSymbol, SyntaxNode node)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var m in methods)
-        {
-            if (m.Locations.All(l => !l.IsInSource))
-            {
-                var typeName = m.ContainingType?.ToDisplayString() ?? string.Empty;
-                keys.Add($"{typeName}.{m.Name}");
-            }
-        }
-        return keys;
-    }
+        if (callingSymbol is IMethodSymbol caller && caller.ContainingType != null)
+            return $"{caller.ContainingType.Name}.{caller.Name}";
 
-    private static bool IsMethodMatch(
-        IMethodSymbol calledMethod,
-        HashSet<IMethodSymbol> targetSet,
-        IReadOnlyList<IMethodSymbol> targetMethods,
-        HashSet<string> targetMetadataKeys)
-    {
-        if (targetSet.Contains(calledMethod) || targetSet.Contains(calledMethod.OriginalDefinition))
-            return true;
-
-        // Cross-compilation fallback for metadata symbols: compare by containing type name + method name
-        if (targetMetadataKeys.Count > 0 && calledMethod.Locations.All(l => !l.IsInSource))
-        {
-            var typeName = (calledMethod.OriginalDefinition.ContainingType ?? calledMethod.ContainingType)
-                ?.ToDisplayString() ?? string.Empty;
-            if (targetMetadataKeys.Contains($"{typeName}.{calledMethod.Name}"))
-                return true;
-        }
-
-        for (int i = 0; i < targetMethods.Count; i++)
-        {
-            if (!string.Equals(calledMethod.Name, targetMethods[i].Name, StringComparison.Ordinal))
-                continue;
-            if (IsInterfaceImplementation(calledMethod, targetMethods[i]))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsInterfaceImplementation(IMethodSymbol calledMethod, IMethodSymbol targetMethod)
-    {
-        // If the target is an interface method, check if the called method's containing type
-        // implements that interface and the call resolves through the interface
-        if (targetMethod.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            // Direct interface call: calledMethod is the interface method itself
-            if (SymbolEqualityComparer.Default.Equals(calledMethod, targetMethod))
-                return true;
-
-            // Check if calledMethod implements the target interface method
-            var containingType = calledMethod.ContainingType;
-            var implementation = containingType.FindImplementationForInterfaceMember(targetMethod);
-            if (implementation != null &&
-                SymbolEqualityComparer.Default.Equals(implementation, calledMethod))
-                return true;
-        }
-
-        // If the called method is an interface method, check if it matches the target
-        if (calledMethod.ContainingType.TypeKind == TypeKind.Interface &&
-            targetMethod.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            return SymbolEqualityComparer.Default.Equals(
-                calledMethod.ContainingType, targetMethod.ContainingType) &&
-                string.Equals(calledMethod.Name, targetMethod.Name, StringComparison.Ordinal);
-        }
-
-        return false;
-    }
-
-    private static string GetCallerName(SyntaxNode node)
-    {
         var method = node.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
         var type = node.Ancestors().OfType<TypeDeclarationSyntax>().FirstOrDefault();
 
