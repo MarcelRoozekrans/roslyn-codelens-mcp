@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -19,55 +20,47 @@ public static class FindReferencesLogic
             targets = [resolved.Symbol];
         }
 
-        var targetSet = BuildTargetSet(targets);
-        return ScanForReferences(loaded, source, targetSet);
-    }
-
-    private static HashSet<ISymbol> BuildTargetSet(IReadOnlyList<ISymbol> targets)
-    {
-        var targetSet = new HashSet<ISymbol>(targets, SymbolEqualityComparer.Default);
-        foreach (var t in targets)
-        {
-            if (t.OriginalDefinition != null)
-                targetSet.Add(t.OriginalDefinition);
-        }
-        return targetSet;
+        return ScanForReferences(loaded, source, targets);
     }
 
     private static List<SymbolReference> ScanForReferences(
-        LoadedSolution loaded, SymbolResolver resolver, HashSet<ISymbol> targetSet)
+        LoadedSolution loaded, SymbolResolver resolver, IReadOnlyList<ISymbol> targets)
     {
         var results = new List<SymbolReference>();
         var seen = new HashSet<(string, int)>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        foreach (var target in targets)
         {
-            var projectName = resolver.GetProjectName(projectId);
+            // Roslyn's SymbolFinder handles cross-compilation symbol identity, generic
+            // constructions, partial-class merges, and metadata-vs-source symbol unification.
+            // A hand-rolled walk that compares with SymbolEqualityComparer.Default misses
+            // references in downstream projects when the consuming compilation observes the
+            // same logical symbol as a distinct ISymbol instance.
+            var references = SymbolFinder.FindReferencesAsync(target, loaded.Solution)
+                .GetAwaiter().GetResult();
 
-            foreach (var syntaxTree in compilation.SyntaxTrees)
+            foreach (var referencedSymbol in references)
             {
-                var semanticModel = compilation.GetSemanticModel(syntaxTree);
-                var root = syntaxTree.GetRoot();
-
-                foreach (var node in root.DescendantNodes())
+                foreach (var location in referencedSymbol.Locations)
                 {
-                    var (referencedSymbol, kind) = ResolveNodeSymbol(node, semanticModel);
-
-                    if (referencedSymbol == null)
+                    var sourceTree = location.Location.SourceTree;
+                    if (sourceTree == null)
                         continue;
 
-                    if (!IsMatch(referencedSymbol, targetSet))
-                        continue;
-
-                    var lineSpan = node.GetLocation().GetLineSpan();
+                    var lineSpan = location.Location.GetLineSpan();
                     var file = lineSpan.Path;
                     var line = lineSpan.StartLinePosition.Line + 1;
 
                     if (!seen.Add((file, line)))
                         continue;
 
+                    var node = sourceTree.GetRoot().FindNode(location.Location.SourceSpan);
+                    var kind = ClassifyReferenceNode(node);
                     var snippet = GetContainingStatement(node);
-                    results.Add(new SymbolReference(kind, file, line, snippet, projectName, resolver.IsGenerated(file)));
+                    var projectName = resolver.GetProjectName(location.Document.Project.Id);
+
+                    results.Add(new SymbolReference(
+                        kind, file, line, snippet, projectName, resolver.IsGenerated(file)));
                 }
             }
         }
@@ -75,37 +68,17 @@ public static class FindReferencesLogic
         return results;
     }
 
-    private static (ISymbol? Symbol, string Kind) ResolveNodeSymbol(SyntaxNode node, SemanticModel semanticModel)
+    private static string ClassifyReferenceNode(SyntaxNode node)
     {
-        return node switch
-        {
-            IdentifierNameSyntax identifier => (semanticModel.GetSymbolInfo(identifier).Symbol, ClassifyReference(identifier)),
-            GenericNameSyntax genericName => (semanticModel.GetSymbolInfo(genericName).Symbol, "type_argument"),
-            _ => (null, "usage")
-        };
-    }
+        var identifier = node as IdentifierNameSyntax
+            ?? node.FirstAncestorOrSelf<IdentifierNameSyntax>();
+        if (identifier != null)
+            return ClassifyReference(identifier);
 
-    private static bool IsMatch(ISymbol candidate, HashSet<ISymbol> targets)
-    {
-        if (targets.Contains(candidate))
-            return true;
-        if (candidate.OriginalDefinition != null && targets.Contains(candidate.OriginalDefinition))
-            return true;
-        // For interface implementations
-        if (candidate is IMethodSymbol method)
-        {
-            foreach (var target in targets)
-            {
-                if (target is IMethodSymbol targetMethod &&
-                    targetMethod.ContainingType?.TypeKind == TypeKind.Interface)
-                {
-                    var impl = method.ContainingType?.FindImplementationForInterfaceMember(targetMethod);
-                    if (impl != null && SymbolEqualityComparer.Default.Equals(impl, method))
-                        return true;
-                }
-            }
-        }
-        return false;
+        if (node is GenericNameSyntax || node.FirstAncestorOrSelf<GenericNameSyntax>() != null)
+            return "type_argument";
+
+        return "usage";
     }
 
     private static string ClassifyReference(IdentifierNameSyntax identifier)
@@ -118,6 +91,7 @@ public static class FindReferencesLogic
             TypeConstraintSyntax => "type_constraint",
             BaseTypeSyntax => "base_type",
             ObjectCreationExpressionSyntax => "instantiation",
+            TypeArgumentListSyntax => "type_argument",
             _ => "usage"
         };
     }
