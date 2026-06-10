@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.1.0...v2.2.0) (2026-06-10)
+
+
+### Features
+
+* **symbols:** SymbolSignatureComparer for cross-compilation identity in enumeration paths ([#214](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/214)) ([b34f8c6](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/b34f8c658d1ee7122c30a2706dacb5fb987e3c3b))
+
+
+### Bug Fixes
+
+* **bg-tasks:** set Result/ErrorCode/ErrorMessage before flipping Status to terminal ([#212](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/212)) ([272f8ad](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/272f8adb54026dc40c99771adcc78519afd2bc9f))
+* **find_references,find_callers:** use SymbolFinder for cross-compilation symbol identity ([#211](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/211)) ([7283122](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/7283122abd4c457354814a18eea43c8b33cf1dde))
+
 ## [2.1.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.0.0...v2.1.0) (2026-05-28)
 
 
