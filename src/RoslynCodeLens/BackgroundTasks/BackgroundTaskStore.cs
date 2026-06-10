@@ -34,8 +34,8 @@ public sealed class BackgroundTaskStore : IDisposable
             try
             {
                 var result = await work(task.Cts.Token).ConfigureAwait(false);
-                task.Status = BackgroundTaskStatus.Succeeded;
                 task.Result = result;
+                task.Status = BackgroundTaskStatus.Succeeded;
             }
             catch (OperationCanceledException)
             {
@@ -43,15 +43,18 @@ public sealed class BackgroundTaskStore : IDisposable
             }
             catch (McpToolException mcpEx)
             {
-                task.Status = BackgroundTaskStatus.Failed;
+                // Populate payload fields *before* the terminal Status flip so a
+                // polling consumer that observes Status != Running cannot also
+                // observe null ErrorCode/ErrorMessage.
                 task.ErrorCode = mcpEx.Code.ToString();
                 task.ErrorMessage = mcpEx.Message;
+                task.Status = BackgroundTaskStatus.Failed;
             }
             catch (Exception ex)
             {
-                task.Status = BackgroundTaskStatus.Failed;
                 task.ErrorCode = nameof(ToolErrorCode.Internal);
                 task.ErrorMessage = ex.Message;
+                task.Status = BackgroundTaskStatus.Failed;
             }
             finally
             {
