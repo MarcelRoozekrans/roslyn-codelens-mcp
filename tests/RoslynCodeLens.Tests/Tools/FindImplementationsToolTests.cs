@@ -47,6 +47,17 @@ public class FindImplementationsToolTests
     }
 
     [Fact]
+    public void FindImplementations_ForInterface_FindsImplementorInReferencingProject()
+    {
+        // IGreeter is defined in TestLib; CrossProjectGreeter implements it in TestLib2.
+        // Without cross-compilation symbol normalisation, only same-project implementors
+        // are found because Roslyn produces different ISymbol instances per compilation.
+        var results = FindImplementationsLogic.Execute(_loaded, _resolver, _metadata, "IGreeter");
+
+        Assert.Contains(results, r => r.FullName.Contains("CrossProjectGreeter", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Sort_OrdersByFileThenLine()
     {
         var input = new List<SymbolLocation>

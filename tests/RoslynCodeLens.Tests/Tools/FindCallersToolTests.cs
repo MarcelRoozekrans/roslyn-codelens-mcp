@@ -39,6 +39,17 @@ public class FindCallersToolTests
     }
 
     [Fact]
+    public void FindCallers_InterfaceMethod_FindsCallersInReferencingProject()
+    {
+        // IGreeter.Greet is defined in TestLib; GreeterConsumer in TestLib2 calls it via the interface.
+        // Without cross-compilation symbol normalisation, the interface dispatch check uses
+        // reference-equality symbols, missing callers from other projects.
+        var results = FindCallersLogic.Execute(_loaded, _resolver, _metadata, "IGreeter.Greet");
+
+        Assert.Contains(results, r => r.File.Contains("TestLib2", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void Sort_OrdersByFileThenLine()
     {
         var input = new List<CallerInfo>

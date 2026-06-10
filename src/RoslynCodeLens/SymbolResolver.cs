@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
+using RoslynCodeLens.Symbols;
 
 namespace RoslynCodeLens;
 
@@ -91,9 +92,8 @@ public class SymbolResolver
                      Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>)
         BuildInheritanceMaps(List<INamedTypeSymbol> allTypes)
     {
-        var comparer = SymbolEqualityComparer.Default;
-        var implementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
-        var derived = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
+        var implementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeSignatureComparer.Instance);
+        var derived = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeSignatureComparer.Instance);
 
         foreach (ref readonly var type in CollectionsMarshal.AsSpan(allTypes))
         {
