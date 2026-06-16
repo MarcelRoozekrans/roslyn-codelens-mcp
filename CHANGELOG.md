@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.0...v2.2.1) (2026-06-16)
+
+
+### Bug Fixes
+
+* **symbols:** tolerate ErrorTypeSymbol in inheritance index ([#222](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/222)) ([#223](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/223)) ([d3b61d8](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/d3b61d81c614a7495687f236b48acefd309aa2cd))
+
 ## [2.2.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.1.0...v2.2.0) (2026-06-10)
 
 

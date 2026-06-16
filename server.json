@@ -7,13 +7,13 @@
     "url": "https://github.com/MarcelRoozekrans/roslyn-codelens-mcp",
     "source": "github"
   },
-  "version": "2.2.0",
+  "version": "2.2.1",
   "packages": [
     {
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "RoslynCodeLens.Mcp",
-      "version": "2.2.0",
+      "version": "2.2.1",
       "transport": {
         "type": "stdio"
       },
