@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.1...v2.2.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* **ci:** suffix CI NuGet pushes with -ci.{run} to prevent version collisions ([#225](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/225)) ([#226](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/226)) ([ad12de5](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/ad12de52f161cc0ffa04ee36f1b28b8f6540e4f2))
+
 ## [2.2.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.0...v2.2.1) (2026-06-16)
 
 
