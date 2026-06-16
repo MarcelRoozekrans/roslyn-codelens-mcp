@@ -8,6 +8,9 @@ namespace RoslynCodeLens.Symbols;
 // SymbolEqualityComparer.Default treats those as different, breaking cross-project index lookups.
 // Intentional omissions: type-parameter names (may differ between source and metadata) and
 // assembly version (to tolerate multi-targeting and binding redirects).
+// Null-safe on ContainingNamespace and ContainingAssembly to tolerate ErrorTypeSymbol
+// instances (e.g. NoPiaMissingCanonicalTypeSymbol) that surface from AllInterfaces / BaseType
+// when references are unresolved.
 internal sealed class NamedTypeSignatureComparer : IEqualityComparer<INamedTypeSymbol>
 {
 	public static readonly NamedTypeSignatureComparer Instance = new();
@@ -18,7 +21,7 @@ internal sealed class NamedTypeSignatureComparer : IEqualityComparer<INamedTypeS
 		if (x is null || y is null) return false;
 		return x.Arity == y.Arity
 			&& string.Equals(x.Name, y.Name, StringComparison.Ordinal)
-			&& string.Equals(x.ContainingNamespace.ToDisplayString(), y.ContainingNamespace.ToDisplayString(), StringComparison.Ordinal)
+			&& string.Equals(x.ContainingNamespace?.ToDisplayString(), y.ContainingNamespace?.ToDisplayString(), StringComparison.Ordinal)
 			&& string.Equals(x.ContainingAssembly?.Identity.Name, y.ContainingAssembly?.Identity.Name, StringComparison.Ordinal);
 	}
 
@@ -27,7 +30,7 @@ internal sealed class NamedTypeSignatureComparer : IEqualityComparer<INamedTypeS
 		return HashCode.Combine(
 			obj.Name,
 			obj.Arity,
-			obj.ContainingNamespace.ToDisplayString(),
+			obj.ContainingNamespace?.ToDisplayString(),
 			obj.ContainingAssembly?.Identity.Name);
 	}
 }

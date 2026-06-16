@@ -99,6 +99,9 @@ public class SymbolResolver
         {
             foreach (var iface in type.AllInterfaces)
             {
+                // Skip error symbols (e.g. NoPiaMissingCanonicalTypeSymbol from unresolved
+                // embedded-interop types) — they have no real identity and would pollute the index.
+                if (iface.TypeKind == TypeKind.Error) continue;
                 if (!implementors.TryGetValue(iface, out var implList))
                 {
                     implList = new List<INamedTypeSymbol>();
@@ -110,6 +113,7 @@ public class SymbolResolver
             var baseType = type.BaseType;
             while (baseType != null && baseType.SpecialType != SpecialType.System_Object)
             {
+                if (baseType.TypeKind == TypeKind.Error) break;
                 if (!derived.TryGetValue(baseType, out var derivedList))
                 {
                     derivedList = new List<INamedTypeSymbol>();
