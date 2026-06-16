@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.2...v2.2.3) (2026-06-16)
+
+
+### Bug Fixes
+
+* **ci:** retry MCP Registry publish to absorb NuGet indexing lag ([#230](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/230)) ([2eb6b9f](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/2eb6b9f12954766d700840e472306d52fef39132))
+
 ## [2.2.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.1...v2.2.2) (2026-06-16)
 
 
