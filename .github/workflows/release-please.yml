@@ -48,7 +48,9 @@ jobs:
           dotnet pack src/RoslynCodeLens/RoslynCodeLens.csproj -c Release --no-build -p:PackageVersion=${{ needs.release-please.outputs.version }} -o ./nupkg
 
       - name: Push to NuGet
-        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        # No --skip-duplicate: if the release version already exists on NuGet, fail loudly
+        # rather than silently masking a version collision (see #225).
+        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
       - name: Upload to GitHub Release
         run: gh release upload ${{ needs.release-please.outputs.tag_name }} ./nupkg/*.nupkg
