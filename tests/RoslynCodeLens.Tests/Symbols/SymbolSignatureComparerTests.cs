@@ -136,4 +136,51 @@ public class SymbolSignatureComparerTests
 
 		Assert.Contains(metadata, set);
 	}
+
+	// Repro for issue #222: NoPiaMissingCanonicalTypeSymbol (an ErrorTypeSymbol) has a null
+	// ContainingNamespace and surfaces from AllInterfaces when embedded-interop canonical
+	// type lookup fails (e.g. WebView2 referenced from a WPF app). The comparer must not NRE
+	// when such a symbol is hashed or compared.
+	private static INamedTypeSymbol BuildErrorTypeWithoutNamespace()
+	{
+		var compilation = CSharpCompilation.Create(
+			"Empty",
+			[],
+			[MetadataReference.CreateFromFile(typeof(object).Assembly.Location)]);
+		return compilation.CreateErrorTypeSymbol(container: null, name: "", arity: 0);
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_GetHashCode_ErrorTypeWithNullNamespace_DoesNotThrow()
+	{
+		var errorType = BuildErrorTypeWithoutNamespace();
+		// Sanity check: this is the precondition the regression depends on.
+		Assert.Null(errorType.ContainingNamespace);
+
+		var ex = Record.Exception(() => NamedTypeSignatureComparer.Instance.GetHashCode(errorType));
+
+		Assert.Null(ex);
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_Equals_ErrorTypeWithNullNamespace_DoesNotThrow()
+	{
+		var errorType = BuildErrorTypeWithoutNamespace();
+
+		var ex = Record.Exception(() => NamedTypeSignatureComparer.Instance.Equals(errorType, errorType));
+
+		Assert.Null(ex);
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_UsableAsDictionaryKey_ErrorTypeWithNullNamespace_DoesNotThrow()
+	{
+		// Mirrors BuildInheritanceMaps: the dictionary insert triggers GetHashCode on the key.
+		var errorType = BuildErrorTypeWithoutNamespace();
+		var dict = new Dictionary<INamedTypeSymbol, string>(NamedTypeSignatureComparer.Instance);
+
+		var ex = Record.Exception(() => dict[errorType] = "x");
+
+		Assert.Null(ex);
+	}
 }
