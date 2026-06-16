@@ -25,12 +25,18 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
-      - name: Run GitVersion
-        id: gitversion
+      - name: Compute CI package version
+        id: pkgver
         run: |
-          VERSION=$(dotnet gitversion /showvariable SemVer)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Package version: $VERSION"
+          SEMVER=$(dotnet gitversion /showvariable SemVer)
+          # Always append a CI prerelease suffix so a main-branch CI publish can never
+          # collide with the stable version that release-please publishes for a tag.
+          # See #225: a stable "2.2.1" got published from a regular push to main, then
+          # the release-please publish for the actual v2.2.1 silently no-op'd via
+          # --skip-duplicate, leaving the wrong build at the released version on NuGet.
+          CI_VERSION="${SEMVER}-ci.${{ github.run_number }}"
+          echo "version=$CI_VERSION" >> "$GITHUB_OUTPUT"
+          echo "CI package version: $CI_VERSION"
 
       - name: Restore
         run: dotnet restore
@@ -39,14 +45,14 @@ jobs:
         run: dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
 
       - name: Build
-        run: dotnet build --no-restore -c Release -p:Version=${{ steps.gitversion.outputs.version }}
+        run: dotnet build --no-restore -c Release -p:Version=${{ steps.pkgver.outputs.version }}
 
       - name: Test
         run: dotnet test --no-build -c Release --verbosity normal
 
       - name: Pack
         run: |
-          dotnet pack src/RoslynCodeLens/RoslynCodeLens.csproj --no-build -c Release -p:PackageVersion=${{ steps.gitversion.outputs.version }} -o ./artifacts
+          dotnet pack src/RoslynCodeLens/RoslynCodeLens.csproj --no-build -c Release -p:PackageVersion=${{ steps.pkgver.outputs.version }} -o ./artifacts
 
       - name: Push to NuGet (pre-release)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
