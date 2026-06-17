@@ -45,14 +45,14 @@ public sealed class SolutionManager : IDisposable
     public bool HasLoadFailure => _loadException != null;
     public string? LoadFailureMessage => _loadFailureMessage;
 
-    public static async Task<SolutionManager> CreateAsync(string solutionPath)
+    public static async Task<SolutionManager> CreateAsync(string solutionPath, ProjectFilter? filter = null)
     {
         var loader = new SolutionLoader();
         Solution solution;
         IReadOnlyList<SkippedProject> skipped;
         try
         {
-            (solution, _, skipped) = await loader.OpenAsync(solutionPath).ConfigureAwait(false);
+            (solution, _, skipped) = await loader.OpenAsync(solutionPath, filter).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
