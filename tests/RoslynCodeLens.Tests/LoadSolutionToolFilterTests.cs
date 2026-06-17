@@ -3,7 +3,7 @@ using RoslynCodeLens.Tools;
 
 namespace RoslynCodeLens.Tests;
 
-public class LoadSolutionToolTests
+public class LoadSolutionToolFilterTests
 {
     private static string Slnx()
     {
