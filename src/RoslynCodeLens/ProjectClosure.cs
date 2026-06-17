@@ -15,12 +15,19 @@ public static class ProjectClosure
 {
     public sealed record Result(IReadOnlySet<string> Loaded);
 
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the filter matches no projects (empty seeds), when
+    /// <see cref="ProjectFilter.RootProjects"/> names projects absent from the
+    /// solution (unknown roots), or when an include pattern is an invalid glob.
+    /// </exception>
     public static Result Compute(
         ProjectFilter filter,
         IEnumerable<string> allProjectNames,
         IReadOnlyDictionary<string, IReadOnlyList<string>> graph)
     {
-        var allSet = allProjectNames is HashSet<string> hs ? hs : new HashSet<string>(allProjectNames, StringComparer.Ordinal);
+        var allSet = allProjectNames is HashSet<string> hs && hs.Comparer.Equals(StringComparer.Ordinal)
+            ? hs
+            : new HashSet<string>(allProjectNames, StringComparer.Ordinal);
 
         var includeRegexes = new List<Regex>(filter.Include.Count);
         foreach (var pattern in filter.Include)
@@ -92,6 +99,6 @@ public static class ProjectClosure
             throw new ArgumentException("character classes '[…]' are not supported");
 
         var pattern = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-        return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        return new Regex(pattern, RegexOptions.CultureInvariant);
     }
 }
