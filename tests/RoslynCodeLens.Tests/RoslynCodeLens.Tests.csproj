@@ -22,9 +22,11 @@
     <Compile Remove="Fixtures\TestSolution\**" />
     <Compile Remove="Fixtures\TestSolutionAlt\**" />
     <Compile Remove="Fixtures\LegacySolution\**" />
+    <Compile Remove="Fixtures\GraphReader\**" />
     <None Include="Fixtures\TestSolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\TestSolutionAlt\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\LegacySolution\**" CopyToOutputDirectory="Never" />
+    <None Include="Fixtures\GraphReader\**" CopyToOutputDirectory="PreserveNewest" />
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
