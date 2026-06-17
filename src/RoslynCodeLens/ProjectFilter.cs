@@ -6,8 +6,11 @@ namespace RoslynCodeLens;
 /// seed set; the loader walks <c>ProjectReference</c> transitively from
 /// these seeds to produce the loaded project set.
 /// </summary>
-/// <param name="Include">Glob patterns matched against <c>Project.Name</c>.</param>
-/// <param name="RootProjects">Exact project names; missing names are an error.</param>
+/// <param name="Include">Glob patterns matched (case-insensitively) against the project's
+/// file name without extension — the <c>.csproj</c>/<c>.vbproj</c> base name — not the
+/// MSBuild <c>&lt;AssemblyName&gt;</c>.</param>
+/// <param name="RootProjects">Exact project file names without extension (the
+/// <c>.csproj</c>/<c>.vbproj</c> base name), not the assembly name; missing names are an error.</param>
 public sealed record ProjectFilter(
     IReadOnlyList<string> Include,
     IReadOnlyList<string> RootProjects)

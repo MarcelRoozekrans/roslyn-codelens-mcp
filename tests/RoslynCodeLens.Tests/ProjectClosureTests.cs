@@ -93,6 +93,19 @@ public class ProjectClosureTests
     }
 
     [Fact]
+    public void Closure_GlobMatchIsCaseInsensitive()
+    {
+        var graph = Graph(
+            ("App.Api", Array.Empty<string>()),
+            ("Other",   Array.Empty<string>()));
+
+        var filter = new ProjectFilter(Include: new[] { "app.*" }, RootProjects: Array.Empty<string>());
+        var result = ProjectClosure.Compute(filter, allProjectNames: graph.Keys, graph);
+
+        Assert.Equal(new[] { "App.Api" }, result.Loaded.OrderBy(x => x));
+    }
+
+    [Fact]
     public void Closure_InvalidGlob_Throws()
     {
         var graph = Graph(("App.Api", Array.Empty<string>()));

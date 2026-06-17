@@ -35,4 +35,27 @@ public class LoadSolutionToolFilterTests
         Assert.DoesNotContain("skipped", result, StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith("Loaded", result.Trim());
     }
+
+    [Fact]
+    public async Task Execute_WithIncludeAndRootProjects_LoadsUnion()
+    {
+        using var manager = MultiSolutionManager.CreateEmpty();
+        // include Sample.Unrelated (no deps) + rootProjects App.Domain (pulls Shared.Common)
+        var result = await LoadSolutionTool.Execute(manager, Slnx(),
+            include: new[] { "Sample.*" }, rootProjects: new[] { "App.Domain" });
+
+        // Union closure: Sample.Unrelated (1, no deps) + App.Domain → Shared.Common (2) = 3 loaded.
+        // App.Api/App.Infrastructure/App.Api.Tests are NOT pulled (nothing in the seed set references them).
+        Assert.Contains("Loaded 3", result);
+    }
+
+    [Fact]
+    public async Task Execute_FilterMatchingNothing_ThrowsActionableError()
+    {
+        using var manager = MultiSolutionManager.CreateEmpty();
+        var ex = await Assert.ThrowsAsync<McpToolException>(() =>
+            LoadSolutionTool.Execute(manager, Slnx(),
+                include: new[] { "DoesNotMatchAnything.*" }, rootProjects: null));
+        Assert.Contains("matched 0 projects", ex.Message);
+    }
 }

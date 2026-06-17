@@ -99,6 +99,6 @@ public static class ProjectClosure
             throw new ArgumentException("character classes '[…]' are not supported");
 
         var pattern = "^" + Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".") + "$";
-        return new Regex(pattern, RegexOptions.CultureInvariant);
+        return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     }
 }

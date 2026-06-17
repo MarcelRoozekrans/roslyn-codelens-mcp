@@ -8,9 +8,11 @@ public static class LoadSolutionTool
 {
     [McpServerTool(Name = "load_solution"),
      Description("Load a .sln/.slnx solution at runtime and make it the active solution. " +
-                 "Pass `include` (glob array matched against project NAME, supporting only `*` and `?` " +
+                 "Both `include` and `rootProjects` match against the project FILE NAME without " +
+                 "extension (the .csproj/.vbproj base name), NOT the assembly name. " +
+                 "Pass `include` (case-insensitive glob array, supporting only `*` and `?` " +
                  "wildcards — character classes like `[...]` are NOT supported) or `rootProjects` " +
-                 "(EXACT project names) to load only a subset; the loader walks ProjectReference " +
+                 "(EXACT, case-sensitive file names) to load only a subset; the loader walks ProjectReference " +
                  "transitively from those seeds to keep the workspace semantically complete. " +
                  "A filter that matches NO project is an ERROR (the call fails) — it does NOT " +
                  "silently fall back to a full load; if unsure of exact names, do a no-filter load " +
@@ -21,8 +23,8 @@ public static class LoadSolutionTool
     public static async Task<string> Execute(
         MultiSolutionManager manager,
         [Description("Full path to the .sln or .slnx file to load")] string path,
-        [Description("Optional glob patterns against project name (e.g. 'MyApp.*')")] string[]? include = null,
-        [Description("Optional exact project names; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null)
+        [Description("Optional case-insensitive glob patterns against project file name without extension (e.g. 'MyApp.*')")] string[]? include = null,
+        [Description("Optional exact project file names without extension; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null)
     {
         if (!File.Exists(path))
             throw new FileNotFoundException($"Solution file not found: {path}");
