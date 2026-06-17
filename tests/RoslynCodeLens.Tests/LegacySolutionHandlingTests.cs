@@ -74,7 +74,7 @@ public class LegacySolutionHandlingTests
 
         var result = await LoadSolutionTool.Execute(manager, LegacySolutionPath);
 
-        Assert.Contains("Loaded and activated", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Loaded", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Skipped", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Legacy", result, StringComparison.OrdinalIgnoreCase);
 

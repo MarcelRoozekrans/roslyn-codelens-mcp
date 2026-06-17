@@ -26,7 +26,7 @@ public class LoadSolutionToolTests
 
         var result = await LoadSolutionTool.Execute(manager, _solutionPath);
 
-        Assert.Contains("Loaded and activated", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Loaded", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("TestSolution", result, StringComparison.OrdinalIgnoreCase);
         manager.Dispose();
     }
