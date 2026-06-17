@@ -25,6 +25,13 @@ Companions to `apply_code_action`, but for shapes that Roslyn doesn't ship out o
 - **`generate_dto_from_class`** — given a domain class, emit a DTO + AutoMapper-style mapping (or manual `ToDto`/`FromDto` extension methods). *Note: opinionated — picking a mapping style is the hard part.*
 - **`generate_builder`** — fluent builder for a class, including required-property tracking.
 
+## 4. Startup & loading performance
+
+Big-solution scenarios (400+ projects) where the structural open dominates wall-clock and blocks the client agent. The project-filter feature (issue [#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) is the in-flight first step; the items below are deferred companions.
+
+- **Parallelise the per-project fallback loader** — `SolutionLoader.OpenPerProjectAsync` currently iterates `foreach … await workspace.OpenProjectAsync(entry.Path)` sequentially. With 400 projects even an unfiltered load would benefit. *Note: `MSBuildWorkspace` is documented as not fully thread-safe for opens; needs validation (probably one workspace per worker, then re-stitch). Promote once the filter feature ships and we have measurements.*
+- **Async `load_solution` with a load handle** — return immediately with `{ status: "loading", loadId }` and add a `get_load_status` tool. Tools needing compilations either wait or report "still loading" with progress. Lets the agent issue other queries (e.g. `list_solutions`) while a 10-minute open is in flight. *Note: bigger surface change — touches `MultiSolutionManager`, `SolutionManager`, and every tool's `EnsureLoaded()` semantics. Defer until #232's filter approach proves insufficient on its own.*
+
 ---
 
 ## In flight
