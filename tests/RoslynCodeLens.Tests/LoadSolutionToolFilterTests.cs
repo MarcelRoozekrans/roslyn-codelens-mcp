@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.BackgroundTasks;
 using RoslynCodeLens.Tools;
 
 namespace RoslynCodeLens.Tests;
@@ -17,7 +18,8 @@ public class LoadSolutionToolFilterTests
     public async Task Execute_WithInclude_ReturnsLoadedAndSkippedCounts()
     {
         using var manager = MultiSolutionManager.CreateEmpty();
-        var result = await LoadSolutionTool.Execute(manager, Slnx(),
+        using var store = new BackgroundTaskStore();
+        var result = (string)await LoadSolutionTool.Execute(manager, store, Slnx(),
             include: new[] { "App.*" }, rootProjects: null);
 
         Assert.Contains("Loaded 5", result);
@@ -28,7 +30,8 @@ public class LoadSolutionToolFilterTests
     public async Task Execute_NoFilter_BehavesAsBefore()
     {
         using var manager = MultiSolutionManager.CreateEmpty();
-        var result = await LoadSolutionTool.Execute(manager, Slnx(),
+        using var store = new BackgroundTaskStore();
+        var result = (string)await LoadSolutionTool.Execute(manager, store, Slnx(),
             include: null, rootProjects: null);
 
         Assert.Contains("Loaded", result);
@@ -40,8 +43,9 @@ public class LoadSolutionToolFilterTests
     public async Task Execute_WithIncludeAndRootProjects_LoadsUnion()
     {
         using var manager = MultiSolutionManager.CreateEmpty();
+        using var store = new BackgroundTaskStore();
         // include Sample.Unrelated (no deps) + rootProjects App.Domain (pulls Shared.Common)
-        var result = await LoadSolutionTool.Execute(manager, Slnx(),
+        var result = (string)await LoadSolutionTool.Execute(manager, store, Slnx(),
             include: new[] { "Sample.*" }, rootProjects: new[] { "App.Domain" });
 
         // Union closure: Sample.Unrelated (1, no deps) + App.Domain → Shared.Common (2) = 3 loaded.
@@ -53,8 +57,9 @@ public class LoadSolutionToolFilterTests
     public async Task Execute_FilterMatchingNothing_ThrowsActionableError()
     {
         using var manager = MultiSolutionManager.CreateEmpty();
+        using var store = new BackgroundTaskStore();
         var ex = await Assert.ThrowsAsync<McpToolException>(() =>
-            LoadSolutionTool.Execute(manager, Slnx(),
+            LoadSolutionTool.Execute(manager, store, Slnx(),
                 include: new[] { "DoesNotMatchAnything.*" }, rootProjects: null));
         Assert.Contains("matched 0 projects", ex.Message);
     }
