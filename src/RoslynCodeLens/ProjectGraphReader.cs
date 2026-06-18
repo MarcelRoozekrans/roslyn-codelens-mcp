@@ -30,7 +30,15 @@ public static class ProjectGraphReader
                 var include = reader.GetAttribute("Include");
                 if (string.IsNullOrWhiteSpace(include)) continue;
 
-                var absolute = Path.GetFullPath(Path.Combine(dir, include));
+                // ProjectReference Include paths are authored with Windows-style
+                // backslash separators (the form MSBuild emits). Normalise them to
+                // the OS separator before combining, otherwise on non-Windows the
+                // backslashes are treated as ordinary characters: the ".." segment
+                // never collapses, the path matches no project, and the dependency
+                // edge is silently dropped — degenerating the transitive closure to
+                // the seed set. Mirrors ProjectClassifier.EnumerateProjects.
+                var normalisedInclude = include.Replace('\\', Path.DirectorySeparatorChar);
+                var absolute = Path.GetFullPath(Path.Combine(dir, normalisedInclude));
                 results.Add(absolute);
             }
         }
