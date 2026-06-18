@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.3...v2.3.0) (2026-06-18)
+
+
+### Features
+
+* **loader:** project-filter for load_solution ([#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) ([#235](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/235)) ([06b8239](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/06b823925a8ca71efe0b7426120d2ab64a4d9a06))
+
 ## [2.2.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.2...v2.2.3) (2026-06-16)
 
 
