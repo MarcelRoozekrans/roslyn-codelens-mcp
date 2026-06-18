@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using RoslynCodeLens.BackgroundTasks;
 
 namespace RoslynCodeLens.Tools;
 
@@ -19,19 +20,48 @@ public static class LoadSolutionTool
                  "first and call list_solutions to discover them. If the same `path` is already loaded, " +
                  "providing a new filter disposes the previous workspace (replace semantics). " +
                  "If the solution is already loaded with no filter, it simply activates it (~instant). " +
-                 "New solutions take ~3 seconds to load and compile.")]
-    public static async Task<string> Execute(
+                 "New solutions take ~3 seconds to load and compile. " +
+                 "For very large solutions (hundreds of projects) that take minutes to open, pass " +
+                 "`background: true` to return a taskId immediately instead of blocking; poll it with " +
+                 "get_task_status until it succeeds (its result carries the loaded/skipped counts). " +
+                 "The new solution only becomes active once the background load finishes, so other " +
+                 "tools keep working against the current solution meanwhile.")]
+    public static async Task<object> Execute(
         MultiSolutionManager manager,
+        BackgroundTaskStore store,
         [Description("Full path to the .sln or .slnx file to load")] string path,
         [Description("Optional case-insensitive glob patterns against project file name without extension (e.g. 'MyApp.*')")] string[]? include = null,
-        [Description("Optional exact project file names without extension; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null)
+        [Description("Optional exact project file names without extension; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null,
+        [Description("If true, load on a background task and return a taskId immediately (poll with get_task_status) instead of blocking until the solution is ready. Default false.")] bool background = false)
     {
+        // Validate up front in both modes so a bad path fails fast rather than
+        // surfacing only when the caller polls the background task.
         if (!File.Exists(path))
             throw new FileNotFoundException($"Solution file not found: {path}");
 
         ProjectFilter? filter = (include?.Length > 0 || rootProjects?.Length > 0)
             ? new ProjectFilter(include ?? Array.Empty<string>(), rootProjects ?? Array.Empty<string>())
             : null;
+
+        if (background)
+        {
+            return store.Start("load_solution", async _ =>
+            {
+                var loadedPath = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
+                var skippedProjects = manager.GetActiveSkippedProjects();
+                var projectCount = manager.GetLoadedSolution().Solution.Projects.Count();
+                return new
+                {
+                    path = loadedPath,
+                    loadedProjects = projectCount,
+                    skippedProjects = skippedProjects.Count,
+                    skipped = skippedProjects
+                        .Take(10)
+                        .Select(s => new { s.Name, s.Kind, s.Reason })
+                        .ToArray(),
+                };
+            });
+        }
 
         var normalised = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
         var skipped = manager.GetActiveSkippedProjects();

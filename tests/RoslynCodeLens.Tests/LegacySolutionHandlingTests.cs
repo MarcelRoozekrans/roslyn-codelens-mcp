@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.BackgroundTasks;
 using RoslynCodeLens.Tools;
 
 namespace RoslynCodeLens.Tests;
@@ -71,8 +72,9 @@ public class LegacySolutionHandlingTests
     public async Task LoadSolutionTool_LegacySolution_ReturnsSkippedSummary()
     {
         var manager = MultiSolutionManager.CreateEmpty();
+        using var store = new BackgroundTaskStore();
 
-        var result = await LoadSolutionTool.Execute(manager, LegacySolutionPath);
+        var result = (string)await LoadSolutionTool.Execute(manager, store, LegacySolutionPath);
 
         Assert.Contains("Loaded", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Skipped", result, StringComparison.OrdinalIgnoreCase);
