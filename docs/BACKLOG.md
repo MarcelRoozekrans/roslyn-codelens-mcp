@@ -27,9 +27,9 @@ Companions to `apply_code_action`, but for shapes that Roslyn doesn't ship out o
 
 ## 4. Startup & loading performance
 
-Big-solution scenarios (400+ projects) where the structural open dominates wall-clock and blocks the client agent. The project-filter feature (issue [#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) is the in-flight first step; the items below are deferred companions.
+Big-solution scenarios (400+ projects) where the structural open dominates wall-clock and blocks the client agent. The project-filter feature (issue [#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) was the first step; the items below were its deferred companions.
 
-- **Parallelise the per-project fallback loader** — `SolutionLoader.OpenPerProjectAsync` currently iterates `foreach … await workspace.OpenProjectAsync(entry.Path)` sequentially. With 400 projects even an unfiltered load would benefit. *Note: `MSBuildWorkspace` is documented as not fully thread-safe for opens; needs validation (probably one workspace per worker, then re-stitch). Promote once the filter feature ships and we have measurements.*
+- ✅ **Parallelise the per-project loader** — *shipped.* `SolutionLoader.OpenPerProjectAsync` now loads projects across a bounded pool of isolated `MSBuildWorkspace` workers (each its own out-of-process `BuildHost`), with global path-dedup to curb redundant transitive loads, then re-stitches the results into one workspace. Confirmed via experiment that concurrent `OpenProjectAsync` on a *shared* workspace corrupts the solution, so isolation + re-stitch is required. Degree via `ROSLYN_CODELENS_LOAD_PARALLELISM` (default `min(CPU, 8)`). Design: [docs/plans/2026-06-18-parallel-project-loader-design.md](plans/2026-06-18-parallel-project-loader-design.md).
 - **Async `load_solution` with a load handle** — return immediately with `{ status: "loading", loadId }` and add a `get_load_status` tool. Tools needing compilations either wait or report "still loading" with progress. Lets the agent issue other queries (e.g. `list_solutions`) while a 10-minute open is in flight. *Note: bigger surface change — touches `MultiSolutionManager`, `SolutionManager`, and every tool's `EnsureLoaded()` semantics. Defer until #232's filter approach proves insufficient on its own.*
 
 ---

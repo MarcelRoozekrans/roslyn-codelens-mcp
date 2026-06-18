@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynCodeLens;
 
 public class SolutionLoader
 {
     private const int DefaultOpenProjectTimeoutSec = 300;
+    private const int MaxDefaultParallelism = 8;
 
     internal static int GetOpenProjectTimeoutSec() =>
         int.TryParse(
@@ -15,6 +17,19 @@ public class SolutionLoader
             out var n) && n > 0
                 ? n
                 : DefaultOpenProjectTimeoutSec;
+
+    // Each worker opens projects in its own MSBuildWorkspace, which spins up a
+    // separate out-of-process BuildHost. That is the only way to get genuine
+    // build parallelism (one workspace serialises its builds through one
+    // BuildHost), but each process costs memory — so the fan-out is bounded.
+    // Override with ROSLYN_CODELENS_LOAD_PARALLELISM; 1 forces single-worker
+    // loading (deterministic, used by tests and as an escape hatch).
+    internal static int GetLoadParallelism() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("ROSLYN_CODELENS_LOAD_PARALLELISM"),
+            out var n) && n > 0
+                ? n
+                : Math.Max(1, Math.Min(Environment.ProcessorCount, MaxDefaultParallelism));
 
     internal static async Task<T?> RunWithTimeoutAsync<T>(
         Func<CancellationToken, Task<T?>> work,
@@ -40,7 +55,7 @@ public class SolutionLoader
         }
     }
 
-    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, CancellationToken ct = default)
+    public async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
 
@@ -104,59 +119,21 @@ public class SolutionLoader
         return (solution, workspace, Array.Empty<SkippedProject>());
     }
 
-    private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
+    private static async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         CancellationToken ct)
     {
-        var workspace = MSBuildWorkspace.Create();
         var skipped = new List<SkippedProject>();
 
-        workspace.WorkspaceFailed += (_, e) =>
-        {
-            Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
-        };
-
+        // Non-SDK entries (legacy/missing/unknown) are never opened; report them
+        // up front, exactly as the old sequential loader did.
+        var targets = new List<ProjectClassifier.ClassifiedProject>(classified.Count);
         foreach (var entry in classified)
         {
             if (entry.Kind == ProjectClassifier.ProjectKind.SdkStyle)
             {
-                // Opening a project pulls in its transitive ProjectReferences, so a
-                // later entry may already be present. Skip it rather than letting
-                // OpenProjectAsync throw "already part of the workspace" (which would
-                // otherwise be misreported as a load failure).
-                if (workspace.CurrentSolution.Projects.Any(p =>
-                        string.Equals(p.FilePath, entry.Path, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
-                var timeoutSec = GetOpenProjectTimeoutSec();
-                Project? loaded;
-                try
-                {
-                    loaded = await RunWithTimeoutAsync<Project>(
-                        innerCt => workspace.OpenProjectAsync(entry.Path, cancellationToken: innerCt),
-                        timeoutSec,
-                        ct).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    await Console.Error.WriteLineAsync(
-                        $"[roslyn-codelens] Skipping project {entry.Name}: {ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
-                    skipped.Add(new SkippedProject(entry.Path, entry.Name, "Failed",
-                        $"{ex.GetType().Name}: {ex.Message}"));
-                    continue;
-                }
-
-                if (loaded is null)
-                {
-                    await Console.Error.WriteLineAsync(
-                        $"[roslyn-codelens] Timeout loading project {entry.Name} (exceeded {timeoutSec}s).").ConfigureAwait(false);
-                    skipped.Add(new SkippedProject(entry.Path, entry.Name, "Timeout",
-                        $"Project load exceeded {timeoutSec}s. " +
-                        $"Set ROSLYN_CODELENS_OPEN_PROJECT_TIMEOUT_SECONDS to override."));
-                }
+                targets.Add(entry);
             }
             else
             {
@@ -168,10 +145,242 @@ public class SolutionLoader
             }
         }
 
+        if (targets.Count == 0)
+        {
+            return (new AdhocWorkspace().CurrentSolution, new AdhocWorkspace(), skipped);
+        }
+
+        // On-disk ProjectReference graph, restricted to the target set. Used both
+        // to order roots-first (so a few big transitive opens populate the cache
+        // and the leaves are skipped before they are scheduled) and to re-wire
+        // references after re-stitch. Reuses the same lightweight XML reader and
+        // separator normalisation as the filter feature, so it is cross-platform.
+        var targetPaths = new HashSet<string>(targets.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
+        var graph = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in targets)
+        {
+            var refs = new List<string>();
+            foreach (var refPath in ProjectGraphReader.ReadProjectReferences(t.Path))
+                if (targetPaths.Contains(refPath))
+                    refs.Add(refPath);
+            graph[t.Path] = refs;
+        }
+
+        var ordered = OrderRootsFirst(targets, graph);
+
+        // path -> detached ProjectInfo (text materialised in-memory, ProjectReferences
+        // stripped). Keep-first wins: a project pulled in transitively by an earlier
+        // worker is captured once and not re-opened standalone.
+        var captured = new ConcurrentDictionary<string, ProjectInfo>(StringComparer.OrdinalIgnoreCase);
+        var failures = new ConcurrentDictionary<string, SkippedProject>(StringComparer.OrdinalIgnoreCase);
+
+        var degree = GetLoadParallelism();
+        var timeoutSec = GetOpenProjectTimeoutSec();
+        using var gate = new SemaphoreSlim(degree);
+        var loadedCount = 0;
+
+        var tasks = new List<Task>(ordered.Count);
+        foreach (var entry in ordered)
+        {
+            if (captured.ContainsKey(entry.Path))
+                continue;
+
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    // Re-check after acquiring the gate: an in-flight worker may have
+                    // captured this project transitively while we were queued.
+                    if (captured.ContainsKey(entry.Path))
+                        return;
+
+                    var index = Interlocked.Increment(ref loadedCount);
+                    await Console.Error.WriteLineAsync(
+                        $"[roslyn-codelens] Loading {index}/{targets.Count}: {entry.Name}").ConfigureAwait(false);
+
+                    using var ws = MSBuildWorkspace.Create();
+                    ws.WorkspaceFailed += (_, e) =>
+                        Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
+
+                    Project? loaded;
+                    try
+                    {
+                        loaded = await RunWithTimeoutAsync<Project>(
+                            innerCt => ws.OpenProjectAsync(entry.Path, cancellationToken: innerCt),
+                            timeoutSec,
+                            ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        await Console.Error.WriteLineAsync(
+                            $"[roslyn-codelens] Skipping project {entry.Name}: {ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
+                        failures[entry.Path] = new SkippedProject(entry.Path, entry.Name, "Failed",
+                            $"{ex.GetType().Name}: {ex.Message}");
+                        return;
+                    }
+
+                    if (loaded is null)
+                    {
+                        await Console.Error.WriteLineAsync(
+                            $"[roslyn-codelens] Timeout loading project {entry.Name} (exceeded {timeoutSec}s).").ConfigureAwait(false);
+                        failures[entry.Path] = new SkippedProject(entry.Path, entry.Name, "Timeout",
+                            $"Project load exceeded {timeoutSec}s. " +
+                            $"Set ROSLYN_CODELENS_OPEN_PROJECT_TIMEOUT_SECONDS to override.");
+                        return;
+                    }
+
+                    // Capture this project plus every in-set project the workspace
+                    // pulled in transitively, detaching each into a workspace-free
+                    // ProjectInfo before the worker workspace is disposed.
+                    foreach (var p in ws.CurrentSolution.Projects)
+                    {
+                        if (p.FilePath is null || !targetPaths.Contains(p.FilePath))
+                            continue;
+                        if (captured.ContainsKey(p.FilePath))
+                            continue;
+                        var info = await ToDetachedInfoAsync(p).ConfigureAwait(false);
+                        captured.TryAdd(p.FilePath, info);
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }, ct));
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        // Re-stitch: rebuild every captured project into a single AdhocWorkspace,
+        // re-wiring ProjectReferences from the on-disk graph (their original ids
+        // were local to each worker workspace and are meaningless now).
+        var idByPath = new Dictionary<string, ProjectId>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, info) in captured)
+            idByPath[path] = info.Id;
+
+        var finalInfos = new List<ProjectInfo>(captured.Count);
+        foreach (var (path, info) in captured)
+        {
+            var projectRefs = new List<ProjectReference>();
+            foreach (var refPath in graph[path])
+                if (idByPath.TryGetValue(refPath, out var refId))
+                    projectRefs.Add(new ProjectReference(refId));
+            finalInfos.Add(info.WithProjectReferences(projectRefs));
+        }
+
+        // Any target SDK project that is neither captured nor already recorded as a
+        // failure could not be loaded — surface it through the same skip channel.
+        foreach (var t in targets)
+        {
+            if (captured.ContainsKey(t.Path))
+                continue;
+            skipped.Add(failures.TryGetValue(t.Path, out var f)
+                ? f
+                : new SkippedProject(t.Path, t.Name, "Failed", "Project could not be loaded."));
+        }
+
+        var workspace = new AdhocWorkspace();
+        var solutionInfo = SolutionInfo.Create(
+            SolutionId.CreateNewId(), VersionStamp.Create(), solutionPath, finalInfos);
+        workspace.AddSolution(solutionInfo);
+
         return (workspace.CurrentSolution, workspace, skipped);
     }
 
-    private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenFilteredAsync(
+    /// <summary>
+    /// Orders target projects by descending transitive in-set dependency count, so
+    /// dependency roots open first. Their transitive loads populate the capture
+    /// cache, letting leaf projects be skipped before they are ever scheduled.
+    /// Ordering affects only efficiency, never correctness (keep-first dedup).
+    /// </summary>
+    private static List<ProjectClassifier.ClassifiedProject> OrderRootsFirst(
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> targets,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> graph)
+    {
+        int ClosureSize(string path)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stack = new Stack<string>();
+            stack.Push(path);
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                if (!graph.TryGetValue(cur, out var refs))
+                    continue;
+                foreach (var r in refs)
+                    if (seen.Add(r))
+                        stack.Push(r);
+            }
+            return seen.Count;
+        }
+
+        return targets
+            .OrderByDescending(t => ClosureSize(t.Path))
+            .ThenBy(t => t.Name, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Detaches a workspace-loaded <see cref="Project"/> into a self-contained
+    /// <see cref="ProjectInfo"/> with document text materialised in memory and all
+    /// ProjectReferences stripped, so it survives disposal of its source workspace
+    /// and can be re-stitched into a fresh workspace. The project keeps its own
+    /// (globally-unique) id and document ids.
+    /// </summary>
+    private static async Task<ProjectInfo> ToDetachedInfoAsync(Project project)
+    {
+        var documents = new List<DocumentInfo>();
+        foreach (var d in project.Documents)
+            documents.Add(await ToDocumentInfoAsync(d, d.SourceCodeKind).ConfigureAwait(false));
+
+        var additional = new List<DocumentInfo>();
+        foreach (var d in project.AdditionalDocuments)
+            additional.Add(await ToDocumentInfoAsync(d, SourceCodeKind.Regular).ConfigureAwait(false));
+
+        var analyzerConfig = new List<DocumentInfo>();
+        foreach (var d in project.AnalyzerConfigDocuments)
+            analyzerConfig.Add(await ToDocumentInfoAsync(d, SourceCodeKind.Regular).ConfigureAwait(false));
+
+        return ProjectInfo.Create(
+                project.Id,
+                VersionStamp.Create(),
+                project.Name,
+                project.AssemblyName,
+                project.Language,
+                filePath: project.FilePath,
+                outputFilePath: project.OutputFilePath,
+                compilationOptions: project.CompilationOptions,
+                parseOptions: project.ParseOptions,
+                documents: documents,
+                projectReferences: Array.Empty<ProjectReference>(),
+                metadataReferences: project.MetadataReferences,
+                analyzerReferences: project.AnalyzerReferences,
+                additionalDocuments: additional)
+            .WithAnalyzerConfigDocuments(analyzerConfig)
+            .WithDefaultNamespace(project.DefaultNamespace);
+    }
+
+    private static async Task<DocumentInfo> ToDocumentInfoAsync(TextDocument document, SourceCodeKind kind)
+    {
+        var text = await document.GetTextAsync().ConfigureAwait(false);
+        var loader = TextLoader.From(
+            TextAndVersion.Create(text, VersionStamp.Create(), document.FilePath ?? document.Name));
+
+        return DocumentInfo.Create(
+            document.Id,
+            document.Name,
+            folders: document.Folders,
+            sourceCodeKind: kind,
+            loader: loader,
+            filePath: document.FilePath);
+    }
+
+    private static async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenFilteredAsync(
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         ProjectFilter filter,
