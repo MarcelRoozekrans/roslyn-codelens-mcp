@@ -40,9 +40,15 @@ public class SolutionLoader
         }
     }
 
-    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, CancellationToken ct = default)
+    public async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
+
+        if (filter is not null && filter.HasSeeds)
+        {
+            return await OpenFilteredAsync(solutionPath, classified, filter, ct).ConfigureAwait(false);
+        }
+
         var legacyOrMissing = classified
             .Where(p => p.Kind is ProjectClassifier.ProjectKind.Legacy
                      or ProjectClassifier.ProjectKind.Missing
@@ -115,6 +121,16 @@ public class SolutionLoader
         {
             if (entry.Kind == ProjectClassifier.ProjectKind.SdkStyle)
             {
+                // Opening a project pulls in its transitive ProjectReferences, so a
+                // later entry may already be present. Skip it rather than letting
+                // OpenProjectAsync throw "already part of the workspace" (which would
+                // otherwise be misreported as a load failure).
+                if (workspace.CurrentSolution.Projects.Any(p =>
+                        string.Equals(p.FilePath, entry.Path, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
                 var timeoutSec = GetOpenProjectTimeoutSec();
                 Project? loaded;
                 try
@@ -153,6 +169,70 @@ public class SolutionLoader
         }
 
         return (workspace.CurrentSolution, workspace, skipped);
+    }
+
+    private static async Task<(Solution Solution, MSBuildWorkspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenFilteredAsync(
+        string solutionPath,
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
+        ProjectFilter filter,
+        CancellationToken ct)
+    {
+        // Build a name -> referenced-project-names graph. References are read as
+        // absolute paths and resolved back to project names via the classified set,
+        // so only references that point at projects in this solution form edges.
+        var nameByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in classified)
+            nameByPath[entry.Path] = entry.Name;
+
+        var graph = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        foreach (var entry in classified)
+        {
+            if (entry.Kind != ProjectClassifier.ProjectKind.SdkStyle)
+            {
+                graph[entry.Name] = Array.Empty<string>();
+                continue;
+            }
+
+            var refPaths = ProjectGraphReader.ReadProjectReferences(entry.Path);
+            var refNames = new List<string>(refPaths.Count);
+            foreach (var refPath in refPaths)
+            {
+                if (nameByPath.TryGetValue(refPath, out var refName))
+                    refNames.Add(refName);
+            }
+            graph[entry.Name] = refNames;
+        }
+
+        // May throw InvalidOperationException for empty seeds / unknown roots /
+        // invalid globs; callers surface that as a load error.
+        var closure = ProjectClosure.Compute(filter, classified.Select(p => p.Name), graph);
+
+        await Console.Error.WriteLineAsync(
+            $"[roslyn-codelens] Loading {closure.Loaded.Count}/{classified.Count} project(s) from {Path.GetFileName(solutionPath)} (filtered).")
+            .ConfigureAwait(false);
+
+        // Projects excluded by the filter are reported up front; the remaining
+        // (in-closure) projects are loaded per-project, reusing the exact same
+        // loading/timeout/skip logic as the unfiltered fallback path.
+        var inClosure = new List<ProjectClassifier.ClassifiedProject>(closure.Loaded.Count);
+        var filteredOut = new List<SkippedProject>();
+        foreach (var entry in classified)
+        {
+            if (closure.Loaded.Contains(entry.Name))
+                inClosure.Add(entry);
+            else
+                filteredOut.Add(new SkippedProject(entry.Path, entry.Name, "FilteredOut",
+                    "Excluded by load_solution filter."));
+        }
+
+        var (solution, workspace, perProjectSkipped) =
+            await OpenPerProjectAsync(solutionPath, inClosure, ct).ConfigureAwait(false);
+
+        var skipped = new List<SkippedProject>(filteredOut.Count + perProjectSkipped.Count);
+        skipped.AddRange(filteredOut);
+        skipped.AddRange(perProjectSkipped);
+
+        return (solution, workspace, skipped);
     }
 
     public async Task<ConcurrentDictionary<ProjectId, Compilation>> CompileAllParallelAsync(Solution solution)

@@ -158,23 +158,38 @@ public sealed class MultiSolutionManager : IDisposable
     }
 
     /// <summary>
-    /// Load a new solution at runtime. If it's already loaded, just activates it.
+    /// Load a new solution at runtime. If it's already loaded with no (seeded) filter,
+    /// just activates it. If it's already loaded and a seeded <paramref name="filter"/> is
+    /// supplied, the previous workspace is disposed and reloaded fresh so the new filter
+    /// takes effect (replace semantics — no coexisting filtered views).
     /// Returns the normalised path of the loaded solution.
     /// </summary>
-    public async Task<string> LoadSolutionAsync(string solutionPath)
+    public async Task<string> LoadSolutionAsync(string solutionPath, ProjectFilter? filter = null)
     {
         var normalised = Path.GetFullPath(solutionPath);
 
+        SolutionManager? toDispose = null;
         lock (_lock)
         {
-            if (_managers.ContainsKey(normalised))
+            if (_managers.TryGetValue(normalised, out var existing) && filter is not null && filter.HasSeeds)
             {
+                // Replace semantics: a filtered re-load disposes the previous workspace
+                // so the new filter takes effect rather than silently re-activating the old view.
+                _managers.TryRemove(normalised, out _);
+                toDispose = existing;
+            }
+            else if (_managers.ContainsKey(normalised))
+            {
+                // No-filter (or seedless filter) re-load of an already-loaded path → re-activate fast path.
                 _activeKey = normalised;
                 return normalised;
             }
         }
 
-        var manager = await SolutionManager.CreateAsync(normalised).ConfigureAwait(false);
+        // Dispose the replaced manager OUTSIDE the lock to avoid blocking other callers.
+        toDispose?.Dispose();
+
+        var manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
 
         if (manager.HasLoadFailure)
         {

@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="App.Api/App.Api.csproj" />
+  <Project Path="App.Domain/App.Domain.csproj" />
+  <Project Path="App.Infrastructure/App.Infrastructure.csproj" />
+  <Project Path="Shared.Common/Shared.Common.csproj" />
+  <Project Path="Sample.Unrelated/Sample.Unrelated.csproj" />
+  <Project Path="App.Api.Tests/App.Api.Tests.csproj" />
+</Solution>
