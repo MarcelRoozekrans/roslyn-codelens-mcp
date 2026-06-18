@@ -1,7 +1,7 @@
 {
   "name": "roslyn-codelens-mcp",
   "description": "Roslyn-based .NET code graph intelligence for Claude Code",
-  "version": "2.2.3",
+  "version": "2.3.0",
   "owner": {
     "name": "Marcel Roozekrans"
   },
@@ -9,7 +9,7 @@
     {
       "name": "roslyn-codelens",
       "description": "Roslyn-based code graph intelligence for .NET codebases. Provides semantic understanding of type hierarchies, call sites, DI registrations, and reflection usage.",
-      "version": "2.2.3",
+      "version": "2.3.0",
       "author": {
         "name": "Marcel Roozekrans"
       },
