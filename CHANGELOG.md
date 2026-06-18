@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.3.0...v2.4.0) (2026-06-18)
+
+
+### Features
+
+* **load:** async load_solution via background task handle ([#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) ([#240](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/240)) ([7bee805](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/7bee8050abdd13f2f51a67ed7a85fc3a5ee77b50))
+
+
+### Performance Improvements
+
+* **loader:** parallelise per-project loading with re-stitch ([#232](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/232)) ([#238](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/238)) ([bc000bb](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/bc000bb2ca17babf78863541654feca305de1fbc))
+
 ## [2.3.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.2.3...v2.3.0) (2026-06-18)
 
 
