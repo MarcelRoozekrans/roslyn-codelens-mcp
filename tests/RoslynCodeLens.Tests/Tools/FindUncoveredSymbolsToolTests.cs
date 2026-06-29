@@ -39,6 +39,15 @@ public class FindUncoveredSymbolsToolTests
     }
 
     [Fact]
+    public void Result_Indexer_DoesNotAppearAsUncovered()
+    {
+        var result = FindUncoveredSymbolsLogic.Execute(_loaded, _resolver);
+
+        Assert.DoesNotContain(result.UncoveredSymbols, s =>
+            string.Equals(s.Symbol, "IndexerSample.this[]", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Result_FormalNameLength_AppearsAsProperty()
     {
         var result = FindUncoveredSymbolsLogic.Execute(_loaded, _resolver);
