@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Threading;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeLens.Analyzers;
@@ -15,6 +16,7 @@ public sealed class ShadowCopyAnalyzerAssemblyLoader : IAnalyzerAssemblyLoader, 
     private readonly SharedAnalyzerAssemblyCache _cache;
     private readonly ConcurrentBag<string> _dependencyLocations = new();
     private readonly ConcurrentBag<SharedAnalyzerAssemblyCache.AnalyzerAssemblyHandle> _handles = new();
+    private int _disposed;
 
     public ShadowCopyAnalyzerAssemblyLoader(SharedAnalyzerAssemblyCache cache) => _cache = cache;
 
@@ -29,6 +31,11 @@ public sealed class ShadowCopyAnalyzerAssemblyLoader : IAnalyzerAssemblyLoader, 
 
     public void Dispose()
     {
+        // Release each acquired handle AT MOST ONCE, even under double/raced Dispose —
+        // a double release would decrement a shared refcount twice and could prematurely
+        // unload another live solution's analyzer ALC.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
         foreach (var handle in _handles)
             _cache.Release(handle);
     }

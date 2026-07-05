@@ -29,6 +29,7 @@ public sealed class SolutionManager : IDisposable
     private static readonly SharedAnalyzerAssemblyCache SharedCache = new();
     private ShadowCopyAnalyzerAssemblyLoader? _analyzerLoader;
     private Workspace? _workspace;
+    private bool _disposed;
 
     private SolutionManager(LoadedSolution loaded, string? solutionPath)
     {
@@ -318,9 +319,26 @@ public sealed class SolutionManager : IDisposable
 
     public void Dispose()
     {
-        _tracker?.Dispose();
+        // Idempotent: snapshot the swappable state under _lock (ForceReloadAsync swaps
+        // _workspace/_analyzerLoader under the same lock), then dispose outside it. This
+        // avoids a double release of refcounted analyzer handles that could prematurely
+        // unload another live solution's analyzer ALC.
+        Workspace? workspace;
+        ShadowCopyAnalyzerAssemblyLoader? analyzerLoader;
+        FileChangeTracker? tracker;
+        lock (_lock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            workspace = _workspace;
+            analyzerLoader = _analyzerLoader;
+            tracker = _tracker;
+            _workspace = null;
+            _analyzerLoader = null;
+        }
+        tracker?.Dispose();
         _peCache.Dispose();
-        _workspace?.Dispose();
-        _analyzerLoader?.Dispose();   // releases each acquired analyzer -> refcount--, unload at zero
+        workspace?.Dispose();
+        analyzerLoader?.Dispose();   // releases each acquired analyzer -> refcount--, unload at zero
     }
 }
