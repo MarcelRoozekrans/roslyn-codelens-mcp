@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
+using RoslynCodeLens.Analyzers;
 using RoslynCodeLens.Metadata;
 using RoslynCodeLens.Symbols;
 
@@ -21,6 +22,13 @@ public sealed class SolutionManager : IDisposable
     private readonly string? _loadFailureMessage;
     private readonly PEFileCache _peCache = new();
     private readonly IlDisassemblerAdapter _ilAdapter;
+
+    // Process-lifetime shared shadow-copy cache (never disposed): the cross-solution
+    // dedup layer. Individual solutions release their entries via their own facade
+    // analyzer loader on dispose (refcount--), so entries unload when the last owner goes.
+    private static readonly SharedAnalyzerAssemblyCache SharedCache = new();
+    private ShadowCopyAnalyzerAssemblyLoader? _analyzerLoader;
+    private Workspace? _workspace;
 
     private SolutionManager(LoadedSolution loaded, string? solutionPath)
     {
@@ -47,15 +55,19 @@ public sealed class SolutionManager : IDisposable
 
     public static async Task<SolutionManager> CreateAsync(string solutionPath, ProjectFilter? filter = null)
     {
-        var loader = new SolutionLoader();
+        var solutionLoader = new SolutionLoader();
+        var analyzerLoader = new ShadowCopyAnalyzerAssemblyLoader(SharedCache);
         Solution solution;
+        Workspace workspace;
         IReadOnlyList<SkippedProject> skipped;
         try
         {
-            (solution, _, skipped) = await loader.OpenAsync(solutionPath, filter).ConfigureAwait(false);
+            (solution, workspace, skipped) =
+                await solutionLoader.OpenAsync(solutionPath, filter, analyzerLoader).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
+            analyzerLoader.Dispose();
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] {SolutionLoadFailure.Describe(solutionPath, ex)}").ConfigureAwait(false);
             return new SolutionManager(solutionPath, ex);
@@ -69,7 +81,9 @@ public sealed class SolutionManager : IDisposable
         };
 
         var manager = new SolutionManager(emptyLoaded, solutionPath);
-        manager._warmupTask = manager.WarmupAsync(loader, solution, skipped);
+        manager._analyzerLoader = analyzerLoader;
+        manager._workspace = workspace;
+        manager._warmupTask = manager.WarmupAsync(solutionLoader, solution, skipped);
         return manager;
     }
 
@@ -254,18 +268,22 @@ public sealed class SolutionManager : IDisposable
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        var loader = new SolutionLoader();
+        var solutionLoader = new SolutionLoader();
+        var analyzerLoader = new ShadowCopyAnalyzerAssemblyLoader(SharedCache);
         Solution solution;
+        Workspace workspace;
         IReadOnlyList<SkippedProject> skipped;
         try
         {
-            (solution, _, skipped) = await loader.OpenAsync(_solutionPath).ConfigureAwait(false);
+            (solution, workspace, skipped) =
+                await solutionLoader.OpenAsync(_solutionPath, null, analyzerLoader).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
+            analyzerLoader.Dispose();
             throw new InvalidOperationException(SolutionLoadFailure.Describe(_solutionPath, ex), ex);
         }
-        var compilations = await loader.CompileAllParallelAsync(solution).ConfigureAwait(false);
+        var compilations = await solutionLoader.CompileAllParallelAsync(solution).ConfigureAwait(false);
 
         var newLoaded = new LoadedSolution
         {
@@ -276,15 +294,23 @@ public sealed class SolutionManager : IDisposable
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
 
+        var oldLoader = _analyzerLoader;
+        var oldWorkspace = _workspace;
         lock (_lock)
         {
             _loaded = newLoaded;
             _resolver = newResolver;
             _metadataResolver = newMetadataResolver;
+            _analyzerLoader = analyzerLoader;
+            _workspace = workspace;
         }
 
         _tracker?.UpdateMappings(newLoaded);
         _tracker?.ClearStale();
+
+        // Dispose the previous workspace/loader AFTER the state swap so nothing in-flight uses them.
+        oldWorkspace?.Dispose();
+        oldLoader?.Dispose();
 
         sw.Stop();
         return (newLoaded.Compilations.Count, sw.Elapsed);
@@ -294,5 +320,7 @@ public sealed class SolutionManager : IDisposable
     {
         _tracker?.Dispose();
         _peCache.Dispose();
+        _workspace?.Dispose();
+        _analyzerLoader?.Dispose();   // releases each acquired analyzer -> refcount--, unload at zero
     }
 }
