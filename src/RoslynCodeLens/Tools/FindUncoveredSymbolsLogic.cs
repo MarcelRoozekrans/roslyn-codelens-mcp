@@ -199,6 +199,8 @@ public static class FindUncoveredSymbolsLogic
                     }
                     else if (member is IPropertySymbol property)
                     {
+                        if (property.IsIndexer)
+                            continue;
                         if (property.IsAbstract)
                             continue;
                         if (property.GetMethod is null && property.SetMethod is null)
