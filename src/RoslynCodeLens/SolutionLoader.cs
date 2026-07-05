@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
+using RoslynCodeLens.Analyzers;
 
 namespace RoslynCodeLens;
 
@@ -55,13 +56,13 @@ public class SolutionLoader
         }
     }
 
-    public async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, CancellationToken ct = default)
+    public async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, ShadowCopyAnalyzerAssemblyLoader? analyzerLoader = null, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
 
         if (filter is not null && filter.HasSeeds)
         {
-            return await OpenFilteredAsync(solutionPath, classified, filter, ct).ConfigureAwait(false);
+            return await OpenFilteredAsync(solutionPath, classified, filter, analyzerLoader, ct).ConfigureAwait(false);
         }
 
         var legacyOrMissing = classified
@@ -76,7 +77,7 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
         var workspace = MSBuildWorkspace.Create();
@@ -104,7 +105,7 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
         if (solution is null)
@@ -113,15 +114,32 @@ public class SolutionLoader
             await Console.Error.WriteLineAsync(
                 $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
                 .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified, ct).ConfigureAwait(false);
+            return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
+        if (analyzerLoader is not null)
+            solution = RemapSolutionAnalyzers(solution, analyzerLoader);
+
         return (solution, workspace, Array.Empty<SkippedProject>());
+    }
+
+    private static Solution RemapSolutionAnalyzers(Solution solution, ShadowCopyAnalyzerAssemblyLoader loader)
+    {
+        foreach (var projectId in solution.ProjectIds)
+        {
+            var project = solution.GetProject(projectId)!;
+            if (project.AnalyzerReferences.Count == 0)
+                continue;
+            var remapped = AnalyzerReferenceRemapper.Remap(project.AnalyzerReferences, loader);
+            solution = solution.WithProjectAnalyzerReferences(projectId, remapped);
+        }
+        return solution;
     }
 
     private static async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
+        ShadowCopyAnalyzerAssemblyLoader? analyzerLoader,
         CancellationToken ct)
     {
         var skipped = new List<SkippedProject>();
@@ -243,7 +261,7 @@ public class SolutionLoader
                             continue;
                         if (captured.ContainsKey(p.FilePath))
                             continue;
-                        var info = await ToDetachedInfoAsync(p).ConfigureAwait(false);
+                        var info = await ToDetachedInfoAsync(p, analyzerLoader).ConfigureAwait(false);
                         captured.TryAdd(p.FilePath, info);
                     }
                 }
@@ -332,7 +350,7 @@ public class SolutionLoader
     /// and can be re-stitched into a fresh workspace. The project keeps its own
     /// (globally-unique) id and document ids.
     /// </summary>
-    private static async Task<ProjectInfo> ToDetachedInfoAsync(Project project)
+    private static async Task<ProjectInfo> ToDetachedInfoAsync(Project project, ShadowCopyAnalyzerAssemblyLoader? loader)
     {
         var documents = new List<DocumentInfo>();
         foreach (var d in project.Documents)
@@ -359,7 +377,9 @@ public class SolutionLoader
                 documents: documents,
                 projectReferences: Array.Empty<ProjectReference>(),
                 metadataReferences: project.MetadataReferences,
-                analyzerReferences: project.AnalyzerReferences,
+                analyzerReferences: loader is null
+                    ? project.AnalyzerReferences
+                    : AnalyzerReferenceRemapper.Remap(project.AnalyzerReferences, loader),
                 additionalDocuments: additional)
             .WithAnalyzerConfigDocuments(analyzerConfig)
             .WithDefaultNamespace(project.DefaultNamespace);
@@ -384,6 +404,7 @@ public class SolutionLoader
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         ProjectFilter filter,
+        ShadowCopyAnalyzerAssemblyLoader? analyzerLoader,
         CancellationToken ct)
     {
         // Build a name -> referenced-project-names graph. References are read as
@@ -435,7 +456,7 @@ public class SolutionLoader
         }
 
         var (solution, workspace, perProjectSkipped) =
-            await OpenPerProjectAsync(solutionPath, inClosure, ct).ConfigureAwait(false);
+            await OpenPerProjectAsync(solutionPath, inClosure, analyzerLoader, ct).ConfigureAwait(false);
 
         var skipped = new List<SkippedProject>(filteredOut.Count + perProjectSkipped.Count);
         skipped.AddRange(filteredOut);
