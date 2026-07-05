@@ -25,7 +25,7 @@ public class SharedAnalyzerAssemblyCacheTests : IDisposable
         using var cache = new SharedAnalyzerAssemblyCache();
         var original = MakeFakeAnalyzer("Alpha");
 
-        var asm = cache.Acquire(original, Array.Empty<string>());
+        var (asm, _) = cache.Acquire(original, Array.Empty<string>());
 
         Assert.NotNull(asm);
         Assert.NotEqual(
@@ -53,8 +53,8 @@ public class SharedAnalyzerAssemblyCacheTests : IDisposable
         using var cache = new SharedAnalyzerAssemblyCache();
         var original = MakeFakeAnalyzer("Gamma");
 
-        var a = cache.Acquire(original, Array.Empty<string>());
-        var b = cache.Acquire(original, Array.Empty<string>());
+        var (a, _) = cache.Acquire(original, Array.Empty<string>());
+        var (b, _) = cache.Acquire(original, Array.Empty<string>());
 
         Assert.Same(a, b);
     }
@@ -64,13 +64,14 @@ public class SharedAnalyzerAssemblyCacheTests : IDisposable
     {
         var cache = new SharedAnalyzerAssemblyCache();
         var original = MakeFakeAnalyzer("Delta");
-        var shadowDirBefore = Path.GetDirectoryName(cache.Acquire(original, Array.Empty<string>()).Location)!;
-        cache.Acquire(original, Array.Empty<string>());   // refcount = 2
+        var (root, handle1) = cache.Acquire(original, Array.Empty<string>());
+        var shadowDirBefore = Path.GetDirectoryName(root.Location)!;
+        var (_, handle2) = cache.Acquire(original, Array.Empty<string>());   // refcount = 2
 
-        cache.Release(original);                           // -> 1, still present
+        cache.Release(handle1);                            // -> 1, still present
         Assert.True(Directory.Exists(shadowDirBefore));
 
-        cache.Release(original);                           // -> 0, entry unloaded + removed
+        cache.Release(handle2);                            // -> 0, entry unloaded + removed
         ForceGc();
 
         // The collectible ALC's unload is best-effort: on Windows the shadow DLL can stay
@@ -78,12 +79,26 @@ public class SharedAnalyzerAssemblyCacheTests : IDisposable
         // CAN prove is that the entry left the cache at refcount zero: a further Release is a
         // harmless no-op, and re-Acquire has to build a brand-new shadow dir (a live entry
         // would have deduped and returned the same path).
-        var noop = Record.Exception(() => cache.Release(original));
+        var noop = Record.Exception(() => cache.Release(handle2));
         Assert.Null(noop);
 
-        var shadowDirAfter = Path.GetDirectoryName(cache.Acquire(original, Array.Empty<string>()).Location)!;
+        var (reAsm, _) = cache.Acquire(original, Array.Empty<string>());
+        var shadowDirAfter = Path.GetDirectoryName(reAsm.Location)!;
         Assert.NotEqual(shadowDirBefore, shadowDirAfter, StringComparer.OrdinalIgnoreCase);
         cache.Dispose();
+    }
+
+    [Fact]
+    public void Release_AfterOriginalDeleted_DoesNotThrow()   // guards handle-based release (#254)
+    {
+        using var cache = new SharedAnalyzerAssemblyCache();
+        var original = MakeFakeAnalyzer("Epsilon");
+
+        var (_, handle) = cache.Acquire(original, Array.Empty<string>());
+        File.Delete(original);   // simulate the concurrent build deleting the DLL
+
+        var ex = Record.Exception(() => cache.Release(handle));
+        Assert.Null(ex);         // must not throw FileNotFoundException
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

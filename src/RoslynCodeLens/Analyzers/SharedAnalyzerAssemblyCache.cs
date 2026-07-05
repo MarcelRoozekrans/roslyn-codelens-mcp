@@ -12,7 +12,19 @@ namespace RoslynCodeLens.Analyzers;
 /// </summary>
 public sealed class SharedAnalyzerAssemblyCache : IDisposable
 {
-    private readonly record struct Key(string Path, long Length, DateTime LastWriteUtc);
+    internal readonly record struct Key(string Path, long Length, DateTime LastWriteUtc);
+
+    /// <summary>
+    /// Opaque handle returned by <see cref="Acquire"/> that captures the cache key computed at
+    /// acquire time. <see cref="Release"/> takes this handle so it never has to touch the disk —
+    /// critical for #254, where a concurrent build may have already deleted or overwritten the
+    /// original analyzer DLL by the time we release.
+    /// </summary>
+    public readonly struct AnalyzerAssemblyHandle
+    {
+        internal Key Key { get; }
+        internal AnalyzerAssemblyHandle(Key key) => Key = key;
+    }
 
     private sealed class Entry
     {
@@ -31,12 +43,15 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
     private static Key KeyFor(string fullPath)
     {
         var fi = new FileInfo(fullPath);
-        return new Key(Path.GetFullPath(fullPath), fi.Length, fi.LastWriteTimeUtc);
+        // Normalize path casing so the same DLL referenced with different casing maps to one entry.
+        var normalized = Path.GetFullPath(fullPath).ToUpperInvariant();
+        return new Key(normalized, fi.Length, fi.LastWriteTimeUtc);
     }
 
     /// <summary>Load <paramref name="analyzerPath"/> from a shadow copy, incrementing its refcount.</summary>
     /// <param name="dependencyPaths">Sibling dependency locations Roslyn reported for this analyzer.</param>
-    public Assembly Acquire(string analyzerPath, IReadOnlyList<string> dependencyPaths)
+    /// <returns>The loaded root assembly and an opaque handle to pass back to <see cref="Release"/>.</returns>
+    public (Assembly Assembly, AnalyzerAssemblyHandle Handle) Acquire(string analyzerPath, IReadOnlyList<string> dependencyPaths)
     {
         var key = KeyFor(analyzerPath);
         lock (_gate)
@@ -45,34 +60,48 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
             if (_entries.TryGetValue(key, out var existing))
             {
                 existing.RefCount++;
-                return existing.Root;
+                return (existing.Root, new AnalyzerAssemblyHandle(key));
             }
 
             var shadowDir = Path.Combine(_root, Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(shadowDir);
-            var shadowPath = ShadowCopy(analyzerPath, shadowDir);
+            AssemblyLoadContext? alc = null;
+            try
+            {
+                Directory.CreateDirectory(shadowDir);
+                var shadowPath = ShadowCopy(analyzerPath, shadowDir);
 
-            var alc = new AssemblyLoadContext($"analyzer:{Path.GetFileName(analyzerPath)}", isCollectible: true);
-            alc.Resolving += (ctx, name) => ResolveDependency(ctx, name, analyzerPath, dependencyPaths, shadowDir);
+                alc = new AssemblyLoadContext($"analyzer:{Path.GetFileName(analyzerPath)}", isCollectible: true);
+                alc.Resolving += (ctx, name) => ResolveDependency(ctx, name, analyzerPath, dependencyPaths, shadowDir);
 
-            var root = alc.LoadFromAssemblyPath(shadowPath);
-            _entries[key] = new Entry { ShadowDir = shadowDir, Alc = alc, Root = root, RefCount = 1 };
-            return root;
+                var root = alc.LoadFromAssemblyPath(shadowPath);
+                _entries[key] = new Entry { ShadowDir = shadowDir, Alc = alc, Root = root, RefCount = 1 };
+                return (root, new AnalyzerAssemblyHandle(key));
+            }
+            catch
+            {
+                // A bad image (or any failure) must not leak the collectible ALC or the shadow dir.
+                alc?.Unload();
+                TryDeleteDir(shadowDir);
+                throw;
+            }
         }
     }
 
-    /// <summary>Decrement the refcount; at zero, unload the ALC and delete the shadow copy.</summary>
-    public void Release(string analyzerPath)
+    /// <summary>
+    /// Decrement the refcount for the entry identified by <paramref name="handle"/>; at zero,
+    /// unload the ALC and delete the shadow copy. Performs no disk access, so it is safe even if
+    /// the original analyzer DLL has since been deleted or overwritten by a concurrent build.
+    /// </summary>
+    public void Release(AnalyzerAssemblyHandle handle)
     {
-        var key = KeyFor(analyzerPath);
         lock (_gate)
         {
-            if (!_entries.TryGetValue(key, out var entry))
+            if (!_entries.TryGetValue(handle.Key, out var entry))
                 return;
             if (--entry.RefCount > 0)
                 return;
 
-            _entries.TryRemove(key, out _);
+            _entries.TryRemove(handle.Key, out _);
             entry.Alc.Unload();
             TryDeleteDir(entry.ShadowDir);
         }
@@ -100,8 +129,18 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
     private static string ShadowCopy(string source, string shadowDir)
     {
         var dest = Path.Combine(shadowDir, Path.GetFileName(source));
-        if (!File.Exists(dest))
+        if (File.Exists(dest))
+            return dest;
+
+        try
+        {
             File.Copy(source, dest, overwrite: false);
+        }
+        catch (IOException) when (File.Exists(dest))
+        {
+            // ResolveDependency runs outside _gate (during compilation), so a concurrent resolve
+            // may have produced this shadow already. "Already copied" is success.
+        }
         return dest;
     }
 
