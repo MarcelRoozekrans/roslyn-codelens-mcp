@@ -34,11 +34,17 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
         public int RefCount;
     }
 
+    private static readonly string ShadowParent =
+        Path.Combine(Path.GetTempPath(), "roslyn-codelens-shadow");
+
+    // Tagged with the process id so a later run can identify (and sweep) roots left by dead processes.
     private readonly string _root =
-        Path.Combine(Path.GetTempPath(), "roslyn-codelens-shadow", Guid.NewGuid().ToString("N"));
+        Path.Combine(ShadowParent, $"pid-{Environment.ProcessId}-{Guid.NewGuid():N}");
     private readonly ConcurrentDictionary<Key, Entry> _entries = new();
     private readonly Lock _gate = new();
     private bool _disposed;
+
+    public SharedAnalyzerAssemblyCache() => SweepDeadProcessRoots();
 
     private static Key KeyFor(string fullPath)
     {
@@ -103,7 +109,12 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
 
             _entries.TryRemove(handle.Key, out _);
             entry.Alc.Unload();
-            TryDeleteDir(entry.ShadowDir);
+            // Deliberately do NOT delete the shadow directory here. The just-unloaded assemblies
+            // may not be GC-collected yet, so they still appear in AppDomain.CurrentDomain.GetAssemblies()
+            // with Location pointing here; code that re-opens loaded assemblies by path (or Roslyn
+            // itself) would then hit a missing file. Shadow copies are reclaimed at process exit and
+            // swept on next startup (SweepDeadProcessRoots). This matches Roslyn's shadow-copy loader,
+            // which keeps its copies for the whole session.
         }
     }
 
@@ -159,7 +170,46 @@ public sealed class SharedAnalyzerAssemblyCache : IDisposable
             foreach (var entry in _entries.Values)
                 entry.Alc.Unload();
             _entries.Clear();
-            TryDeleteDir(_root);
+            // Shadow files are intentionally left on disk (see Release) — the loaded assemblies may
+            // still be referenced. They are cleaned up by the next process's startup sweep.
         }
+    }
+
+    /// <summary>
+    /// Best-effort removal of shadow roots left behind by processes that are no longer running.
+    /// Runs at construction; never touches this process's own root or any live process's root.
+    /// </summary>
+    private static void SweepDeadProcessRoots()
+    {
+        try
+        {
+            if (!Directory.Exists(ShadowParent))
+                return;
+
+            foreach (var dir in Directory.EnumerateDirectories(ShadowParent))
+            {
+                var name = Path.GetFileName(dir);
+                if (!name.StartsWith("pid-", StringComparison.Ordinal))
+                    continue;
+
+                var rest = name.AsSpan("pid-".Length);
+                var dash = rest.IndexOf('-');
+                if (dash <= 0 || !int.TryParse(rest[..dash], out var pid))
+                    continue;
+
+                if (pid == Environment.ProcessId || IsProcessAlive(pid))
+                    continue;
+
+                try { Directory.Delete(dir, recursive: true); }
+                catch { /* another instance may be sweeping too, or files are pinned — best effort */ }
+            }
+        }
+        catch { /* hygiene only; never fail construction over cleanup */ }
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        try { using var _ = System.Diagnostics.Process.GetProcessById(pid); return true; }
+        catch { return false; }
     }
 }
