@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.4.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.0...v2.4.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* **analyzers:** shadow-copy analyzer/generator assemblies so bin\Debug stays unlocked ([#254](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/254)) ([#258](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/258)) ([af54626](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/af546267ddf6e87486edc43efde93997f3fa589d))
+* **find_uncovered_symbols:** exclude indexers from coverage candidates ([#252](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/252)) ([d52267b](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/d52267b7e0b77a0225522577a7f7e56df2c026f5))
+
 ## [2.4.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.3.0...v2.4.0) (2026-06-18)
 
 
