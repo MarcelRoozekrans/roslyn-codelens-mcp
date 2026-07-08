@@ -32,6 +32,53 @@ public class SolutionLoader
                 ? n
                 : Math.Max(1, Math.Min(Environment.ProcessorCount, MaxDefaultParallelism));
 
+    // Concurrent MSBuildWorkspace design-time builds contend for the out-of-process
+    // BuildHost and can silently drop a project's references (partial or total),
+    // after which discovery/coverage over that project returns empty/wrong results.
+    // A single load in isolation is reliable; contention is the trigger. This
+    // process-wide gate caps how many design-time builds run at once ACROSS all
+    // concurrent loads, so independent load_solution calls (and each per-project
+    // worker) can't oversubscribe the BuildHost. Default equals the per-load
+    // parallelism, so a single load is never throttled; override with
+    // ROSLYN_CODELENS_MAX_CONCURRENT_LOADS.
+    internal static int GetMaxConcurrentBuildHosts() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("ROSLYN_CODELENS_MAX_CONCURRENT_LOADS"),
+            out var n) && n > 0
+                ? n
+                : GetLoadParallelism();
+
+    // How many times to re-open a solution whose design-time build reported
+    // reference-resolution failures, on a fresh workspace. Each load is an
+    // independent draw, so a small number of retries clears the transient
+    // contention drop. 0 disables retry. Override with ROSLYN_CODELENS_LOAD_RETRIES.
+    internal static int GetLoadRetryCount() =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("ROSLYN_CODELENS_LOAD_RETRIES"),
+            out var n) && n >= 0
+                ? n
+                : 2;
+
+    private static readonly SemaphoreSlim s_buildHostGate = new(GetMaxConcurrentBuildHosts());
+
+    /// <summary>Result of opening a solution: the loaded workspace plus what could not
+    /// be loaded (<see cref="Skipped"/>) and reference-resolution failures on projects
+    /// that did load (<see cref="LoadDiagnostics"/>).</summary>
+    public readonly record struct SolutionOpen(
+        Solution Solution,
+        Workspace Workspace,
+        IReadOnlyList<SkippedProject> Skipped,
+        IReadOnlyList<string> LoadDiagnostics)
+    {
+        // Back-compat deconstruction for callers that predate LoadDiagnostics.
+        public void Deconstruct(out Solution solution, out Workspace workspace, out IReadOnlyList<SkippedProject> skipped)
+        {
+            solution = Solution;
+            workspace = Workspace;
+            skipped = Skipped;
+        }
+    }
+
     internal static async Task<T?> RunWithTimeoutAsync<T>(
         Func<CancellationToken, Task<T?>> work,
         int timeoutSec,
@@ -56,7 +103,7 @@ public class SolutionLoader
         }
     }
 
-    public async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenAsync(string solutionPath, ProjectFilter? filter = null, ShadowCopyAnalyzerAssemblyLoader? analyzerLoader = null, CancellationToken ct = default)
+    public async Task<SolutionOpen> OpenAsync(string solutionPath, ProjectFilter? filter = null, ShadowCopyAnalyzerAssemblyLoader? analyzerLoader = null, CancellationToken ct = default)
     {
         var classified = ProjectClassifier.EnumerateProjects(solutionPath);
 
@@ -80,47 +127,117 @@ public class SolutionLoader
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var workspace = MSBuildWorkspace.Create();
-        workspace.WorkspaceFailed += (_, e) =>
-        {
-            Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
-        };
-
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
-        Solution? solution;
-        try
+        // Re-open on a fresh workspace when the design-time build drops a project's
+        // references under contention (a load is an independent draw). Keep the least
+        // degraded attempt; if all attempts drop references, surface them rather than
+        // returning a silently-degraded solution.
+        var maxAttempts = GetLoadRetryCount() + 1;
+        MSBuildWorkspace? bestWorkspace = null;
+        Solution? bestSolution = null;
+        IReadOnlyList<string> bestDropped = Array.Empty<string>();
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            solution = await RunWithTimeoutAsync<Solution>(
-                innerCt => workspace.OpenSolutionAsync(solutionPath, cancellationToken: innerCt),
-                GetOpenProjectTimeoutSec(),
-                ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // Fallback: solution-level open threw (often a legacy project we did not classify, or
-            // an SDK project with a broken import). Reuse per-project loading so we still surface
-            // whatever can be loaded plus a list of what was skipped.
-            workspace.Dispose();
-            await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
-                .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+            var workspace = MSBuildWorkspace.Create();
+            workspace.WorkspaceFailed += (_, e) =>
+                Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
+
+            Solution? solution;
+            try
+            {
+                await s_buildHostGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    solution = await RunWithTimeoutAsync<Solution>(
+                        innerCt => workspace.OpenSolutionAsync(solutionPath, cancellationToken: innerCt),
+                        GetOpenProjectTimeoutSec(),
+                        ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    s_buildHostGate.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                // Fallback: solution-level open threw (often a legacy project we did not classify, or
+                // an SDK project with a broken import). Reuse per-project loading so we still surface
+                // whatever can be loaded plus a list of what was skipped.
+                workspace.Dispose();
+                bestWorkspace?.Dispose();
+                await Console.Error.WriteLineAsync(
+                    $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
+                    .ConfigureAwait(false);
+                return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+            }
+
+            if (solution is null)
+            {
+                workspace.Dispose();
+                bestWorkspace?.Dispose();
+                await Console.Error.WriteLineAsync(
+                    $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
+                    .ConfigureAwait(false);
+                return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+            }
+
+            var dropped = FindProjectsWithDroppedReferences(solution);
+            if (dropped.Count == 0)
+            {
+                bestWorkspace?.Dispose();
+                if (analyzerLoader is not null)
+                    solution = RemapSolutionAnalyzers(solution, analyzerLoader);
+                return new SolutionOpen(solution, workspace, [], []);
+            }
+
+            // Degraded: retain the attempt with the fewest dropped projects.
+            if (bestSolution is null || dropped.Count < bestDropped.Count)
+            {
+                bestWorkspace?.Dispose();
+                bestWorkspace = workspace;
+                bestSolution = solution;
+                bestDropped = dropped;
+            }
+            else
+            {
+                workspace.Dispose();
+            }
+
+            if (attempt < maxAttempts)
+                await Console.Error.WriteLineAsync(
+                    $"[roslyn-codelens] {dropped.Count} project(s) loaded with dropped references; retrying ({attempt}/{maxAttempts - 1})...")
+                    .ConfigureAwait(false);
         }
 
-        if (solution is null)
+        await Console.Error.WriteLineAsync(
+            $"[roslyn-codelens] Solution remained degraded after {maxAttempts} attempt(s); {bestDropped.Count} project(s) have unresolved references and will be reported.")
+            .ConfigureAwait(false);
+
+        var finalSolution = analyzerLoader is not null
+            ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
+            : bestSolution!;
+        return new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped);
+    }
+
+    /// <summary>
+    /// Detects projects whose references the design-time build dropped: a source-bearing
+    /// project with zero resolved metadata references. Every real SDK project resolves
+    /// the framework reference set, so zero is an unambiguous, false-positive-free signal
+    /// of a contention drop. (Partial drops — some references resolved, some not — are not
+    /// detectable this way; the concurrency gate is what keeps those rare.)
+    /// </summary>
+    private static IReadOnlyList<string> FindProjectsWithDroppedReferences(Solution solution)
+    {
+        List<string>? dropped = null;
+        foreach (var project in solution.Projects)
         {
-            workspace.Dispose();
-            await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
-                .ConfigureAwait(false);
-            return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+            if (project.DocumentIds.Count > 0 && project.MetadataReferences.Count == 0)
+                (dropped ??= new List<string>()).Add(
+                    $"{project.Name}: no metadata references resolved (design-time build dropped references)");
         }
-
-        if (analyzerLoader is not null)
-            solution = RemapSolutionAnalyzers(solution, analyzerLoader);
-
-        return (solution, workspace, Array.Empty<SkippedProject>());
+        return (IReadOnlyList<string>?)dropped ?? Array.Empty<string>();
     }
 
     private static Solution RemapSolutionAnalyzers(Solution solution, ShadowCopyAnalyzerAssemblyLoader loader)
@@ -136,7 +253,7 @@ public class SolutionLoader
         return solution;
     }
 
-    private static async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenPerProjectAsync(
+    private static async Task<SolutionOpen> OpenPerProjectAsync(
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         ShadowCopyAnalyzerAssemblyLoader? analyzerLoader,
@@ -165,7 +282,7 @@ public class SolutionLoader
 
         if (targets.Count == 0)
         {
-            return (new AdhocWorkspace().CurrentSolution, new AdhocWorkspace(), skipped);
+            return new SolutionOpen(new AdhocWorkspace().CurrentSolution, new AdhocWorkspace(), skipped, []);
         }
 
         // On-disk ProjectReference graph, restricted to the target set. Used both
@@ -224,10 +341,21 @@ public class SolutionLoader
                     Project? loaded;
                     try
                     {
-                        loaded = await RunWithTimeoutAsync<Project>(
-                            innerCt => ws.OpenProjectAsync(entry.Path, cancellationToken: innerCt),
-                            timeoutSec,
-                            ct).ConfigureAwait(false);
+                        // Bound concurrent design-time builds across all in-flight loads so
+                        // independent workers/loads don't oversubscribe the BuildHost and
+                        // drop references.
+                        await s_buildHostGate.WaitAsync(ct).ConfigureAwait(false);
+                        try
+                        {
+                            loaded = await RunWithTimeoutAsync<Project>(
+                                innerCt => ws.OpenProjectAsync(entry.Path, cancellationToken: innerCt),
+                                timeoutSec,
+                                ct).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            s_buildHostGate.Release();
+                        }
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
@@ -307,7 +435,8 @@ public class SolutionLoader
             SolutionId.CreateNewId(), VersionStamp.Create(), solutionPath, finalInfos);
         workspace.AddSolution(solutionInfo);
 
-        return (workspace.CurrentSolution, workspace, skipped);
+        var dropped = FindProjectsWithDroppedReferences(workspace.CurrentSolution);
+        return new SolutionOpen(workspace.CurrentSolution, workspace, skipped, dropped);
     }
 
     /// <summary>
@@ -400,7 +529,7 @@ public class SolutionLoader
             filePath: document.FilePath);
     }
 
-    private static async Task<(Solution Solution, Workspace Workspace, IReadOnlyList<SkippedProject> Skipped)> OpenFilteredAsync(
+    private static async Task<SolutionOpen> OpenFilteredAsync(
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         ProjectFilter filter,
@@ -455,14 +584,13 @@ public class SolutionLoader
                     "Excluded by load_solution filter."));
         }
 
-        var (solution, workspace, perProjectSkipped) =
-            await OpenPerProjectAsync(solutionPath, inClosure, analyzerLoader, ct).ConfigureAwait(false);
+        var open = await OpenPerProjectAsync(solutionPath, inClosure, analyzerLoader, ct).ConfigureAwait(false);
 
-        var skipped = new List<SkippedProject>(filteredOut.Count + perProjectSkipped.Count);
+        var skipped = new List<SkippedProject>(filteredOut.Count + open.Skipped.Count);
         skipped.AddRange(filteredOut);
-        skipped.AddRange(perProjectSkipped);
+        skipped.AddRange(open.Skipped);
 
-        return (solution, workspace, skipped);
+        return open with { Skipped = skipped };
     }
 
     public async Task<ConcurrentDictionary<ProjectId, Compilation>> CompileAllParallelAsync(Solution solution)
@@ -497,17 +625,18 @@ public class SolutionLoader
 
     public async Task<LoadedSolution> LoadAsync(string solutionPath)
     {
-        var (solution, _, skipped) = await OpenAsync(solutionPath).ConfigureAwait(false);
-        var compilations = await CompileAllParallelAsync(solution).ConfigureAwait(false);
+        var open = await OpenAsync(solutionPath).ConfigureAwait(false);
+        var compilations = await CompileAllParallelAsync(open.Solution).ConfigureAwait(false);
 
         await Console.Error.WriteLineAsync(
-            $"[roslyn-codelens] Ready. {compilations.Count} projects compiled, {skipped.Count} skipped.").ConfigureAwait(false);
+            $"[roslyn-codelens] Ready. {compilations.Count} projects compiled, {open.Skipped.Count} skipped, {open.LoadDiagnostics.Count} degraded.").ConfigureAwait(false);
 
         return new LoadedSolution
         {
-            Solution = solution,
+            Solution = open.Solution,
             Compilations = compilations,
-            SkippedProjects = skipped
+            SkippedProjects = open.Skipped,
+            LoadDiagnostics = open.LoadDiagnostics
         };
     }
 
