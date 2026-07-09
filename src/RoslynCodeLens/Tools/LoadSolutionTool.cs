@@ -49,6 +49,7 @@ public static class LoadSolutionTool
             {
                 var loadedPath = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
                 var skippedProjects = manager.GetActiveSkippedProjects();
+                var degraded = manager.GetActiveLoadDiagnostics();
                 var projectCount = manager.GetLoadedSolution().Solution.Projects.Count();
                 return new
                 {
@@ -59,20 +60,31 @@ public static class LoadSolutionTool
                         .Take(10)
                         .Select(s => new { s.Name, s.Kind, s.Reason })
                         .ToArray(),
+                    degradedProjects = degraded.Count,
+                    degraded = degraded.Take(10).ToArray(),
                 };
             });
         }
 
         var normalised = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
         var skipped = manager.GetActiveSkippedProjects();
+        var degraded = manager.GetActiveLoadDiagnostics();
         var loadedCount = manager.GetLoadedSolution().Solution.Projects.Count();
 
+        // A degraded load means MSBuildWorkspace dropped a project's references under
+        // contention; results from those projects may be incomplete. Warn rather than
+        // let tools silently return empty/partial results.
+        var degradedNote = degraded.Count > 0
+            ? $" ⚠ {degraded.Count} project(s) loaded with unresolved references (results for them may be incomplete): " +
+              $"{string.Join("; ", degraded.Take(5))}{(degraded.Count > 5 ? " …" : "")}. Retry load_solution to re-attempt."
+            : "";
+
         if (skipped.Count == 0)
-            return $"Loaded {loadedCount} project(s) from: {normalised}";
+            return $"Loaded {loadedCount} project(s) from: {normalised}.{degradedNote}";
 
         var summary = string.Join(", ", skipped.Take(10).Select(s => $"{s.Name} ({s.Kind})"));
         var ellipsis = skipped.Count > 10 ? $" and {skipped.Count - 10} more" : "";
         return $"Loaded {loadedCount} project(s) from: {normalised}; skipped {skipped.Count}: {summary}{ellipsis}. " +
-               "Call list_solutions for per-project reason details.";
+               $"Call list_solutions for per-project reason details.{degradedNote}";
     }
 }

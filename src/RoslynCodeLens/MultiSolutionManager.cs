@@ -135,6 +135,22 @@ public sealed class MultiSolutionManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Reference-resolution failures on the active solution (projects that opened with
+    /// dropped references). Non-empty means results from those projects may be incomplete.
+    /// </summary>
+    public IReadOnlyList<string> GetActiveLoadDiagnostics()
+    {
+        try
+        {
+            return Active.GetLoadedSolution().LoadDiagnostics;
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
     public string SetActiveSolution(string name)
     {
         var matches = _managers.Keys

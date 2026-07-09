@@ -58,13 +58,10 @@ public sealed class SolutionManager : IDisposable
     {
         var solutionLoader = new SolutionLoader();
         var analyzerLoader = new ShadowCopyAnalyzerAssemblyLoader(SharedCache);
-        Solution solution;
-        Workspace workspace;
-        IReadOnlyList<SkippedProject> skipped;
+        SolutionLoader.SolutionOpen open;
         try
         {
-            (solution, workspace, skipped) =
-                await solutionLoader.OpenAsync(solutionPath, filter, analyzerLoader).ConfigureAwait(false);
+            open = await solutionLoader.OpenAsync(solutionPath, filter, analyzerLoader).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -76,15 +73,16 @@ public sealed class SolutionManager : IDisposable
 
         var emptyLoaded = new LoadedSolution
         {
-            Solution = solution,
+            Solution = open.Solution,
             Compilations = new ConcurrentDictionary<ProjectId, Compilation>(),
-            SkippedProjects = skipped
+            SkippedProjects = open.Skipped,
+            LoadDiagnostics = open.LoadDiagnostics
         };
 
         var manager = new SolutionManager(emptyLoaded, solutionPath);
         manager._analyzerLoader = analyzerLoader;
-        manager._workspace = workspace;
-        manager._warmupTask = manager.WarmupAsync(solutionLoader, solution, skipped);
+        manager._workspace = open.Workspace;
+        manager._warmupTask = manager.WarmupAsync(solutionLoader, open.Solution, open.Skipped, open.LoadDiagnostics);
         return manager;
     }
 
@@ -93,7 +91,7 @@ public sealed class SolutionManager : IDisposable
         return new SolutionManager(LoadedSolution.Empty, null);
     }
 
-    private async Task WarmupAsync(SolutionLoader loader, Solution solution, IReadOnlyList<SkippedProject> skipped)
+    private async Task WarmupAsync(SolutionLoader loader, Solution solution, IReadOnlyList<SkippedProject> skipped, IReadOnlyList<string> loadDiagnostics)
     {
         try
         {
@@ -104,7 +102,8 @@ public sealed class SolutionManager : IDisposable
             {
                 Solution = solution,
                 Compilations = compilations,
-                SkippedProjects = skipped
+                SkippedProjects = skipped,
+                LoadDiagnostics = loadDiagnostics
             };
             var newResolver = new SymbolResolver(newLoaded);
             var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
@@ -238,8 +237,9 @@ public sealed class SolutionManager : IDisposable
         ShadowCopyAnalyzerAssemblyLoader? analyzerLoader;
         lock (_lock) { analyzerLoader = _analyzerLoader; }
 
-        var (solution, workspace, skipped) =
-            await solutionLoader.OpenAsync(_solutionPath!, null, analyzerLoader).ConfigureAwait(false);
+        var open = await solutionLoader.OpenAsync(_solutionPath!, null, analyzerLoader).ConfigureAwait(false);
+        var solution = open.Solution;
+        var workspace = open.Workspace;
         var compilations = new ConcurrentDictionary<ProjectId, Compilation>(_loaded.Compilations);
 
         var staleProjects = solution.Projects.Where(p => staleIds.Contains(p.Id)).ToList();
@@ -256,7 +256,8 @@ public sealed class SolutionManager : IDisposable
         {
             Solution = solution,
             Compilations = compilations,
-            SkippedProjects = skipped
+            SkippedProjects = open.Skipped,
+            LoadDiagnostics = open.LoadDiagnostics
         };
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
@@ -289,26 +290,26 @@ public sealed class SolutionManager : IDisposable
 
         var solutionLoader = new SolutionLoader();
         var analyzerLoader = new ShadowCopyAnalyzerAssemblyLoader(SharedCache);
-        Solution solution;
-        Workspace workspace;
-        IReadOnlyList<SkippedProject> skipped;
+        SolutionLoader.SolutionOpen open;
         try
         {
-            (solution, workspace, skipped) =
-                await solutionLoader.OpenAsync(_solutionPath, null, analyzerLoader).ConfigureAwait(false);
+            open = await solutionLoader.OpenAsync(_solutionPath, null, analyzerLoader).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             analyzerLoader.Dispose();
             throw new InvalidOperationException(SolutionLoadFailure.Describe(_solutionPath, ex), ex);
         }
+        var solution = open.Solution;
+        var workspace = open.Workspace;
         var compilations = await solutionLoader.CompileAllParallelAsync(solution).ConfigureAwait(false);
 
         var newLoaded = new LoadedSolution
         {
             Solution = solution,
             Compilations = compilations,
-            SkippedProjects = skipped
+            SkippedProjects = open.Skipped,
+            LoadDiagnostics = open.LoadDiagnostics
         };
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
