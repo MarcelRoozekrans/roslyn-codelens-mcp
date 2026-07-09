@@ -59,6 +59,24 @@
     <StampMcpVersion FilePath="$(MSBuildProjectDirectory)/.mcp/server.json" PackageVersion="$(Version)" />
   </Target>
 
+  <!--
+    A running Debug server (launched by `dotnet run` or an MCP client) keeps its own
+    bin\Debug DLLs (ModelContextProtocol.*, RoslynCodeLens.dll, ...) loaded, so a
+    rebuild fails on Windows with MSB3021 "being used by another process". Before a
+    Debug build, stop any RoslynCodeLens process started from THIS project's output so
+    the copy step can overwrite it. The MCP client relaunches the server on demand.
+
+    Scoped to this project's own bin\ so a server from another checkout/worktree is
+    left alone. Windows-only: on Linux/CI open files can be overwritten and no server
+    is running. Opt out with -p:StopLockingServerOnBuild=false. Never fails the build.
+  -->
+  <Target Name="StopLockingServer"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(OS)' == 'Windows_NT' and '$(Configuration)' == 'Debug' and '$(StopLockingServerOnBuild)' != 'false'">
+    <Exec ContinueOnError="true"
+          Command="powershell -NoProfile -NonInteractive -Command &quot;$p = Get-Process -Name RoslynCodeLens -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '$(MSBuildProjectDirectory)\bin\*' }; if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 400 }&quot;" />
+  </Target>
+
   <!-- MSBuild.Locator requires these to be excluded from runtime -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Build" Version="18.7.1" ExcludeAssets="runtime" PrivateAssets="all" />
