@@ -8,11 +8,11 @@
     <ToolCommandName>roslyn-codelens-mcp</ToolCommandName>
     <PackageId>RoslynCodeLens.Mcp</PackageId>
     <Authors>Marcel Roozekrans</Authors>
-    <Description>Roslyn-based MCP server providing semantic code intelligence for .NET codebases</Description>
+    <Description>Roslyn-based MCP server that gives AI agents deep semantic understanding of .NET codebases — navigation, call graphs, diagnostics, refactoring, code-quality auditing, test intelligence, and IL/external-assembly inspection.</Description>
     <PackageProjectUrl>https://marcelroozekrans.github.io/roslyn-codelens-mcp/</PackageProjectUrl>
     <RepositoryUrl>https://github.com/MarcelRoozekrans/roslyn-codelens-mcp</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-<PackageTags>roslyn;mcp;code-analysis;dotnet-tool</PackageTags>
+    <PackageTags>roslyn;mcp;mcp-server;csharp;dotnet;dotnet-tool;code-analysis;code-intelligence;static-analysis;refactoring;diagnostics;code-quality</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
     <PackageType>DotnetTool;McpServer</PackageType>
