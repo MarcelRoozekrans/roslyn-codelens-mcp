@@ -76,16 +76,27 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        # The registry validates by hitting NuGet's search API, which lags ~1-2 min
-        # behind the upload that the preceding `publish` job just performed. Retry
-        # so we don't fail the workflow on indexing latency.
+        # The registry validates the version against NuGet's search index, which for a
+        # NEW version can lag 5-15+ min behind the upload the `publish` job just did
+        # (new versions index far slower than updates to an existing package). The old
+        # 6x30s (~3 min) window was too short and failed the release on indexing lag
+        # (2.4.2). Retry with backoff over a ~25 min window so we ride it out.
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
         run: |
-          for attempt in 1 2 3 4 5 6; do
+          max_attempts=15
+          delay=30
+          for attempt in $(seq 1 "$max_attempts"); do
             if ./mcp-publisher publish; then
+              echo "Published $VERSION to MCP Registry on attempt $attempt."
               exit 0
             fi
-            echo "::warning::MCP Registry publish attempt $attempt failed; retrying in 30s"
-            sleep 30
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "::notice::MCP Registry publish attempt $attempt/$max_attempts failed (NuGet is likely still indexing $VERSION); retrying in ${delay}s"
+              sleep "$delay"
+              # Ramp up to a 2 min cap so the total window is ~25 min without hammering.
+              [ "$delay" -lt 120 ] && delay=$((delay + 30))
+            fi
           done
-          echo "::error::MCP Registry publish failed after 6 attempts"
+          echo "::error::MCP Registry publish failed after $max_attempts attempts (~25 min). NuGet may still be indexing $VERSION; once nuget.org shows it, re-run the 'Publish to MCP Registry' workflow (Actions -> Publish to MCP Registry -> Run workflow)."
           exit 1

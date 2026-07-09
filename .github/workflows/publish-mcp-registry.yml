@@ -25,4 +25,22 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        # Retry with backoff in case NuGet is still indexing the version the registry
+        # validates against (~25 min window). Safe to run any time: succeeds on the
+        # first attempt once the version is indexed.
+        run: |
+          max_attempts=15
+          delay=30
+          for attempt in $(seq 1 "$max_attempts"); do
+            if ./mcp-publisher publish; then
+              echo "Published to MCP Registry on attempt $attempt."
+              exit 0
+            fi
+            if [ "$attempt" -lt "$max_attempts" ]; then
+              echo "::notice::MCP Registry publish attempt $attempt/$max_attempts failed (NuGet may still be indexing); retrying in ${delay}s"
+              sleep "$delay"
+              [ "$delay" -lt 120 ] && delay=$((delay + 30))
+            fi
+          done
+          echo "::error::MCP Registry publish failed after $max_attempts attempts (~25 min)."
+          exit 1
