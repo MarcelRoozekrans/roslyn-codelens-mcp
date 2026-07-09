@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.1...v2.4.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **loader:** harden concurrent MSBuildWorkspace loads against dropped references ([#263](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/263)) ([#265](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/265)) ([e347311](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/e3473115d47f6ca5998b78777c05b5aa446a3afc))
+
 ## [2.4.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.0...v2.4.1) (2026-07-06)
 
 
