@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.2...v2.4.3) (2026-07-11)
+
+
+### Bug Fixes
+
+* **deps:** update docusaurus monorepo to v3.10.2 ([#272](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/272)) ([79be3d2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/79be3d24403f53f030887a3b79cdd516814a1196))
+
 ## [2.4.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.1...v2.4.2) (2026-07-09)
 
 
