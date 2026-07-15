@@ -28,9 +28,10 @@ public static class GetProjectHealthTool
         int hotspotsPerDimension = 5)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GetProjectHealthLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             project,
             hotspotsPerDimension);
     }

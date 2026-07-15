@@ -39,9 +39,10 @@ public static class FindGodObjectsTool
         int minOutgoingNamespaces = 5)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindGodObjectsLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             project,
             minLines,
             minMembers,

@@ -20,7 +20,8 @@ public static class SearchSymbolsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = SearchSymbolsLogic.Execute(manager.GetResolver(), manager.GetMetadataResolver(), query);
+        var context = manager.GetAnalysisContext();
+        var raw = SearchSymbolsLogic.Execute(context.Resolver, context.Metadata, query);
 
         var sorted = SortByMatchQuality(query, raw);
         var summary = BuildSummary(raw);

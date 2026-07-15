@@ -23,9 +23,10 @@ public static class FindBreakingChangesTool
         string baselinePath)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindBreakingChangesLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             baselinePath);
     }
 }

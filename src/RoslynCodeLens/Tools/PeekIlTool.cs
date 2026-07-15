@@ -14,9 +14,10 @@ public static class PeekIlTool
         [Description("Fully-qualified method name with parameter types, e.g. 'Newtonsoft.Json.JsonConvert.SerializeObject(object)'")] string methodSymbol)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return PeekIlLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetMetadataResolver(),
+            context.Loaded,
+            context.Metadata,
             manager.GetIlDisassembler(),
             methodSymbol);
     }

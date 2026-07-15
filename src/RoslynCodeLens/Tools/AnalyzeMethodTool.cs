@@ -16,8 +16,7 @@ public static class AnalyzeMethodTool
         [Description("Method symbol (e.g. 'Greeter.Greet' or 'MyNamespace.MyClass.MyMethod')")] string symbol)
     {
         manager.EnsureLoaded();
-        var loaded = manager.GetLoadedSolution();
-        var resolver = manager.GetResolver();
-        return AnalyzeMethodLogic.Execute(loaded, resolver, manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        return AnalyzeMethodLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
     }
 }

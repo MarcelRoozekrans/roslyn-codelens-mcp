@@ -22,6 +22,7 @@ public static class GetOperatorsTool
         [Description("Type name (simple or fully qualified) — e.g. Vector2, MyApp.Money")] string symbol)
     {
         manager.EnsureLoaded();
-        return GetOperatorsLogic.Execute(manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        return GetOperatorsLogic.Execute(context.Resolver, context.Metadata, symbol);
     }
 }

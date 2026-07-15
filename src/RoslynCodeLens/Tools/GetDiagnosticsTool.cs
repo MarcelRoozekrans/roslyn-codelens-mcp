@@ -26,8 +26,9 @@ public static class GetDiagnosticsTool
         CancellationToken ct = default)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         var raw = await GetDiagnosticsLogic.ExecuteAsync(
-            manager.GetLoadedSolution(), manager.GetResolver(),
+            context.Loaded, context.Resolver,
             project, severity, includeAnalyzers, trustStore, allowlist, ct).ConfigureAwait(false);
 
         // Sort severity-first so truncated top-N keeps the most important diagnostics.

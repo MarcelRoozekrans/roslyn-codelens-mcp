@@ -24,7 +24,8 @@ public static class GetCodeFixesTool
         CancellationToken ct = default)
     {
         manager.EnsureLoaded();
-        var raw = await GetCodeFixesLogic.ExecuteAsync(manager.GetLoadedSolution(), manager.GetResolver(), diagnosticId, filePath, line, trustStore, allowlist, ct).ConfigureAwait(false);
+        var context = manager.GetAnalysisContext();
+        var raw = await GetCodeFixesLogic.ExecuteAsync(context.Loaded, context.Resolver, diagnosticId, filePath, line, trustStore, allowlist, ct).ConfigureAwait(false);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

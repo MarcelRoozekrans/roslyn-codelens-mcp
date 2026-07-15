@@ -16,9 +16,10 @@ public static class FindTestsForSymbolTool
         [Description("Maximum walk depth when transitive=true. Clamped to [1, 5]. Default 3.")] int maxDepth = 3)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindTestsForSymbolLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             symbol,
             transitive,
             maxDepth);

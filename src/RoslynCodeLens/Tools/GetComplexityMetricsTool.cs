@@ -20,7 +20,8 @@ public static class GetComplexityMetricsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = GetComplexityMetricsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project, threshold);
+        var context = manager.GetAnalysisContext();
+        var raw = GetComplexityMetricsLogic.Execute(context.Loaded, context.Resolver, project, threshold);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw, threshold);

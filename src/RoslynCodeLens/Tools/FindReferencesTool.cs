@@ -19,7 +19,8 @@ public static class FindReferencesTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindReferencesLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = FindReferencesLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw);

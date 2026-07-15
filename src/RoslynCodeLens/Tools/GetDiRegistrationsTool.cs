@@ -19,7 +19,8 @@ public static class GetDiRegistrationsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = GetDiRegistrationsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = GetDiRegistrationsLogic.Execute(context.Loaded, context.Resolver, symbol);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

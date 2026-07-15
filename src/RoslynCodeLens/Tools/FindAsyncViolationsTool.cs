@@ -18,8 +18,9 @@ public static class FindAsyncViolationsTool
     public static FindAsyncViolationsResult Execute(MultiSolutionManager manager)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindAsyncViolationsLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver());
+            context.Loaded,
+            context.Resolver);
     }
 }

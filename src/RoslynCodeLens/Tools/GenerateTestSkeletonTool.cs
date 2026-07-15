@@ -31,9 +31,10 @@ public static class GenerateTestSkeletonTool
         string? framework = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GenerateTestSkeletonLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             symbol,
             framework);
     }

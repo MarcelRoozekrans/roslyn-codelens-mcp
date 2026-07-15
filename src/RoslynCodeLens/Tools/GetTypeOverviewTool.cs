@@ -16,9 +16,7 @@ public static class GetTypeOverviewTool
         [Description("Type name (simple name or fully qualified)")] string typeName)
     {
         manager.EnsureLoaded();
-        var loaded = manager.GetLoadedSolution();
-        var resolver = manager.GetResolver();
-        var metadata = manager.GetMetadataResolver();
-        return GetTypeOverviewLogic.Execute(loaded, resolver, metadata, typeName);
+        var context = manager.GetAnalysisContext();
+        return GetTypeOverviewLogic.Execute(context.Loaded, context.Resolver, context.Metadata, typeName);
     }
 }

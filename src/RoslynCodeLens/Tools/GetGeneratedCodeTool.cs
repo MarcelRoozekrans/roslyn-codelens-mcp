@@ -20,8 +20,9 @@ public static class GetGeneratedCodeTool
             int? limit = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         var raw = GetGeneratedCodeLogic.Execute(
-            manager.GetLoadedSolution(), manager.GetResolver(), generator, file);
+            context.Loaded, context.Resolver, generator, file);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);
