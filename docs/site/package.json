@@ -34,7 +34,7 @@
   "//overrides": "Pin patched versions of transitive dev/build-time deps flagged by Dependabot until Docusaurus bumps them upstream. All are build-toolchain deps, not shipped runtime code.",
   "overrides": {
     "serialize-javascript": "^7.0.5",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^5.0.0",
     "uuid": "^11.1.1",
     "joi": "^17.13.4",
     "http-proxy-middleware": "^4.0.0",
