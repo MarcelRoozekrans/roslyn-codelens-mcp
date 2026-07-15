@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.5](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.4...v2.4.5) (2026-07-15)
+
+
+### Bug Fixes
+
+* **rebuild:** don't drop edits made during a rebuild; harden edge-case tests ([#288](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/288)) ([4897d1e](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/4897d1e9062a83a054e68404a516a11eca4581e6))
+
 ## [2.4.4](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.3...v2.4.4) (2026-07-15)
 
 
