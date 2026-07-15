@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 
 namespace RoslynCodeLens.Tests;
@@ -9,12 +10,16 @@ namespace RoslynCodeLens.Tests;
 /// totalCount:0 permanently. The rebuild re-opened the solution, minting fresh ProjectIds that
 /// no longer matched the retained compilations, so SymbolFinder was handed symbols foreign to
 /// the solution and silently returned empty. The fix applies source edits to the existing
-/// solution in place (Solution.WithDocumentText), preserving identity.
+/// solution in place (Solution.WithDocumentText), preserving identity. These tests exercise the
+/// SymbolFinder-backed tools end-to-end across the edit-then-query flow that triggered the bug.
 /// </summary>
 public class IncrementalRebuildTests
 {
     private static string SolutionPath => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolution", "TestSolution.slnx"));
+
+    private static string FixtureFile(params string[] parts) =>
+        Path.Combine(new[] { Path.GetDirectoryName(SolutionPath)! }.Concat(parts).ToArray());
 
     [Fact]
     public async Task IncrementalRebuild_AfterCsEdit_FindReferencesReflectsNewUsage()
@@ -22,32 +27,25 @@ public class IncrementalRebuildTests
         // ICrossProjectOnly is declared in TestLib and used only in TestLib2/CrossProjectGreeter.cs
         // — the exact cross-project shape from the #282 repro (a symbol from an unchanged project,
         // referenced from the edited project).
-        var solutionDir = Path.GetDirectoryName(SolutionPath)!;
-        var consumerPath = Path.Combine(solutionDir, "TestLib2", "CrossProjectGreeter.cs");
+        var consumerPath = FixtureFile("TestLib2", "CrossProjectGreeter.cs");
         var original = await File.ReadAllTextAsync(consumerPath).ConfigureAwait(false);
 
         SolutionManager? manager = null;
         try
         {
-            int before;
-            (manager, before) = await CreateManagerWithBaselineAsync().ConfigureAwait(false);
+            manager = await CreateHealthyManagerAsync().ConfigureAwait(false);
+            var before = CountReferences(manager, "ICrossProjectOnly");
 
-            // Edit the consumer on disk, adding a second implementation of the cross-project
-            // interface — one extra reference. (using TestLib; is already in the file.)
-            var edited = original +
-                "\n\npublic class ExtraCrossConsumer : ICrossProjectOnly\n{\n\tpublic string Execute() => \"extra\";\n}\n";
-            await File.WriteAllTextAsync(consumerPath, edited).ConfigureAwait(false);
-
+            // Add a second implementation of the cross-project interface — one extra reference.
+            await File.WriteAllTextAsync(consumerPath, original +
+                "\n\npublic class ExtraCrossConsumer : ICrossProjectOnly\n{\n\tpublic string Execute() => \"extra\";\n}\n")
+                .ConfigureAwait(false);
             manager.SimulateFileChangeForTest(consumerPath);
 
-            var (loaded, resolver, metadata) = manager.GetAnalysisContext();
-            var after = FindReferencesLogic.Execute(loaded, resolver, metadata, "ICrossProjectOnly");
-
-            Assert.True(
-                after.Count > before,
+            var after = CountReferences(manager, "ICrossProjectOnly");
+            Assert.True(after > before,
                 $"find_references for ICrossProjectOnly should reflect the new usage after an incremental " +
-                $"rebuild (before={before}, after={after.Count}). A count of 0 is the #282 silent-empty bug.");
-            Assert.Contains(after, r => r.File.Contains("CrossProjectGreeter", StringComparison.Ordinal));
+                $"rebuild (before={before}, after={after}). A count of 0 is the #282 silent-empty bug.");
         }
         finally
         {
@@ -56,12 +54,99 @@ public class IncrementalRebuildTests
         }
     }
 
+    [Fact]
+    public async Task IncrementalRebuild_AfterCsEdit_FindCallersReflectsNewCallSite()
+    {
+        // find_callers is the other SymbolFinder-backed tool called out in #282. GreeterConsumer
+        // (TestLib2) calls IGreeter.Greet (declared in TestLib); adding a second call site must be
+        // reflected after the incremental rebuild rather than collapsing to 0.
+        var consumerPath = FixtureFile("TestLib2", "GreeterConsumer.cs");
+        var original = await File.ReadAllTextAsync(consumerPath).ConfigureAwait(false);
+
+        SolutionManager? manager = null;
+        try
+        {
+            manager = await CreateHealthyManagerAsync().ConfigureAwait(false);
+            var before = CountCallers(manager, "IGreeter.Greet");
+            Assert.True(before > 0, "expected an existing cross-project caller of IGreeter.Greet");
+
+            // Insert a second method that calls _greeter.Greet, before the class's closing brace.
+            var idx = original.LastIndexOf('}');
+            var edited = original[..idx] + "    public string SayHi() => _greeter.Greet(\"Hi\");\n" + original[idx..];
+            await File.WriteAllTextAsync(consumerPath, edited).ConfigureAwait(false);
+            manager.SimulateFileChangeForTest(consumerPath);
+
+            var after = CountCallers(manager, "IGreeter.Greet");
+            Assert.True(after > before,
+                $"find_callers for IGreeter.Greet should reflect the new call site (before={before}, after={after}).");
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(consumerPath, original).ConfigureAwait(false);
+            manager?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task IncrementalRebuild_EditingDefiningProject_KeepsCrossProjectReferencesResolvable()
+    {
+        // Editing the project that DEFINES a symbol recompiles it (new symbol identity) and, via
+        // transitive staleness, its dependents too. Cross-project references must still resolve —
+        // a naive rebuild that recompiled only the defining project would leave dependents bound to
+        // the old symbol and drop the reference. Also verifies a second sequential edit stays sound.
+        var defPath = FixtureFile("TestLib", "ICrossProjectOnly.cs");
+        var original = await File.ReadAllTextAsync(defPath).ConfigureAwait(false);
+
+        SolutionManager? manager = null;
+        try
+        {
+            manager = await CreateHealthyManagerAsync().ConfigureAwait(false);
+            var baseline = References(manager, "ICrossProjectOnly");
+            Assert.Contains(baseline, r => r.File.Contains("CrossProjectGreeter", StringComparison.Ordinal));
+
+            // Trivial semantic-preserving edit (append a comment) forces TestLib + dependents to recompile.
+            await File.WriteAllTextAsync(defPath, original + "\n// touch 1\n").ConfigureAwait(false);
+            manager.SimulateFileChangeForTest(defPath);
+
+            var afterFirst = References(manager, "ICrossProjectOnly");
+            Assert.Contains(afterFirst, r => r.File.Contains("CrossProjectGreeter", StringComparison.Ordinal));
+            Assert.Equal(baseline.Count, afterFirst.Count);
+
+            // Second sequential edit — the tracker re-mapped against the new snapshot; this must still work.
+            await File.WriteAllTextAsync(defPath, original + "\n// touch 1\n// touch 2\n").ConfigureAwait(false);
+            manager.SimulateFileChangeForTest(defPath);
+
+            var afterSecond = References(manager, "ICrossProjectOnly");
+            Assert.Contains(afterSecond, r => r.File.Contains("CrossProjectGreeter", StringComparison.Ordinal));
+            Assert.Equal(baseline.Count, afterSecond.Count);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(defPath, original).ConfigureAwait(false);
+            manager?.Dispose();
+        }
+    }
+
+    private static IReadOnlyList<SymbolReference> References(SolutionManager manager, string symbol)
+    {
+        var (loaded, resolver, metadata) = manager.GetAnalysisContext();
+        return FindReferencesLogic.Execute(loaded, resolver, metadata, symbol);
+    }
+
+    private static int CountReferences(SolutionManager manager, string symbol) => References(manager, symbol).Count;
+
+    private static int CountCallers(SolutionManager manager, string symbol)
+    {
+        var (loaded, resolver, metadata) = manager.GetAnalysisContext();
+        return FindCallersLogic.Execute(loaded, resolver, metadata, symbol).Count;
+    }
+
     /// <summary>
-    /// Creates a manager and returns the baseline find_references count for ICrossProjectOnly.
-    /// Retries on the MSBuildWorkspace design-time-build reference-drop flake (#260) so the
-    /// baseline is never a degraded zero.
+    /// Creates a manager, waits for warmup, and probes the cross-project reference path until it is
+    /// healthy — retrying on the MSBuildWorkspace design-time-build reference-drop flake (#260) so a
+    /// degraded load never masquerades as a real result.
     /// </summary>
-    private static async Task<(SolutionManager Manager, int Baseline)> CreateManagerWithBaselineAsync()
+    private static async Task<SolutionManager> CreateHealthyManagerAsync()
     {
         const int maxAttempts = 6;
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -70,18 +155,17 @@ public class IncrementalRebuildTests
             await manager.WaitForWarmupAsync().ConfigureAwait(false);
 
             var (loaded, resolver, metadata) = manager.GetAnalysisContext();
-            if (!loaded.Degraded)
+            if (!loaded.Degraded &&
+                FindReferencesLogic.Execute(loaded, resolver, metadata, "ICrossProjectOnly").Count > 0)
             {
-                var baseline = FindReferencesLogic.Execute(loaded, resolver, metadata, "ICrossProjectOnly");
-                if (baseline.Count > 0)
-                    return (manager, baseline.Count);
+                return manager;
             }
 
             manager.Dispose();
         }
 
         throw new InvalidOperationException(
-            $"TestSolution failed to load healthily after {maxAttempts} attempts (baseline references for " +
+            $"TestSolution failed to load healthily after {maxAttempts} attempts (cross-project references for " +
             "ICrossProjectOnly came back empty/degraded — the #260 MSBuildWorkspace reference-drop flake).");
     }
 }
