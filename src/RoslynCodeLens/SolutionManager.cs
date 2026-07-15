@@ -15,7 +15,13 @@ public sealed class SolutionManager : IDisposable
     private readonly string? _solutionPath;
     private FileChangeTracker? _tracker;
     private readonly Lock _lock = new();
-    private volatile bool _rebuilding;
+
+    // Serializes every operation that produces a new loaded solution — the watcher-driven
+    // auto-rebuild (RebuildIfStale) and the explicit rebuild_solution (ForceReloadAsync). Only one
+    // runs at a time so neither can read _loaded, have the other swap + dispose its workspace, and
+    // then clobber the swap with a solution forked off a now-disposed workspace. Auto-rebuild
+    // acquires it opportunistically (skips if busy, returning current data); ForceReloadAsync waits.
+    private readonly SemaphoreSlim _rebuildGate = new(1, 1);
     private Task? _warmupTask;
     private Exception? _warmupException;
     private readonly Exception? _loadException;
@@ -191,39 +197,41 @@ public sealed class SolutionManager : IDisposable
         if (_tracker == null || !_tracker.HasStaleProjects)
             return;
 
-        lock (_lock)
-        {
-            // Double-check after acquiring lock
-            if (_tracker == null || !_tracker.HasStaleProjects || _rebuilding)
-                return;
-
-            _rebuilding = true;
-        }
-
-        // Drain (snapshot + clear) outside the lock so edits that land DURING this rebuild
-        // accumulate into the freshly-emptied tracker and trigger the next rebuild, instead of
-        // being wiped by a blanket clear afterwards (that silently dropped saves made during a
-        // multi-second rebuild). On failure we restore the drained state so it retries.
-        var snapshot = _tracker.DrainStale();
-        Console.Error.WriteLine(
-            $"[roslyn-codelens] Rebuilding {snapshot.StaleProjectIds.Count} stale project(s)...");
+        // Opportunistic acquire: if a rebuild or a full reload (ForceReloadAsync) is already
+        // running, skip and let this query return the current consistent data rather than start a
+        // competing rebuild.
+        if (!_rebuildGate.Wait(0))
+            return;
 
         try
         {
-            RebuildAsync(snapshot).GetAwaiter().GetResult();
-        }
-        catch (Exception ex)
-        {
-            _tracker.RestoreStale(snapshot);
+            // Re-check under the gate: another rebuild may have drained the stale state between the
+            // pre-check above and our acquiring the gate.
+            if (_tracker == null || !_tracker.HasStaleProjects)
+                return;
+
+            // Drain (snapshot + clear) so edits that land DURING this rebuild accumulate into the
+            // freshly-emptied tracker and trigger the next rebuild, instead of being wiped by a
+            // blanket clear afterwards (that silently dropped saves made during a multi-second
+            // rebuild). On failure we restore the drained state so it retries.
+            var snapshot = _tracker.DrainStale();
             Console.Error.WriteLine(
-                $"[roslyn-codelens] Rebuild failed: {ex}. Using cached data.");
+                $"[roslyn-codelens] Rebuilding {snapshot.StaleProjectIds.Count} stale project(s)...");
+
+            try
+            {
+                RebuildAsync(snapshot).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                _tracker.RestoreStale(snapshot);
+                Console.Error.WriteLine(
+                    $"[roslyn-codelens] Rebuild failed: {ex}. Using cached data.");
+            }
         }
         finally
         {
-            lock (_lock)
-            {
-                _rebuilding = false;
-            }
+            _rebuildGate.Release();
         }
     }
 
@@ -416,6 +424,26 @@ public sealed class SolutionManager : IDisposable
         if (_solutionPath == null)
             throw new InvalidOperationException("No solution path configured. Cannot reload.");
 
+        // Hold the rebuild gate for the whole reload: wait for any in-progress auto-rebuild to
+        // finish, then keep it out (auto-rebuilds skip and serve current data) so none can clobber
+        // our swap or dispose a workspace we still reference.
+        await _rebuildGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await ReloadAndSwapAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _rebuildGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Re-opens the solution from disk, recompiles everything, and swaps in the result, disposing
+    /// the superseded workspace/loader afterwards. Must be called while holding <see cref="_rebuildGate"/>.
+    /// </summary>
+    private async Task<(int ProjectCount, TimeSpan Elapsed)> ReloadAndSwapAsync()
+    {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
         var solutionLoader = new SolutionLoader();
@@ -423,12 +451,12 @@ public sealed class SolutionManager : IDisposable
         SolutionLoader.SolutionOpen open;
         try
         {
-            open = await solutionLoader.OpenAsync(_solutionPath, null, analyzerLoader).ConfigureAwait(false);
+            open = await solutionLoader.OpenAsync(_solutionPath!, null, analyzerLoader).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             analyzerLoader.Dispose();
-            throw new InvalidOperationException(SolutionLoadFailure.Describe(_solutionPath, ex), ex);
+            throw new InvalidOperationException(SolutionLoadFailure.Describe(_solutionPath!, ex), ex);
         }
         var solution = open.Solution;
         var workspace = open.Workspace;
