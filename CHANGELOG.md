@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.6](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.5...v2.4.6) (2026-07-15)
+
+
+### Bug Fixes
+
+* **rebuild:** serialize rebuild_solution with the watcher auto-rebuild ([#292](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/292)) ([b8860a1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/b8860a1357fc3f8680940051034bfbf1a03ac8ad))
+
 ## [2.4.5](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.4...v2.4.5) (2026-07-15)
 
 
