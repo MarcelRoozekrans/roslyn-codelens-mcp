@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.4](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.3...v2.4.4) (2026-07-15)
+
+
+### Bug Fixes
+
+* incremental rebuild returns consistent symbols after watcher edits ([#282](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/282)) ([#283](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/283)) ([78cab92](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/78cab92f138a5f5d01fe08997c6d3b8e15cd3340))
+
 ## [2.4.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.2...v2.4.3) (2026-07-11)
 
 
