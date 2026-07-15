@@ -19,8 +19,9 @@ public static class GetPublicApiSurfaceTool
     public static GetPublicApiSurfaceResult Execute(MultiSolutionManager manager)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GetPublicApiSurfaceLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver());
+            context.Loaded,
+            context.Resolver);
     }
 }

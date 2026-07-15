@@ -201,13 +201,13 @@ public sealed class SolutionManager : IDisposable
         }
 
         // Rebuild outside the lock to avoid blocking other reads
-        var staleIds = _tracker.GetStaleProjectIds();
+        var snapshot = _tracker.GetStaleSnapshot();
         Console.Error.WriteLine(
-            $"[roslyn-codelens] Rebuilding {staleIds.Count} stale project(s)...");
+            $"[roslyn-codelens] Rebuilding {snapshot.StaleProjectIds.Count} stale project(s)...");
 
         try
         {
-            RebuildStaleProjects(staleIds).GetAwaiter().GetResult();
+            RebuildAsync(snapshot).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
@@ -224,24 +224,52 @@ public sealed class SolutionManager : IDisposable
         }
     }
 
-    private async Task RebuildStaleProjects(IReadOnlySet<ProjectId> staleIds)
+    private async Task RebuildAsync(FileChangeTracker.StaleSnapshot snapshot)
     {
-        var solutionLoader = new SolutionLoader();
+        // A pure .cs edit is applied to the existing Solution in place, preserving every
+        // ProjectId/DocumentId and keeping the recompiled symbols identity-consistent with
+        // loaded.Solution. Re-opening the solution (the #282 bug) minted fresh ProjectIds
+        // that no longer matched the tracker's stale ids or the retained compilations, so
+        // no project actually recompiled and SymbolFinder silently returned empty. Structural
+        // changes (project files, new files) still need MSBuild re-evaluation via a full reload.
+        if (!snapshot.RequiresFullReload
+            && await TryRebuildIncrementalAsync(snapshot.StaleProjectIds, snapshot.ChangedDocumentPaths).ConfigureAwait(false))
+        {
+            return;
+        }
 
-        // Reuse this solution's existing shadow-copy analyzer loader so stale-project generators
-        // load from shadow copies (issue #254) instead of re-locking bin\Debug, and the returned
-        // solution stays remapped. Snapshot under _lock in case a concurrent reload swapped it.
-        // Do NOT create a fresh loader or dispose it here: this is a partial rebuild, the loader's
-        // already-acquired analyzers are still referenced by the retained non-stale compilations,
-        // and reusing dedups via the shared cache instead of churning ALCs on every edit.
-        ShadowCopyAnalyzerAssemblyLoader? analyzerLoader;
-        lock (_lock) { analyzerLoader = _analyzerLoader; }
+        await RebuildViaFullReloadAsync().ConfigureAwait(false);
+    }
 
-        var open = await solutionLoader.OpenAsync(_solutionPath!, null, analyzerLoader).ConfigureAwait(false);
-        var solution = open.Solution;
-        var workspace = open.Workspace;
+    /// <summary>
+    /// Applies the changed source files' current on-disk text to the existing solution via
+    /// <see cref="Solution.WithDocumentText(DocumentId, Microsoft.CodeAnalysis.Text.SourceText, PreservationMode)"/>,
+    /// then recompiles only the stale projects. Because the solution snapshot lineage is
+    /// preserved, the stale ids still resolve, unchanged projects reuse their carried-over
+    /// compilations, and the resulting symbols stay valid against the same solution — so
+    /// <c>SymbolFinder</c> works. Returns false (escalate to a full reload) if a changed file
+    /// can't be read or isn't a document in the current solution.
+    /// </summary>
+    private async Task<bool> TryRebuildIncrementalAsync(
+        IReadOnlySet<ProjectId> staleIds, IReadOnlyList<string> changedDocumentPaths)
+    {
+        var solution = _loaded.Solution;
+
+        foreach (var path in changedDocumentPaths)
+        {
+            var docIds = solution.GetDocumentIdsWithFilePath(path);
+            if (docIds.IsDefaultOrEmpty)
+                return false; // no longer a known document — reload so the graph re-evaluates
+
+            var text = await TryReadSourceTextAsync(path).ConfigureAwait(false);
+            if (text == null)
+                return false; // deleted or unreadable — reload
+
+            foreach (var docId in docIds)
+                solution = solution.WithDocumentText(docId, text);
+        }
+
         var compilations = new ConcurrentDictionary<ProjectId, Compilation>(_loaded.Compilations);
-
         var staleProjects = solution.Projects.Where(p => staleIds.Contains(p.Id)).ToList();
         var tasks = staleProjects.Select(async project =>
         {
@@ -251,6 +279,54 @@ public sealed class SolutionManager : IDisposable
                 compilations[project.Id] = compilation;
         });
         await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        var newLoaded = new LoadedSolution
+        {
+            Solution = solution,
+            Compilations = compilations,
+            SkippedProjects = _loaded.SkippedProjects,
+            LoadDiagnostics = _loaded.LoadDiagnostics
+        };
+        var newResolver = new SymbolResolver(newLoaded);
+        var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
+
+        lock (_lock)
+        {
+            _loaded = newLoaded;
+            _resolver = newResolver;
+            _metadataResolver = newMetadataResolver;
+        }
+
+        // Re-map file->project/document lookups against the new snapshot. Ids are preserved,
+        // but a fresh snapshot instance is now authoritative and future edits resolve against it.
+        _tracker!.UpdateMappings(newLoaded);
+
+        await Console.Error.WriteLineAsync("[roslyn-codelens] Rebuild complete (incremental).").ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Re-opens the solution from disk and recompiles every project. Used for structural
+    /// changes (project files, added/removed files) that require MSBuild re-evaluation, and
+    /// as the escalation path when an incremental edit can't be applied. Recompiling all
+    /// projects is required for correctness: a freshly opened solution has new ProjectIds, so
+    /// the old compilations cannot be mixed with it (mixing them was the #282 silent-empty bug).
+    /// </summary>
+    private async Task RebuildViaFullReloadAsync()
+    {
+        var solutionLoader = new SolutionLoader();
+
+        // Reuse this solution's existing shadow-copy analyzer loader so generators load from
+        // shadow copies (issue #254) instead of re-locking bin\Debug, and the returned solution
+        // stays remapped. Snapshot under _lock in case a concurrent reload swapped it. Do NOT
+        // dispose it here: its already-acquired analyzers are shared via the process-wide cache.
+        ShadowCopyAnalyzerAssemblyLoader? analyzerLoader;
+        lock (_lock) { analyzerLoader = _analyzerLoader; }
+
+        var open = await solutionLoader.OpenAsync(_solutionPath!, null, analyzerLoader).ConfigureAwait(false);
+        var solution = open.Solution;
+        var workspace = open.Workspace;
+        var compilations = await solutionLoader.CompileAllParallelAsync(solution).ConfigureAwait(false);
 
         var newLoaded = new LoadedSolution
         {
@@ -279,6 +355,57 @@ public sealed class SolutionManager : IDisposable
         oldWorkspace?.Dispose();
 
         await Console.Error.WriteLineAsync("[roslyn-codelens] Rebuild complete.").ConfigureAwait(false);
+    }
+
+    private static async Task<Microsoft.CodeAnalysis.Text.SourceText?> TryReadSourceTextAsync(string path)
+    {
+        // The file may still be locked by the editor that just wrote it; a couple of short
+        // retries clear that. A genuine failure (deleted, access denied) returns null so the
+        // caller escalates to a full reload rather than applying stale text.
+        const int attempts = 3;
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            try
+            {
+                await using var stream = new FileStream(
+                    path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                return Microsoft.CodeAnalysis.Text.SourceText.From(stream);
+            }
+            catch (IOException) when (attempt < attempts - 1)
+            {
+                await Task.Delay(50).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Test-only seam: classify a changed path synchronously (bypassing the file watcher's
+    /// debounce) so the incremental rebuild path can be exercised deterministically.
+    /// </summary>
+    internal void SimulateFileChangeForTest(string fullPath) => _tracker?.NotifyChangedPathForTest(fullPath);
+
+    /// <summary>
+    /// Rebuilds if stale, then snapshots the loaded solution and both resolvers under one lock
+    /// so they are guaranteed to come from the same swap. Tools that need more than one of these
+    /// must use this instead of the individual getters: each getter rebuilds independently, so a
+    /// watcher-driven rebuild racing between two getter calls could otherwise pair a solution with
+    /// a resolver built from a different snapshot — the same identity mismatch behind #282, just in
+    /// a narrow window.
+    /// </summary>
+    public SolutionAnalysisContext GetAnalysisContext()
+    {
+        ThrowIfLoadFailed();
+        _warmupTask?.GetAwaiter().GetResult();
+        if (_warmupException != null)
+            throw new InvalidOperationException("Solution warmup failed.", _warmupException);
+        RebuildIfStale();
+        lock (_lock)
+            return new SolutionAnalysisContext(_loaded, _resolver, _metadataResolver);
     }
 
     public async Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync()

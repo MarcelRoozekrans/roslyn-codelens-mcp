@@ -27,9 +27,10 @@ public static class FindObsoleteUsageTool
         bool errorOnly = false)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindObsoleteUsageLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             project,
             errorOnly);
     }

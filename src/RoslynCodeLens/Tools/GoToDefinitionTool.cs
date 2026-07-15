@@ -19,7 +19,8 @@ public static class GoToDefinitionTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = GoToDefinitionLogic.Execute(manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = GoToDefinitionLogic.Execute(context.Resolver, context.Metadata, symbol);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

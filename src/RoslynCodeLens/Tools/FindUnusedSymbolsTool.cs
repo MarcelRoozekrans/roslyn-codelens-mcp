@@ -21,8 +21,9 @@ public static class FindUnusedSymbolsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         var (raw, filteredCounts) = FindUnusedSymbolsLogic.Execute(
-            manager.GetLoadedSolution(), manager.GetResolver(), project, includeInternal);
+            context.Loaded, context.Resolver, project, includeInternal);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw, filteredCounts);

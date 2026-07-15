@@ -21,7 +21,8 @@ public static class FindLargeClassesTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindLargeClassesLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project, maxMembers, maxLines);
+        var context = manager.GetAnalysisContext();
+        var raw = FindLargeClassesLogic.Execute(context.Loaded, context.Resolver, project, maxMembers, maxLines);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

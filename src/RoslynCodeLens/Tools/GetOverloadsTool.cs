@@ -23,9 +23,10 @@ public static class GetOverloadsTool
         string symbol)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GetOverloadsLogic.Execute(
-            manager.GetResolver(),
-            manager.GetMetadataResolver(),
+            context.Resolver,
+            context.Metadata,
             symbol);
     }
 }

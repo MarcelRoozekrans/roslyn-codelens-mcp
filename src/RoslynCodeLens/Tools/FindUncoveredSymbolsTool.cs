@@ -17,8 +17,9 @@ public static class FindUncoveredSymbolsTool
     public static FindUncoveredSymbolsResult Execute(MultiSolutionManager manager)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindUncoveredSymbolsLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver());
+            context.Loaded,
+            context.Resolver);
     }
 }

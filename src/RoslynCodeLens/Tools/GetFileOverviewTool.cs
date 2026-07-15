@@ -16,8 +16,7 @@ public static class GetFileOverviewTool
         CancellationToken ct = default)
     {
         manager.EnsureLoaded();
-        var loaded = manager.GetLoadedSolution();
-        var resolver = manager.GetResolver();
-        return await GetFileOverviewLogic.ExecuteAsync(loaded, resolver, filePath, ct).ConfigureAwait(false);
+        var context = manager.GetAnalysisContext();
+        return await GetFileOverviewLogic.ExecuteAsync(context.Loaded, context.Resolver, filePath, ct).ConfigureAwait(false);
     }
 }

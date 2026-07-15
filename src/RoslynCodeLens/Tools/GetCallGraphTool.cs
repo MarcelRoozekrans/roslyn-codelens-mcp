@@ -34,10 +34,11 @@ public static class GetCallGraphTool
         CancellationToken cancellationToken = default)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GetCallGraphLogic.ExecuteAsync(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
-            manager.GetMetadataResolver(),
+            context.Loaded,
+            context.Resolver,
+            context.Metadata,
             symbol,
             direction,
             maxDepth,

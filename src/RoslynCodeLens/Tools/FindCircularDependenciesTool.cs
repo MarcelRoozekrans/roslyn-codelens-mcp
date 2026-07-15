@@ -19,7 +19,8 @@ public static class FindCircularDependenciesTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindCircularDependenciesLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), level);
+        var context = manager.GetAnalysisContext();
+        var raw = FindCircularDependenciesLogic.Execute(context.Loaded, context.Resolver, level);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

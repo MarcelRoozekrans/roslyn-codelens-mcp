@@ -19,7 +19,8 @@ public static class GetSourceGeneratorsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = GetSourceGeneratorsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project);
+        var context = manager.GetAnalysisContext();
+        var raw = GetSourceGeneratorsLogic.Execute(context.Loaded, context.Resolver, project);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

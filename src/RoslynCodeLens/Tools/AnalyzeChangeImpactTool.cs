@@ -16,8 +16,7 @@ public static class AnalyzeChangeImpactTool
         [Description("Symbol name to analyze (type name, 'Type.Method', etc.)")] string symbol)
     {
         manager.EnsureLoaded();
-        var loaded = manager.GetLoadedSolution();
-        var resolver = manager.GetResolver();
-        return AnalyzeChangeImpactLogic.Execute(loaded, resolver, manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        return AnalyzeChangeImpactLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
     }
 }

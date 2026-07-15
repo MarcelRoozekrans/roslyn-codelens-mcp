@@ -19,7 +19,8 @@ public static class FindReflectionUsageTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindReflectionUsageLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = FindReflectionUsageLogic.Execute(context.Loaded, context.Resolver, symbol);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw);

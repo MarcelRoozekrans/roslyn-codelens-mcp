@@ -19,7 +19,8 @@ public static class FindCallersTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindCallersLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = FindCallersLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw);

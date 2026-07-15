@@ -21,8 +21,9 @@ public static class FindDisposableMisuseTool
     public static FindDisposableMisuseResult Execute(MultiSolutionManager manager)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return FindDisposableMisuseLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver());
+            context.Loaded,
+            context.Resolver);
     }
 }

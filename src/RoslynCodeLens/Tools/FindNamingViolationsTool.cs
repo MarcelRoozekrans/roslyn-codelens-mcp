@@ -19,7 +19,8 @@ public static class FindNamingViolationsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindNamingViolationsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), project);
+        var context = manager.GetAnalysisContext();
+        var raw = FindNamingViolationsLogic.Execute(context.Loaded, context.Resolver, project);
 
         var sorted = Sort(raw);
         var summary = BuildSummary(raw);

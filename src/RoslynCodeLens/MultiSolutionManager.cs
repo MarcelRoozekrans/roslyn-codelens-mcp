@@ -75,6 +75,13 @@ public sealed class MultiSolutionManager : IDisposable
     public LoadedSolution GetLoadedSolution() => Active.GetLoadedSolution();
     public SymbolResolver GetResolver() => Active.GetResolver();
     public MetadataSymbolResolver GetMetadataResolver() => Active.GetMetadataResolver();
+
+    /// <summary>
+    /// An internally-consistent (solution, resolver, metadata) snapshot from the active solution.
+    /// Tools needing more than one of these must use this rather than the individual getters,
+    /// which each rebuild independently and can diverge if a rebuild races between two calls.
+    /// </summary>
+    public SolutionAnalysisContext GetAnalysisContext() => Active.GetAnalysisContext();
     public IlDisassemblerAdapter GetIlDisassembler() => Active.GetIlDisassembler();
     public Task WaitForWarmupAsync() => Active.WaitForWarmupAsync();
     public Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync() => Active.ForceReloadAsync();

@@ -14,6 +14,7 @@ public static class GetTypeHierarchyTool
         [Description("Type name (simple or fully qualified)")] string symbol)
     {
         manager.EnsureLoaded();
-        return GetTypeHierarchyLogic.Execute(manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        return GetTypeHierarchyLogic.Execute(context.Resolver, context.Metadata, symbol);
     }
 }

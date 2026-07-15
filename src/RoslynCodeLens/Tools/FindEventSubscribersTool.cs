@@ -29,10 +29,11 @@ public static class FindEventSubscribersTool
             int? limit = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         var raw = FindEventSubscribersLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
-            manager.GetMetadataResolver(),
+            context.Loaded,
+            context.Resolver,
+            context.Metadata,
             symbol);
 
         var sorted = Sort(raw);

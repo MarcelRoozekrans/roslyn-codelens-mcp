@@ -25,9 +25,10 @@ public static class GetTestSummaryTool
         string? project = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         return GetTestSummaryLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
+            context.Loaded,
+            context.Resolver,
             project);
     }
 }

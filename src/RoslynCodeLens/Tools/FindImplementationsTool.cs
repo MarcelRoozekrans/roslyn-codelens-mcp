@@ -19,7 +19,8 @@ public static class FindImplementationsTool
             int? limit = null)
     {
         manager.EnsureLoaded();
-        var raw = FindImplementationsLogic.Execute(manager.GetLoadedSolution(), manager.GetResolver(), manager.GetMetadataResolver(), symbol);
+        var context = manager.GetAnalysisContext();
+        var raw = FindImplementationsLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);

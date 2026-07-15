@@ -19,10 +19,11 @@ public static class FindAttributeUsagesTool
             int? limit = null)
     {
         manager.EnsureLoaded();
+        var context = manager.GetAnalysisContext();
         var raw = FindAttributeUsagesLogic.Execute(
-            manager.GetLoadedSolution(),
-            manager.GetResolver(),
-            manager.GetMetadataResolver(),
+            context.Loaded,
+            context.Resolver,
+            context.Metadata,
             attribute);
 
         var sorted = Sort(raw);
