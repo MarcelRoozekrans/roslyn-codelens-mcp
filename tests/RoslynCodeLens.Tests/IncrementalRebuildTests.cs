@@ -127,6 +127,58 @@ public class IncrementalRebuildTests
         }
     }
 
+    [Fact]
+    public async Task ForceReload_ConcurrentWithAutoRebuilds_NeverClobbersOrCorruptsState()
+    {
+        // rebuild_solution (ForceReloadAsync) and the watcher-driven auto-rebuild both produce a new
+        // loaded solution. Before they were serialized, an auto-rebuild could read _loaded, have a
+        // concurrent ForceReload swap in a fresh solution and dispose the old workspace, then swap its
+        // own result back — discarding the reload and leaving _loaded forked off a disposed workspace.
+        // With the shared gate every query stays internally consistent under contention: the invariant
+        // "the cross-project reference always resolves and nothing throws" holds regardless of timing.
+        var consumerPath = FixtureFile("TestLib2", "CrossProjectGreeter.cs");
+
+        SolutionManager? manager = null;
+        try
+        {
+            manager = await CreateHealthyManagerAsync().ConfigureAwait(false);
+            var mgr = manager;
+
+            var stop = false;
+            Exception? readerError = null;
+            var minRefs = int.MaxValue;
+
+            // Reader thread: hammer auto-rebuilds (mark stale) + queries while the reloads run.
+            var reader = Task.Run(() =>
+            {
+                try
+                {
+                    while (!Volatile.Read(ref stop))
+                    {
+                        mgr.SimulateFileChangeForTest(consumerPath);
+                        var refs = CountReferences(mgr, "ICrossProjectOnly");
+                        minRefs = Math.Min(minRefs, refs);
+                    }
+                }
+                catch (Exception ex) { readerError = ex; }
+            });
+
+            for (var i = 0; i < 2; i++)
+                await mgr.ForceReloadAsync().ConfigureAwait(false);
+
+            Volatile.Write(ref stop, true);
+            await reader.ConfigureAwait(false);
+
+            Assert.Null(readerError); // a clobber/disposed-workspace access would surface here
+            Assert.True(minRefs > 0,
+                $"every concurrent query must resolve the cross-project reference (min observed={minRefs}).");
+        }
+        finally
+        {
+            manager?.Dispose();
+        }
+    }
+
     private static IReadOnlyList<SymbolReference> References(SolutionManager manager, string symbol)
     {
         var (loaded, resolver, metadata) = manager.GetAnalysisContext();
