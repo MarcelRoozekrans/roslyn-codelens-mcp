@@ -200,8 +200,11 @@ public sealed class SolutionManager : IDisposable
             _rebuilding = true;
         }
 
-        // Rebuild outside the lock to avoid blocking other reads
-        var snapshot = _tracker.GetStaleSnapshot();
+        // Drain (snapshot + clear) outside the lock so edits that land DURING this rebuild
+        // accumulate into the freshly-emptied tracker and trigger the next rebuild, instead of
+        // being wiped by a blanket clear afterwards (that silently dropped saves made during a
+        // multi-second rebuild). On failure we restore the drained state so it retries.
+        var snapshot = _tracker.DrainStale();
         Console.Error.WriteLine(
             $"[roslyn-codelens] Rebuilding {snapshot.StaleProjectIds.Count} stale project(s)...");
 
@@ -211,6 +214,7 @@ public sealed class SolutionManager : IDisposable
         }
         catch (Exception ex)
         {
+            _tracker.RestoreStale(snapshot);
             Console.Error.WriteLine(
                 $"[roslyn-codelens] Rebuild failed: {ex}. Using cached data.");
         }
@@ -220,7 +224,6 @@ public sealed class SolutionManager : IDisposable
             {
                 _rebuilding = false;
             }
-            _tracker.ClearStale();
         }
     }
 

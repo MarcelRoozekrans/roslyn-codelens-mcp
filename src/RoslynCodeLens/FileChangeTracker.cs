@@ -64,26 +64,54 @@ public sealed class FileChangeTracker : IDisposable
     }
 
     /// <summary>
-    /// A consistent snapshot of what has gone stale since the last <see cref="ClearStale"/>:
-    /// the transitively-closed set of stale projects, the source documents whose on-disk
-    /// text changed (candidates for an in-place incremental rebuild via
-    /// <c>Solution.WithDocumentText</c>), and whether any change is structural — a project
-    /// file, an unknown/new file, etc. — and therefore needs a full solution reload rather
-    /// than an incremental document edit.
+    /// A consistent snapshot of what has gone stale since the last drain: the transitively-closed
+    /// set of stale projects, the source documents whose on-disk text changed (candidates for an
+    /// in-place incremental rebuild via <c>Solution.WithDocumentText</c>), and whether any change
+    /// is structural — a project file, an unknown/new file, etc. — and therefore needs a full
+    /// solution reload rather than an incremental document edit.
     /// </summary>
     public readonly record struct StaleSnapshot(
         IReadOnlySet<ProjectId> StaleProjectIds,
         IReadOnlyList<string> ChangedDocumentPaths,
         bool RequiresFullReload);
 
-    public StaleSnapshot GetStaleSnapshot()
+    /// <summary>
+    /// Atomically snapshots the current stale state <em>and clears it</em>, transferring ownership
+    /// to the caller for the duration of a rebuild. Draining (rather than snapshot-then-clear-all
+    /// afterwards) is what makes edits that arrive <em>during</em> a rebuild safe: they accumulate
+    /// into the now-empty live sets instead of being wiped when the rebuild finishes. A rebuild can
+    /// take tens of seconds on a large solution, so that window is real — clearing everything after
+    /// the fact silently dropped any save made while it ran. On failure the caller must
+    /// <see cref="RestoreStale"/> the returned snapshot so the work is retried, not lost.
+    /// </summary>
+    public StaleSnapshot DrainStale()
     {
         lock (_lock)
         {
-            return new StaleSnapshot(
+            var snapshot = new StaleSnapshot(
                 new HashSet<ProjectId>(_staleProjects),
                 _changedDocumentPaths.ToList(),
                 _requiresFullReload);
+            _staleProjects.Clear();
+            _changedDocumentPaths.Clear();
+            _requiresFullReload = false;
+            return snapshot;
+        }
+    }
+
+    /// <summary>
+    /// Merges a previously <see cref="DrainStale"/>d snapshot back into the live state (union with
+    /// anything that arrived since), so a rebuild that failed re-arms and retries instead of
+    /// silently dropping the changes it was meant to process.
+    /// </summary>
+    public void RestoreStale(StaleSnapshot snapshot)
+    {
+        lock (_lock)
+        {
+            _staleProjects.UnionWith(snapshot.StaleProjectIds);
+            foreach (var path in snapshot.ChangedDocumentPaths)
+                _changedDocumentPaths.Add(path);
+            _requiresFullReload |= snapshot.RequiresFullReload;
         }
     }
 
