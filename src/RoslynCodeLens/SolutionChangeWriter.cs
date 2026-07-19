@@ -99,8 +99,11 @@ public static class SolutionChangeWriter
     }
 
     /// <summary>One pending file write: target path, new content, encoding to write with, and the
-    /// pre-write on-disk bytes for rollback (null for added documents that had no file).</summary>
-    private sealed record WritePlan(
+    /// pre-write on-disk bytes for rollback (null for added documents that had no file).
+    /// Internal (with <see cref="WriteAllWithRollback"/>) so tests can exercise the rollback
+    /// path deterministically — after the freshness precheck, a mid-batch failure is only
+    /// reachable through platform-dependent races at the public API level.</summary>
+    internal sealed record WritePlan(
         string FilePath, DocumentId DocumentId, SourceText NewText,
         Encoding Encoding, byte[]? OriginalBytes);
 
@@ -211,7 +214,7 @@ public static class SolutionChangeWriter
     /// deleted, so the batch either fully applies or leaves the tree as it was. Cancellation
     /// DURING a temp-file write is harmless for that file: its target hasn't been touched yet.
     /// </summary>
-    private static void WriteAllWithRollback(List<WritePlan> plans, CancellationToken ct)
+    internal static void WriteAllWithRollback(List<WritePlan> plans, CancellationToken ct)
     {
         var replaced = new List<WritePlan>();
         string? tempPath = null;

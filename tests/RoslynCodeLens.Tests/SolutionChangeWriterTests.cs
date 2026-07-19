@@ -104,7 +104,22 @@ public class SolutionChangeWriterTests : IDisposable
         Assert.Contains("class Eol2", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
     }
 
-    [Fact]
+    /// <summary>
+    /// Runs only on Windows: the injection relies on File.Move hitting a sharing violation
+    /// on a target held open with FileShare.Read — POSIX rename() ignores open handles, so
+    /// on Linux the move succeeds and no failure occurs. The platform-independent rollback
+    /// coverage lives in <see cref="WriteAllWithRollback_MidBatchFailure_RestoresReplacedFiles"/>.
+    /// </summary>
+    private sealed class WindowsOnlyFactAttribute : FactAttribute
+    {
+        public WindowsOnlyFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows())
+                Skip = "File sharing-violation semantics are Windows-only (POSIX rename ignores open handles).";
+        }
+    }
+
+    [WindowsOnlyFact]
     public async Task MidBatchFailure_RollsBackReplacedFiles_AndLeavesNoTempLitter()
     {
         var pathA = PathOf("A.cs");
@@ -137,6 +152,44 @@ public class SolutionChangeWriterTests : IDisposable
         Assert.Equal(Source("Beta"), await File.ReadAllTextAsync(pathB));
         Assert.Equal(Source("Gamma"), await File.ReadAllTextAsync(pathC));
         // No temp litter: exactly the three source files remain.
+        Assert.Equal(3, Directory.GetFiles(_dir).Length);
+    }
+
+    [Fact]
+    public async Task WriteAllWithRollback_MidBatchFailure_RestoresReplacedFiles()
+    {
+        // Platform-independent rollback coverage at the mechanism level: after the freshness
+        // precheck, a mid-batch failure is only reachable via platform-dependent races at the
+        // public API (see the Windows-only test above), so the failing plan is injected
+        // directly — its target's "directory" is an existing regular file, which makes
+        // Directory.CreateDirectory throw IOException on every OS.
+        var pathA = PathOf("A.cs");
+        var pathB = PathOf("B.cs");
+        var blocker = PathOf("blocker");
+        await File.WriteAllTextAsync(pathA, Source("Alpha"));
+        await File.WriteAllTextAsync(pathB, Source("Beta"));
+        await File.WriteAllTextAsync(blocker, "not a directory");
+
+        static SolutionChangeWriter.WritePlan Plan(string path, string content, byte[]? originalBytes)
+            => new(path, DocumentId.CreateNewId(ProjectId.CreateNewId()),
+                SourceText.From(content), new UTF8Encoding(false), originalBytes);
+
+        var plans = new List<SolutionChangeWriter.WritePlan>
+        {
+            Plan(pathA, Source("Alpha2"), await File.ReadAllBytesAsync(pathA)),
+            Plan(pathB, Source("Beta2"), await File.ReadAllBytesAsync(pathB)),
+            Plan(Path.Combine(blocker, "C.cs"), Source("Gamma2"), null),
+        };
+
+        var ex = Assert.Throws<IOException>(
+            () => SolutionChangeWriter.WriteAllWithRollback(plans, CancellationToken.None));
+
+        Assert.Contains("C.cs", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("rolled back", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // A and B were replaced before the failure and must be restored byte-exact.
+        Assert.Equal(Source("Alpha"), await File.ReadAllTextAsync(pathA));
+        Assert.Equal(Source("Beta"), await File.ReadAllTextAsync(pathB));
+        // No temp litter: A.cs, B.cs, and the blocker file remain.
         Assert.Equal(3, Directory.GetFiles(_dir).Length);
     }
 
