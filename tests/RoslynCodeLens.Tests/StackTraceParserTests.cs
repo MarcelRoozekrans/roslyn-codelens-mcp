@@ -287,4 +287,17 @@ public class StackTraceParserTests
         Assert.Equal("A.B`2+C",
             TypeNameNormalizer.StripInstantiations("A.B`2[[X, asm],[Y, asm]]+C"));
     }
+
+    // ---- item 11: demystified generic types carry <...> blocks the source index lacks ----
+
+    [Fact]
+    public void Normalizer_StripAngleGenerics_RemovesBalancedAngleBlocks()
+    {
+        Assert.Equal("Demo.Repository",
+            TypeNameNormalizer.StripAngleGenerics("Demo.Repository<TKey, TValue>"));
+        Assert.Equal("Ns.Outer.Inner",
+            TypeNameNormalizer.StripAngleGenerics("Ns.Outer<T>.Inner<U, V>"));
+        Assert.Equal("Demo.Plain",
+            TypeNameNormalizer.StripAngleGenerics("Demo.Plain"));
+    }
 }

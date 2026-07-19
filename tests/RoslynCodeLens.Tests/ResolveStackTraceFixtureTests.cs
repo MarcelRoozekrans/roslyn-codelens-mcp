@@ -13,7 +13,7 @@ public class ResolveStackTraceFixtureTests
     public void RealisticTrace_ResolvesSourceAndMetadataFrames_InOrder()
     {
         var frames = ResolveStackTraceLogic.Execute(
-            _fixture.Loaded, _fixture.Resolver, _fixture.Metadata, """
+            _fixture.Resolver, _fixture.Metadata, """
             System.InvalidOperationException: boom
                at System.String.Concat(String str0, String str1)
                at TestLib.Greeter.Greet(String name)

@@ -38,4 +38,23 @@ public static partial class TypeNameNormalizer
 
     /// <summary>Strips backtick arity markers (`N) only.</summary>
     public static string StripArity(string typeName) => Arity().Replace(typeName, "");
+
+    /// <summary>
+    /// Removes balanced angle-bracket blocks ("&lt;TKey, TValue&gt;"). Demystified traces
+    /// print generic types in display form with type-argument blocks the arity-stripped
+    /// source index does not carry.
+    /// </summary>
+    public static string StripAngleGenerics(string typeName)
+    {
+        if (!typeName.Contains('<')) return typeName;
+        var sb = new StringBuilder(typeName.Length);
+        var depth = 0;
+        foreach (var c in typeName)
+        {
+            if (c == '<') depth++;
+            else if (c == '>') { if (depth > 0) depth--; }
+            else if (depth == 0) sb.Append(c);
+        }
+        return sb.ToString();
+    }
 }

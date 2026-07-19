@@ -58,15 +58,41 @@ public class ResolveStackTraceLogicTests
         }
         """;
 
+    // Line numbers in this file are asserted below — keep declarations on their lines.
+    private const string OverloadSource = """
+        namespace Demo;
+        public class Dispatcher
+        {
+            public void Handle(System.Collections.Generic.Dictionary<string, int> map) { }
+            public void Handle(string a, int b) { }
+            public void Save(System.Collections.Generic.Dictionary<string, int> map) { }
+            public void Save(string a, int b) { }
+        }
+        public class Config
+        {
+            public Config() { }
+            static Config() { }
+        }
+        public class Repository<TKey, TValue>
+        {
+            public TValue? GetById(TKey key) => default!;
+        }
+        """;
+
+    private const int HandleDictionaryLine = 4;
+    private const int SaveDictionaryLine = 6;
+    private const int InstanceCtorLine = 11;
+    private const int StaticCtorLine = 12;
+
     private static IReadOnlyList<StackFrameInfo> Resolve(string trace)
         => ResolveFull(trace).Frames;
 
     private static StackTraceResolution ResolveFull(string trace)
     {
         var (loaded, resolver) = RenameTestWorkspace.Create(
-            ("Demo.cs", SourceText), ("Program.cs", ProgramSource));
+            ("Demo.cs", SourceText), ("Program.cs", ProgramSource), ("Overloads.cs", OverloadSource));
         var metadata = new MetadataSymbolResolver(loaded, resolver);
-        return ResolveStackTraceLogic.Execute(loaded, resolver, metadata, trace);
+        return ResolveStackTraceLogic.Execute(resolver, metadata, trace);
     }
 
     [Fact]
@@ -236,5 +262,71 @@ public class ResolveStackTraceLogicTests
         var aot = result.Frames[2];
         Assert.Equal(2, aot.Index);
         Assert.Contains("MyApp.Foo", aot.Symbol, StringComparison.Ordinal);
+    }
+
+    // ---- item 9: overload pick counts only top-level commas ----
+
+    [Fact]
+    public void OverloadPick_RuntimeGenericInstantiationCommas_DoNotCountAsParameters()
+    {
+        var f = Assert.Single(Resolve(
+            "at Demo.Dispatcher.Handle(System.Collections.Generic.Dictionary`2[System.String,System.Int32] map)"));
+        Assert.Equal("source", f.Origin);
+        Assert.Equal(HandleDictionaryLine, f.Line); // 1-arg Dictionary overload, not Handle(string, int)
+    }
+
+    [Fact]
+    public void OverloadPick_DemystifiedGenericAngleCommas_DoNotCountAsParameters()
+    {
+        var f = Assert.Single(Resolve("at void Demo.Dispatcher.Save(Dictionary<string, int> map)"));
+        Assert.Equal("source", f.Origin);
+        Assert.Equal(SaveDictionaryLine, f.Line); // 1-arg Dictionary overload, not Save(string, int)
+    }
+
+    // ---- item 10: '.cctor' resolves to the static constructor ----
+
+    [Fact]
+    public void StaticConstructorFrame_ResolvesToStaticCtorDeclaration()
+    {
+        var f = Assert.Single(Resolve("at Demo.Config..cctor()"));
+        Assert.Equal("constructor", f.Kind);
+        Assert.Equal("source", f.Origin);
+        Assert.Equal(StaticCtorLine, f.Line);
+    }
+
+    [Fact]
+    public void InstanceConstructorFrame_StillResolvesToInstanceCtorDeclaration()
+    {
+        var f = Assert.Single(Resolve("at Demo.Config..ctor()"));
+        Assert.Equal("constructor", f.Kind);
+        Assert.Equal("source", f.Origin);
+        Assert.Equal(InstanceCtorLine, f.Line);
+    }
+
+    // ---- item 11: metadata/source name forms for generic types ----
+
+    [Fact]
+    public void DemystifiedGenericTypeFrame_WithSpacedTypeArgs_ResolvesToSource()
+    {
+        var f = Assert.Single(Resolve("at TValue Demo.Repository<TKey, TValue>.GetById(TKey key)"));
+        Assert.Equal("source", f.Origin);
+        Assert.Contains("GetById", f.Symbol, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DemystifiedGenericTypeFrame_WithoutSpaces_ResolvesViaAngleStrippedLookup()
+    {
+        var f = Assert.Single(Resolve("at TValue Demo.Repository<TKey,TValue>.GetById(TKey key)"));
+        Assert.Equal("source", f.Origin);
+        Assert.Contains("GetById", f.Symbol, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RuntimeGenericMetadataFrame_BacktickForm_ResolvesToMetadata()
+    {
+        var f = Assert.Single(Resolve("at System.Collections.Generic.List`1.Add(T item)"));
+        Assert.Equal("metadata", f.Origin);
+        Assert.Contains("Add", f.Symbol, StringComparison.Ordinal);
+        Assert.Null(f.File);
     }
 }

@@ -25,7 +25,7 @@ public static class ResolveStackTraceTool
         manager.EnsureLoaded();
         var context = manager.GetAnalysisContext();
         var result = ResolveStackTraceLogic.Execute(
-            context.Loaded, context.Resolver, context.Metadata, stackTrace);
+            context.Resolver, context.Metadata, stackTrace);
         var frames = result.Frames;
 
         var summary = new
