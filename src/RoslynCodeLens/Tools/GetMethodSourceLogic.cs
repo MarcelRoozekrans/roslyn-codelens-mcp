@@ -33,14 +33,20 @@ public static class GetMethodSourceLogic
     private static IEnumerable<MemberSourceInfo> ResolveOne(
         SymbolResolver resolver, MetadataSymbolResolver metadata, string requested)
     {
+        // Indexers are named "this[]" in the symbol table; accept the natural
+        // "Type.this" spelling too. Items still echo the original request.
+        var lookup = requested.EndsWith(".this", StringComparison.Ordinal)
+            ? requested + "[]"
+            : requested;
+
         // Constructor request form: "Ns.Type.Type" (member segment == type simple name).
         // Must run before FindSymbols — constructors are named ".ctor"/".cctor", so the
         // member index never matches them under the type's name.
-        var lastDot = requested.LastIndexOf('.');
+        var lastDot = lookup.LastIndexOf('.');
         if (lastDot > 0)
         {
-            var typePart = requested[..lastDot];
-            var memberPart = requested[(lastDot + 1)..];
+            var typePart = lookup[..lastDot];
+            var memberPart = lookup[(lastDot + 1)..];
             if (string.Equals(typePart.Split('.')[^1], memberPart, StringComparison.Ordinal))
             {
                 var ctorItems = CtorItems(resolver, requested, typePart).ToList();
@@ -49,12 +55,12 @@ public static class GetMethodSourceLogic
             }
         }
 
-        var matches = resolver.FindSymbols(requested);
+        var matches = resolver.FindSymbols(lookup);
         if (matches.Count == 0)
-            matches = FindExplicitImplementations(resolver, requested);
+            matches = FindExplicitImplementations(resolver, lookup);
         if (matches.Count == 0)
         {
-            var resolved = metadata.Resolve(requested);
+            var resolved = metadata.Resolve(lookup);
             if (resolved != null)
                 return [NotInSource(requested, resolved.Symbol)];
             return [new MemberSourceInfo(requested, "notFound", null, null, null, null, null, null, null)];

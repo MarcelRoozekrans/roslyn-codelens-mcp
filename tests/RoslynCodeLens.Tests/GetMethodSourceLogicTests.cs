@@ -229,6 +229,30 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
+    public void Indexer_ReachableViaBothRequestForms()
+    {
+        const string source = """
+            namespace Storage;
+            public class Box
+            {
+                public int this[int i] => i * 2;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Box.cs", source));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["Box.this", "Box.this[]"]);
+
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal("ok", i.Status));
+        Assert.All(items, i => Assert.Equal("indexer", i.Kind));
+        Assert.All(items, i => Assert.Contains("this[int i]", i.Source, StringComparison.Ordinal));
+        // Items echo the exact requested form.
+        Assert.Equal("Box.this", items[0].RequestedSymbol);
+        Assert.Equal("Box.this[]", items[1].RequestedSymbol);
+    }
+
+    [Fact]
     public void NotFound_PerItem()
     {
         var items = Execute("Widget.Nope", "Widget.Name");
