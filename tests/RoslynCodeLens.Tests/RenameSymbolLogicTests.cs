@@ -255,6 +255,149 @@ public class RenameSymbolLogicTests
     }
 
     [Fact]
+    public async Task PreexistingErrorMentioningSymbol_IsNotAConflict()
+    {
+        // CS0117's message embeds the type name ("'Widget' does not contain a
+        // definition for 'NoSuchMember'"). After the rename the same error is
+        // still there, just mentioning 'Sprocket' — the error COUNT for
+        // (CS0117, file) is unchanged, so it must not be reported as a conflict.
+        const string source = """
+            namespace RenameDemo;
+
+            public class Widget
+            {
+                public static int Existing = 1;
+            }
+
+            public class User
+            {
+                public object Bad = Widget.NoSuchMember;
+                public int Good = Widget.Existing;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", source));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    [Fact]
+    public async Task SameIdSameFileNewLine_IsReported()
+    {
+        // Pre-existing CS0101 on the duplicate 'Dup' (line 3). Renaming
+        // First -> Dup introduces a SECOND CS0101 in the same file with the
+        // exact same message text — only the line differs. The count-based
+        // diff must report exactly the new one, on the new line.
+        const string source = """
+            namespace RenameDemo;
+            public class Dup { }
+            public class Dup { }
+            public class First { }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Types.cs", source));
+        var result = await RunAsync(loaded, resolver, "First", "Dup");
+
+        Assert.True(result.Success);
+        Assert.NotEmpty(result.Conflicts);
+        var conflict = Assert.Single(
+            result.Conflicts, c => string.Equals(c.Id, "CS0101", StringComparison.Ordinal));
+        Assert.Equal(4, conflict.Line);   // the renamed declaration, not the pre-existing dup (line 3)
+    }
+
+    // NOTE on the dependent-project-break scenario: a rename that genuinely breaks
+    // a downstream project WITHOUT changing its text is not constructible with
+    // AdhocWorkspace. Name-capture attempts (rename LibA's Foo -> Action while LibB
+    // uses System.Action) are defused by Renamer's own conflict engine, which
+    // complexifies the captured reference in LibB to 'System.Action' — so LibB's
+    // text changes and it lands in GetProjectChanges anyway (verified empirically).
+    // The remaining real-world breaks (source generators, name-based reflection
+    // lookups) need generator/analyzer infrastructure AdhocWorkspace doesn't run.
+    // The scan-set mechanic is therefore tested directly instead: dependents ARE
+    // scanned (ComputeScanSet_IncludesDirectDependents) and scanning them applies
+    // the same count-based diff without phantom conflicts or crashes
+    // (DependentProjectWithPreexistingError_IsNotAConflict).
+    [Fact]
+    public async Task ComputeScanSet_IncludesDirectDependents()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Other.cs", "namespace Dep; public class Other { }")]));
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Widget");
+        var renamed = await Microsoft.CodeAnalysis.Rename.Renamer.RenameSymbolAsync(
+            loaded.Solution, target,
+            new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
+            CancellationToken.None);
+
+        var scanSet = RenameSymbolLogic.ComputeScanSet(loaded.Solution, renamed);
+        var libA = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibA", StringComparison.Ordinal)).Id;
+        var libB = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibB", StringComparison.Ordinal)).Id;
+
+        Assert.Contains(libA, scanSet);   // textually changed by the rename
+        Assert.Contains(libB, scanSet);   // untouched, but a direct dependent of LibA
+        Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task DependentProjectWithPreexistingError_IsNotAConflict()
+    {
+        // LibB is scanned as a direct dependent; its pre-existing CS0246 must not
+        // surface as a conflict (count unchanged by the rename in LibA).
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Broken.cs", "namespace Dep; public class Broken { public Unknown Field; }")]));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    private static Diagnostic MakeError(string id, string path, int line, bool suppressed = false)
+    {
+        var linePosition = new Microsoft.CodeAnalysis.Text.LinePositionSpan(
+            new Microsoft.CodeAnalysis.Text.LinePosition(line - 1, 0),
+            new Microsoft.CodeAnalysis.Text.LinePosition(line - 1, 1));
+        var location = Location.Create(
+            path, new Microsoft.CodeAnalysis.Text.TextSpan(0, 0), linePosition);
+        return Diagnostic.Create(
+            id, "Test", "synthetic error",
+            DiagnosticSeverity.Error, DiagnosticSeverity.Error,
+            isEnabledByDefault: true, warningLevel: 0, isSuppressed: suppressed,
+            location: location);
+    }
+
+    [Fact]
+    public void SuppressedDiagnostics_AreIgnored()
+    {
+        // An IsSuppressed Error-severity diagnostic is not constructible through
+        // AdhocWorkspace compilation options: #pragma/SuppressMessage suppression is
+        // applied BEFORE warning-as-error elevation, so a suppressed diagnostic
+        // surfaces (under ReportSuppressedDiagnostics) at its original Warning
+        // severity, never Error. Suppressors that keep Error severity require
+        // CompilationWithAnalyzers. The filter is therefore exercised at the diff
+        // level with a synthetic suppressed diagnostic (Diagnostic.Create supports
+        // isSuppressed directly).
+        var suppressed = MakeError("CS9999", "File.cs", 3, suppressed: true);
+        Assert.Empty(RenameSymbolLogic.DiffNewErrors(before: [], after: [suppressed]));
+
+        var unsuppressed = MakeError("CS9999", "File.cs", 3);
+        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before: [], after: [unsuppressed]));
+        Assert.Equal("CS9999", conflict.Id);
+        Assert.Equal(3, conflict.Line);
+    }
+
+    [Fact]
+    public void DiffNewErrors_PrefersLinesAbsentFromBefore()
+    {
+        var before = new[] { MakeError("CS0101", "Types.cs", 3) };
+        var after = new[] { MakeError("CS0101", "Types.cs", 3), MakeError("CS0101", "Types.cs", 7) };
+
+        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before, after));
+        Assert.Equal(7, conflict.Line);
+    }
+
+    [Fact]
     public async Task CollidingRename_ForceTrue_WritesAnyway()
     {
         var dir = Directory.CreateTempSubdirectory("rename-force-").FullName;
