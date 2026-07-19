@@ -208,4 +208,71 @@ public class RenameSymbolLogicTests
         Assert.NotEmpty(result.Conflicts);
         Assert.Contains("force", result.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Apply_WritesRenamedFilesToDisk()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-apply-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false);
+
+            Assert.True(result.Success);
+            Assert.True(result.Applied);
+            var onDisk = await File.ReadAllTextAsync(path);
+            Assert.Contains("public class Sprocket", onDisk, StringComparison.Ordinal);
+            Assert.DoesNotContain("class Widget", onDisk, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Preview_LeavesDiskUntouched()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-preview-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");   // preview: true
+
+            Assert.False(result.Applied);
+            Assert.Equal(BasicSource, await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CollidingRename_ForceTrue_WritesAnyway()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-force-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Types.cs");
+            await File.WriteAllTextAsync(path, CollisionSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, CollisionSource));
+
+            var result = await RunAsync(loaded, resolver, "First", "Second", preview: false, force: true);
+
+            Assert.True(result.Applied);
+            Assert.NotEmpty(result.Conflicts);
+            Assert.Contains("class Second", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
