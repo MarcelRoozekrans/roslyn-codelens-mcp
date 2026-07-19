@@ -51,6 +51,14 @@ public class GetMethodSourceLogicTests
         Assert.Contains("/// <summary>Adds one.</summary>", first.Source, StringComparison.Ordinal);
         Assert.Contains("[Obsolete(\"use ComputeV2\")]", first.Source, StringComparison.Ordinal);
         Assert.Contains("=> value + 1;", first.Source, StringComparison.Ordinal);
+
+        // StartLine must point at the first line actually present in Source —
+        // here the XML doc line, not the method's first token.
+        var lines = DemoSource.Split('\n');
+        var xmlDocLine = Array.FindIndex(lines,
+            l => l.Contains("/// <summary>Adds one.</summary>", StringComparison.Ordinal)) + 1;
+        Assert.True(xmlDocLine > 0, "XML doc line not found in DemoSource");
+        Assert.Equal(xmlDocLine, first.StartLine);
     }
 
     [Fact]
@@ -275,11 +283,9 @@ public class GetMethodSourceLogicTests
         Assert.True(propertyLine > 0, "property line not found in DemoSource");
 
         Assert.Equal("Demo.cs", item.File);
-        Assert.NotNull(item.StartLine);
-        Assert.NotNull(item.EndLine);
-        Assert.True(item.StartLine <= propertyLine,
-            $"StartLine {item.StartLine} should be <= {propertyLine}");
-        Assert.True(item.EndLine >= propertyLine,
-            $"EndLine {item.EndLine} should be >= {propertyLine}");
+        // The emitted Source is exactly the single property line, so both ends of
+        // the span must be that line.
+        Assert.Equal(propertyLine, item.StartLine);
+        Assert.Equal(propertyLine, item.EndLine);
     }
 }

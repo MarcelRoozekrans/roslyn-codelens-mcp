@@ -166,10 +166,18 @@ public static class GetMethodSourceLogic
                 node = node.Parent;
 
             var span = node.GetLocation().GetLineSpan();
+            var (source, skippedLeadingLines) = ExtractSource(node);
+            // StartLine must be the first line actually present in Source: the
+            // node's FullSpan start (leading trivia incl. XML docs/attributes)
+            // plus the blank lines ExtractSource trimmed. EndLine is the last
+            // content line, which is the last token's line (trailing trivia never
+            // spills onto a further line after TrimEnd).
+            var startLine = node.SyntaxTree.GetLineSpan(node.FullSpan)
+                .StartLinePosition.Line + skippedLeadingLines + 1;
             yield return new MemberSourceInfo(
                 requested, "ok", symbol.ToDisplayString(), KindOf(symbol),
-                span.Path, span.StartLinePosition.Line + 1, span.EndLinePosition.Line + 1,
-                ExtractSource(node),
+                span.Path, startLine, span.EndLinePosition.Line + 1,
+                source,
                 resolver.GetProjectName(symbol));
         }
     }
@@ -201,15 +209,17 @@ public static class GetMethodSourceLogic
     /// Trivia decision: Source starts at the first content line (XML doc comment,
     /// attribute, or modifier). Leading blank lines are trimmed, but the first content
     /// line keeps its original indentation; trailing whitespace/newlines are trimmed.
+    /// Also returns how many leading whitespace-only lines were trimmed so the caller
+    /// can report a StartLine that matches the first line actually emitted.
     /// </summary>
-    private static string ExtractSource(SyntaxNode node)
+    private static (string Source, int SkippedLeadingLines) ExtractSource(SyntaxNode node)
     {
         var text = node.ToFullString();
         var lines = text.Split('\n');
         var first = 0;
         while (first < lines.Length && string.IsNullOrWhiteSpace(lines[first]))
             first++;
-        return string.Join('\n', lines.Skip(first)).TrimEnd('\r', '\n', ' ', '\t');
+        return (string.Join('\n', lines.Skip(first)).TrimEnd('\r', '\n', ' ', '\t'), first);
     }
 
     private static MemberSourceInfo NotInSource(string requested, ISymbol symbol)
