@@ -94,6 +94,12 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 Items considered during design of shipped features and consciously punted on. Re-promote to the main backlog above if a use case emerges.
 
+### From `get_method_source` (shipped 2026-07-19, PR #305)
+- **`KindOf` consolidation** — roughly five tools carry their own local symbol-kind mapper (`method`/`property`/`field`/...); extract one shared helper so kind strings can't drift between tools.
+- **Constructor resolution in `SymbolResolver`** — the `Type.Type` / `.ctor` request handling lives in `GetMethodSourceLogic`; move it into `SymbolResolver` so every tool resolves constructors the same way.
+- **Partial-qualification suffix matching** — resolver support for `Outer.Inner.Member`-style requests (today: simple name or fully qualified only; nested types need full qualification).
+- **Collapse the property/field/event Facts into a Theory** — `GetMethodSourceLogicTests` has one near-identical Fact per member kind; a `[Theory]` would shrink the suite without losing coverage.
+
 ### From `get_operators` (shipped 2026-05-04)
 - **Server-side filtering by kind** — agent filters `Kind` client-side; avoids a YAGNI parameter.
 - **Inherited operators** — operators don't inherit in C#; `GetMembers` (declaration-only) is correct.
