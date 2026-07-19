@@ -114,6 +114,31 @@ public class RenameSymbolLogicTests
         Assert.True(result.Success);
     }
 
+    [Fact]
+    public async Task QualifiedNameWithoutTypeParameters_RenamesGenericType()
+    {
+        // Finding 6: "Data.Repository" must resolve Repository<T>, matching the tool's
+        // documented "fully qualified (Namespace.MyClass)" contract.
+        const string source = """
+            namespace Data;
+
+            public class Repository<T>
+            {
+                public T? GetById(int id) => default;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Repository.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Data.Repository", "Store");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.Equal("Data.Repository<T>", result.OldName);
+        var renamed = ApplyEditsToSource(source, result.Edits, "Repository.cs");
+        Assert.Contains("class Store<T>", renamed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Repository", renamed, StringComparison.Ordinal);
+    }
+
     private static string ApplyEditsToSource(string source, IEnumerable<TextEdit> edits, string filePath)
     {
         var text = Microsoft.CodeAnalysis.Text.SourceText.From(source);

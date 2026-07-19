@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Tests.Fixtures;
 
 namespace RoslynCodeLens.Tests;
 
@@ -41,6 +42,109 @@ public class SymbolResolverTests : IAsyncLifetime
         var results = resolver.FindMethods("Greeter.Greet");
 
         Assert.NotEmpty(results);
+    }
+
+    private const string GenericRepositorySource = """
+        namespace Data;
+
+        public class Repository<T>
+        {
+            public T? GetById(int id) => default;
+        }
+        """;
+
+    [Fact]
+    public void FindSymbols_QualifiedNameWithoutTypeParameters_FindsGenericType()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(("Repository.cs", GenericRepositorySource));
+
+        var results = resolver.FindSymbols("Data.Repository");
+
+        var symbol = Assert.Single(results);
+        Assert.Equal("Data.Repository<T>", symbol.ToDisplayString());
+    }
+
+    [Fact]
+    public void FindNamedTypes_StrippedName_ReturnsAllArities()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Repository1.cs", GenericRepositorySource),
+            ("Repository2.cs", """
+                namespace Data;
+
+                public class Repository<T1, T2>
+                {
+                    public T1? GetById(T2 key) => default;
+                }
+                """));
+
+        var results = resolver.FindNamedTypes("Data.Repository");
+
+        Assert.Equal(2, results.Count);
+        Assert.Contains(results, t => t.ToDisplayString() == "Data.Repository<T>");
+        Assert.Contains(results, t => t.ToDisplayString() == "Data.Repository<T1, T2>");
+    }
+
+    [Fact]
+    public void FindSymbols_MemberOfGenericType_ResolvesViaStrippedTypeName()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(("Repository.cs", GenericRepositorySource));
+
+        var results = resolver.FindSymbols("Data.Repository.GetById");
+
+        var symbol = Assert.Single(results);
+        Assert.Equal("GetById", symbol.Name);
+        Assert.Equal("Data.Repository<T>", symbol.ContainingType.ToDisplayString());
+    }
+
+    [Fact]
+    public void FindNamedTypes_ExactGenericDisplayName_StillWorks()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(("Repository.cs", GenericRepositorySource));
+
+        var results = resolver.FindNamedTypes("Data.Repository<T>");
+
+        var type = Assert.Single(results);
+        Assert.Equal("Data.Repository<T>", type.ToDisplayString());
+    }
+
+    [Fact]
+    public void FindNamedTypes_StrippedName_FindsNestedTypeInGenericOuter()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(("Outer.cs", """
+            namespace Ns;
+
+            public class Outer<T>
+            {
+                public class Inner
+                {
+                    public int Value;
+                }
+            }
+            """));
+
+        var results = resolver.FindNamedTypes("Ns.Outer.Inner");
+
+        var type = Assert.Single(results);
+        Assert.Equal("Ns.Outer<T>.Inner", type.ToDisplayString());
+    }
+
+    [Fact]
+    public void FindNamedTypes_NonGenericDottedLookup_Unchanged()
+    {
+        var (_, resolver) = RenameTestWorkspace.Create(("Plain.cs", """
+            namespace Data;
+
+            public class PlainRepository
+            {
+                public int GetById(int id) => id;
+            }
+            """));
+
+        var results = resolver.FindNamedTypes("Data.PlainRepository");
+
+        var type = Assert.Single(results);
+        Assert.Equal("Data.PlainRepository", type.ToDisplayString());
     }
 
     [Fact]
