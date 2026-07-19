@@ -2,7 +2,7 @@
 
 Ideas for future tools, grouped by theme. Not committed work — captured here so they're not lost. Each entry is a starting point for a real design discussion.
 
-Last refreshed: 2026-05-04.
+Last refreshed: 2026-07-19.
 
 ---
 
@@ -16,7 +16,7 @@ Common .NET pain points that aren't covered by analyzers everyone has on by defa
 
 Small, focused queries that aren't currently expressible in one call.
 
-- **`find_duplicated_code`** — heuristic detection of repeated statement blocks across files. *Note: existing tools (JSCPD, SonarQube) cover this well; only worth doing if a Roslyn-semantic angle is identified.*
+- **`find_duplicated_code`** — heuristic detection of repeated statement blocks across files. *Note: existing tools (JSCPD, SonarQube) cover this well; only worth doing if a Roslyn-semantic angle is identified. SharpLensMcp ships this as `find_similar_code` using token-shingle fingerprints — a viable middle ground; would slot into `get_project_health` and the refactor-analysis skill.*
 
 ## 3. Generation & scaffolding (write-side)
 
@@ -32,13 +32,34 @@ Big-solution scenarios (400+ projects) where the structural open dominates wall-
 - ✅ **Parallelise the per-project loader** — *shipped.* `SolutionLoader.OpenPerProjectAsync` now loads projects across a bounded pool of isolated `MSBuildWorkspace` workers (each its own out-of-process `BuildHost`), with global path-dedup to curb redundant transitive loads, then re-stitches the results into one workspace. Confirmed via experiment that concurrent `OpenProjectAsync` on a *shared* workspace corrupts the solution, so isolation + re-stitch is required. Degree via `ROSLYN_CODELENS_LOAD_PARALLELISM` (default `min(CPU, 8)`). Design: [docs/plans/2026-06-18-parallel-project-loader-design.md](plans/2026-06-18-parallel-project-loader-design.md).
 - ✅ **Async `load_solution` with a load handle** — *shipped.* `load_solution` gained a `background: true` flag: it runs the load on the existing `BackgroundTaskStore` and returns a `taskId` immediately; the agent polls `get_task_status`. Turned out far smaller than feared — no `SolutionManager`/`EnsureLoaded` changes, because the new solution only becomes active once the background load finishes, so other tools never block on it. Reuses the background-task infra (which postdates this note) rather than a bespoke `get_load_status`. Design: [docs/plans/2026-06-18-async-load-solution-design.md](plans/2026-06-18-async-load-solution-design.md).
 
+## 5. Gaps identified from SharpLensMcp comparison (2026-07-19)
+
+Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-mcp/) (91 tools). Most of its catalog overlaps ours or is covered by `apply_code_action`; the items below are genuine gaps. Low-value items (`semantic_query`, `check_type_compatibility`, `find_interceptors`, `remove_unused_code`, `organize_usings`, `format_document_batch`) were considered and skipped — niche, or covered by `dotnet format` and existing find-tools.
+
+### High value
+
+- 🔧 **In flight: `rename_symbol`** — solution-wide safe rename via the Roslyn `Renamer` API. Rename is *not* a code action, so `apply_code_action` cannot do it; today an agent renaming a symbol falls back to multi-file text edits — exactly the failure mode this server exists to prevent. Design: [docs/plans/2026-07-19-rename-symbol-design.md](plans/2026-07-19-rename-symbol-design.md).
+- **`resolve_stack_trace`** — map a pasted runtime stack trace to file/line/symbol, undoing name mangling (async state machines, lambdas, generics, `<>c__DisplayClass`). Perfect fit for debugging workflows; nothing comparable today.
+- **`get_method_source` / `get_method_source_batch`** — return a method's source body by name. `analyze_method` gives signature + callers but not the body, so agents still `Read` whole files. Batch variant is very token-efficient.
+- **Reference kind classification on `find_references`** — tag each reference as read/write/invocation/cast/typeof/nameof/attribute, with an optional `kind` filter. Enhancement to the existing tool, not a new one; also subsumes a would-be `find_pattern_usages` (is/as/pattern-match sites).
+- **Exception-flow trio: `get_exception_flow`, `find_throw_sites`, `find_catch_blocks`** — "which exceptions can escape this method, and where are they caught," with derived-type awareness. We have zero exception analysis today.
+
+### Medium value
+
+- **`change_signature`** — add/remove/reorder parameters with all call sites updated. Like rename, not reachable via code actions.
+- **`get_extension_methods`** — which extension methods (including C# 14 extension blocks) apply to a given type. Not answerable with current tools.
+- **`get_instantiation_options`** — "how do I construct this type": accessible constructors, factory methods, DI registration. Pairs well with `generate_test_skeleton`.
+- **Cognitive complexity + nesting depth in `get_complexity_metrics`** — we only report cyclomatic; cognitive complexity is a better refactoring-priority signal. Enhancement to the existing tool.
+- **`check_architecture`** — enforce user-defined namespace/project dependency rules over the type graph (e.g. "Domain must not reference Infrastructure"). `find_circular_dependencies` only catches cycles; layering violations go undetected.
+- **`find_similar_code`** — folded into the existing `find_duplicated_code` entry in §2 above.
+
 ---
 
 ## In flight
 
 Active branches with no merged PR yet.
 
-_(none currently)_
+- **`rename_symbol`** — branch `feature/rename-symbol`, design [docs/plans/2026-07-19-rename-symbol-design.md](plans/2026-07-19-rename-symbol-design.md).
 
 ---
 
