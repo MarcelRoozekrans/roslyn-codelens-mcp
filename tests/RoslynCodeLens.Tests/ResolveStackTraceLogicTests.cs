@@ -23,6 +23,11 @@ public class ResolveStackTraceLogicTests
                 await System.Threading.Tasks.Task.Yield();
                 return id;
             }
+            public System.Collections.Generic.IEnumerable<int> Numbers(int count)
+            {
+                for (var i = 0; i < count; i++)
+                    yield return i;
+            }
         }
         public class Repository<T>
         {
@@ -47,6 +52,15 @@ public class ResolveStackTraceLogicTests
         Assert.Contains("ProcessAsync", f.Symbol, StringComparison.Ordinal);
         Assert.Equal("Demo.cs", f.File);
         Assert.NotNull(f.Line);
+    }
+
+    [Fact]
+    public void IteratorStateMachineFrame_ResolvesToSourceMethod_KindIterator()
+    {
+        var f = Assert.Single(Resolve("at Demo.OrderService+<Numbers>d__3.MoveNext()"));
+        Assert.Equal("iterator", f.Kind);
+        Assert.Equal("source", f.Origin);
+        Assert.Contains("Numbers", f.Symbol, StringComparison.Ordinal);
     }
 
     [Fact]

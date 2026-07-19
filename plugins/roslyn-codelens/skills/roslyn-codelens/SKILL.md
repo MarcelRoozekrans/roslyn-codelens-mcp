@@ -101,6 +101,7 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Are there async bugs?" / "Find sync-over-async" / "Are we using `.Result` anywhere?" | `find_async_violations` |
 | "Are there resource leaks?" / "Find missing `using`" / "Is this disposable handled?" | `find_disposable_misuse` |
 | "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
+| "Where did this exception come from?" / user pastes a stack trace / "What method is `<M>d__12.MoveNext`?" | `resolve_stack_trace` |
 
 **All of these mean: the MCP tool is the correct tool. Use it.**
 
@@ -201,6 +202,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default.
 - `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses unless `force=true` on: conflicts, a degraded solution load, or files changed on disk since the snapshot (freshness refusal — run `rebuild_solution` and retry; `force` does not bypass freshness). After apply the in-memory snapshot updates immediately — follow-up queries see the new name without waiting for a rebuild. Generic types accept the arity-free qualified form (`Data.Repository` finds `Repository<T>`).
+- `resolve_stack_trace` — map a pasted .NET stack trace to file/line/symbol; demangles async/iterator state machines, lambdas, and local functions; handles log-prefixed lines, inner-exception chains, and Demystifier-style traces. Source frames get the declaration site (exact location when the trace carries `in file:line`); external frames come back `origin="metadata"`. Items stay in trace order.
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).
 - `analyze_control_flow` — reachability, returns, unreachable paths.
 
@@ -324,6 +326,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `get_code_actions` | "What refactorings are available here?" |
 | `apply_code_action` | "Apply this refactoring" / "Extract method" |
 | `rename_symbol` | "Rename this symbol everywhere" / "Change this name across the solution" |
+| `resolve_stack_trace` | "Where did this exception come from?" / "Resolve this stack trace" |
 | `find_unused_symbols` | "Any dead code?" |
 | `get_complexity_metrics` | "Which methods are too complex?" |
 | `find_naming_violations` | "Check naming conventions" |
@@ -389,6 +392,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `get_code_actions` | No — source only | | |
 | `apply_code_action` | No — source only | | |
 | `rename_symbol` | No — source only | Locals/parameters and file renames unsupported | |
+| `resolve_stack_trace` | Yes — frames resolve to source or metadata symbols | Metadata frames carry no file/line | `peek_il` to inspect external method bodies |
 | `analyze_data_flow` | No — source only | | |
 | `analyze_control_flow` | No — source only | | |
 | `analyze_change_impact` | No — source only | | |

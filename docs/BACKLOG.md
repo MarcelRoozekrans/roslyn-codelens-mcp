@@ -39,7 +39,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 ### High value
 
 - ✅ **`rename_symbol`** — *shipped* (PR #298; review-findings hardening in [docs/plans/2026-07-19-rename-review-fixes.md](plans/2026-07-19-rename-review-fixes.md)). Design: [docs/plans/2026-07-19-rename-symbol-design.md](plans/2026-07-19-rename-symbol-design.md).
-- **`resolve_stack_trace`** — map a pasted runtime stack trace to file/line/symbol, undoing name mangling (async state machines, lambdas, generics, `<>c__DisplayClass`). Perfect fit for debugging workflows; nothing comparable today.
+- ✅ **`resolve_stack_trace`** — *shipped* (branch `feature/resolve-stack-trace`). Map a pasted runtime stack trace to file/line/symbol, undoing name mangling (async state machines, lambdas, local functions, generics). Design: [docs/plans/2026-07-19-resolve-stack-trace-design.md](plans/2026-07-19-resolve-stack-trace-design.md).
 - **`get_method_source` / `get_method_source_batch`** — return a method's source body by name. `analyze_method` gives signature + callers but not the body, so agents still `Read` whole files. Batch variant is very token-efficient.
 - **Reference kind classification on `find_references`** — tag each reference as read/write/invocation/cast/typeof/nameof/attribute, with an optional `kind` filter. Enhancement to the existing tool, not a new one; also subsumes a would-be `find_pattern_usages` (is/as/pattern-match sites).
 - **Exception-flow trio: `get_exception_flow`, `find_throw_sites`, `find_catch_blocks`** — "which exceptions can escape this method, and where are they caught," with derived-type awareness. We have zero exception analysis today.
