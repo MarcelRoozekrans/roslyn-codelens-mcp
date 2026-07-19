@@ -181,6 +181,32 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
+    public void PartialProperty_OneItemPerPart()
+    {
+        const string source = """
+            public partial class PSplit
+            {
+                public partial int Value { get; set; }
+            }
+            public partial class PSplit
+            {
+                private int _v;
+                public partial int Value { get => _v; set => _v = value; }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("PSplit.cs", source));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["PSplit.Value"]);
+
+        Assert.Equal(2, items.Count);
+        Assert.All(items, i => Assert.Equal("ok", i.Status));
+        Assert.All(items, i => Assert.Equal("property", i.Kind));
+        Assert.Contains(items, i => i.Source!.Contains("{ get; set; }", StringComparison.Ordinal));
+        Assert.Contains(items, i => i.Source!.Contains("get => _v", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void NotFound_PerItem()
     {
         var items = Execute("Widget.Nope", "Widget.Name");

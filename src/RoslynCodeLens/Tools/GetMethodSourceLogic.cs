@@ -183,9 +183,10 @@ public static class GetMethodSourceLogic
     }
 
     /// <summary>
-    /// All declaration parts of a member. Partial methods surface as a single symbol
-    /// (the definition part) with the implementation as a separate linked symbol, each
-    /// carrying only its own syntax reference — merge both so every part yields an item.
+    /// All declaration parts of a member. Partial methods and partial properties
+    /// (C# 13) surface as a single symbol (the definition part) with the implementation
+    /// as a separate linked symbol, each carrying only its own syntax reference —
+    /// merge both so every part yields an item.
     /// </summary>
     private static IReadOnlyList<SyntaxReference> DeclarationReferences(ISymbol symbol)
     {
@@ -195,6 +196,13 @@ public static class GetMethodSourceLogic
             if (method.PartialImplementationPart is { } impl && !SymbolEqualityComparer.Default.Equals(impl, symbol))
                 refs = refs.Concat(impl.DeclaringSyntaxReferences);
             else if (method.PartialDefinitionPart is { } def && !SymbolEqualityComparer.Default.Equals(def, symbol))
+                refs = def.DeclaringSyntaxReferences.Concat(refs);
+        }
+        else if (symbol is IPropertySymbol property)
+        {
+            if (property.PartialImplementationPart is { } impl && !SymbolEqualityComparer.Default.Equals(impl, symbol))
+                refs = refs.Concat(impl.DeclaringSyntaxReferences);
+            else if (property.PartialDefinitionPart is { } def && !SymbolEqualityComparer.Default.Equals(def, symbol))
                 refs = def.DeclaringSyntaxReferences.Concat(refs);
         }
 
