@@ -86,6 +86,16 @@ public sealed class MultiSolutionManager : IDisposable
     public Task WaitForWarmupAsync() => Active.WaitForWarmupAsync();
     public Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync() => Active.ForceReloadAsync();
 
+    /// <summary>
+    /// Commits already-written document texts to the active solution's in-memory snapshot
+    /// immediately (bypassing the file watcher's debounce). See
+    /// <see cref="SolutionManager.CommitDocumentTextsAsync"/>.
+    /// </summary>
+    public Task CommitDocumentTextsAsync(
+        IReadOnlyList<(Microsoft.CodeAnalysis.DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)> documents,
+        CancellationToken ct = default)
+        => Active.CommitDocumentTextsAsync(documents, ct);
+
     public IReadOnlyList<SolutionInfo> ListSolutions()
     {
         string? activeKey;

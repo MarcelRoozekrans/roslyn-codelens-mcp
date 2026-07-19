@@ -31,11 +31,25 @@ public class RenameSymbolLogicTests
     private static Task<RenameSymbolResult> RunAsync(
         LoadedSolution loaded, SymbolResolver resolver, string symbol, string newName,
         bool renameOverloads = true, bool renameInStrings = false, bool renameInComments = true,
-        bool preview = true, bool force = false)
+        bool preview = true, bool force = false,
+        RenameSymbolLogic.CommitWrittenDocuments? commit = null)
         => RenameSymbolLogic.ExecuteAsync(
             loaded, resolver, symbol, newName,
             renameOverloads, renameInStrings, renameInComments, preview, force,
-            CancellationToken.None);
+            commit, CancellationToken.None);
+
+    /// <summary>Rewraps a workspace as a degraded load (non-empty LoadDiagnostics).</summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) Degrade(
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace)
+    {
+        var degraded = new LoadedSolution
+        {
+            Solution = workspace.Loaded.Solution,
+            Compilations = workspace.Loaded.Compilations,
+            LoadDiagnostics = ["RenameProj: metadata reference 'Missing.dll' could not be resolved"],
+        };
+        return (degraded, new SymbolResolver(degraded));
+    }
 
     [Fact]
     public async Task InvalidIdentifier_ThrowsInvalidArgument()
@@ -98,6 +112,31 @@ public class RenameSymbolLogicTests
         var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
         var result = await RunAsync(loaded, resolver, "Widget.Compute", "Calculate");
         Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task QualifiedNameWithoutTypeParameters_RenamesGenericType()
+    {
+        // Finding 6: "Data.Repository" must resolve Repository<T>, matching the tool's
+        // documented "fully qualified (Namespace.MyClass)" contract.
+        const string source = """
+            namespace Data;
+
+            public class Repository<T>
+            {
+                public T? GetById(int id) => default;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Repository.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Data.Repository", "Store");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.Equal("Data.Repository<T>", result.OldName);
+        var renamed = ApplyEditsToSource(source, result.Edits, "Repository.cs");
+        Assert.Contains("class Store<T>", renamed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Repository", renamed, StringComparison.Ordinal);
     }
 
     private static string ApplyEditsToSource(string source, IEnumerable<TextEdit> edits, string filePath)
@@ -247,6 +286,299 @@ public class RenameSymbolLogicTests
 
             Assert.False(result.Applied);
             Assert.Equal(BasicSource, await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PreexistingErrorMentioningSymbol_IsNotAConflict()
+    {
+        // CS0117's message embeds the type name ("'Widget' does not contain a
+        // definition for 'NoSuchMember'"). After the rename the same error is
+        // still there, just mentioning 'Sprocket' — the error COUNT for
+        // (CS0117, file) is unchanged, so it must not be reported as a conflict.
+        const string source = """
+            namespace RenameDemo;
+
+            public class Widget
+            {
+                public static int Existing = 1;
+            }
+
+            public class User
+            {
+                public object Bad = Widget.NoSuchMember;
+                public int Good = Widget.Existing;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", source));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    [Fact]
+    public async Task SameIdSameFileNewLine_IsReported()
+    {
+        // Pre-existing CS0101 on the duplicate 'Dup' (line 3). Renaming
+        // First -> Dup introduces a SECOND CS0101 in the same file with the
+        // exact same message text — only the line differs. The count-based
+        // diff must report exactly the new one, on the new line.
+        const string source = """
+            namespace RenameDemo;
+            public class Dup { }
+            public class Dup { }
+            public class First { }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Types.cs", source));
+        var result = await RunAsync(loaded, resolver, "First", "Dup");
+
+        Assert.True(result.Success);
+        Assert.NotEmpty(result.Conflicts);
+        var conflict = Assert.Single(
+            result.Conflicts, c => string.Equals(c.Id, "CS0101", StringComparison.Ordinal));
+        Assert.Equal(4, conflict.Line);   // the renamed declaration, not the pre-existing dup (line 3)
+    }
+
+    // NOTE on the dependent-project-break scenario: a rename that genuinely breaks
+    // a downstream project WITHOUT changing its text is not constructible with
+    // AdhocWorkspace. Name-capture attempts (rename LibA's Foo -> Action while LibB
+    // uses System.Action) are defused by Renamer's own conflict engine, which
+    // complexifies the captured reference in LibB to 'System.Action' — so LibB's
+    // text changes and it lands in GetProjectChanges anyway (verified empirically).
+    // The remaining real-world breaks (source generators, name-based reflection
+    // lookups) need generator/analyzer infrastructure AdhocWorkspace doesn't run.
+    // The scan-set mechanic is therefore tested directly instead: dependents ARE
+    // scanned (ComputeScanSet_IncludesDirectDependents) and scanning them applies
+    // the same count-based diff without phantom conflicts or crashes
+    // (DependentProjectWithPreexistingError_IsNotAConflict).
+    [Fact]
+    public async Task ComputeScanSet_IncludesDirectDependents()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Other.cs", "namespace Dep; public class Other { }")]));
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Widget");
+        var renamed = await Microsoft.CodeAnalysis.Rename.Renamer.RenameSymbolAsync(
+            loaded.Solution, target,
+            new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
+            CancellationToken.None);
+
+        var scanSet = RenameSymbolLogic.ComputeScanSet(loaded.Solution, renamed);
+        var libA = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibA", StringComparison.Ordinal)).Id;
+        var libB = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibB", StringComparison.Ordinal)).Id;
+
+        Assert.Contains(libA, scanSet);   // textually changed by the rename
+        Assert.Contains(libB, scanSet);   // untouched, but a direct dependent of LibA
+        Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task DependentProjectWithPreexistingError_IsNotAConflict()
+    {
+        // LibB is scanned as a direct dependent; its pre-existing CS0246 must not
+        // surface as a conflict (count unchanged by the rename in LibA).
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Broken.cs", "namespace Dep; public class Broken { public Unknown Field; }")]));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    private static Diagnostic MakeError(string id, string path, int line, bool suppressed = false)
+    {
+        var linePosition = new Microsoft.CodeAnalysis.Text.LinePositionSpan(
+            new Microsoft.CodeAnalysis.Text.LinePosition(line - 1, 0),
+            new Microsoft.CodeAnalysis.Text.LinePosition(line - 1, 1));
+        var location = Location.Create(
+            path, new Microsoft.CodeAnalysis.Text.TextSpan(0, 0), linePosition);
+        return Diagnostic.Create(
+            id, "Test", "synthetic error",
+            DiagnosticSeverity.Error, DiagnosticSeverity.Error,
+            isEnabledByDefault: true, warningLevel: 0, isSuppressed: suppressed,
+            location: location);
+    }
+
+    [Fact]
+    public void SuppressedDiagnostics_AreIgnored()
+    {
+        // An IsSuppressed Error-severity diagnostic is not constructible through
+        // AdhocWorkspace compilation options: #pragma/SuppressMessage suppression is
+        // applied BEFORE warning-as-error elevation, so a suppressed diagnostic
+        // surfaces (under ReportSuppressedDiagnostics) at its original Warning
+        // severity, never Error. Suppressors that keep Error severity require
+        // CompilationWithAnalyzers. The filter is therefore exercised at the diff
+        // level with a synthetic suppressed diagnostic (Diagnostic.Create supports
+        // isSuppressed directly).
+        var suppressed = MakeError("CS9999", "File.cs", 3, suppressed: true);
+        Assert.Empty(RenameSymbolLogic.DiffNewErrors(before: [], after: [suppressed]));
+
+        var unsuppressed = MakeError("CS9999", "File.cs", 3);
+        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before: [], after: [unsuppressed]));
+        Assert.Equal("CS9999", conflict.Id);
+        Assert.Equal(3, conflict.Line);
+    }
+
+    [Fact]
+    public void DiffNewErrors_PrefersLinesAbsentFromBefore()
+    {
+        var before = new[] { MakeError("CS0101", "Types.cs", 3) };
+        var after = new[] { MakeError("CS0101", "Types.cs", 3), MakeError("CS0101", "Types.cs", 7) };
+
+        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before, after));
+        Assert.Equal(7, conflict.Line);
+    }
+
+    [Fact]
+    public async Task Degraded_Preview_MessageCarriesWarning()
+    {
+        var (loaded, resolver) = Degrade(RenameTestWorkspace.Create(("Widget.cs", BasicSource)));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.Contains("degraded", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 load diagnostic", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("incomplete", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Degraded_Apply_RefusedWithoutForce()
+    {
+        var commitCalls = 0;
+        var (loaded, resolver) = Degrade(RenameTestWorkspace.Create(("Widget.cs", BasicSource)));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+            commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+        Assert.False(result.Success);
+        Assert.False(result.Applied);
+        Assert.Contains("degraded", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+        Assert.Contains("force=true", result.Message, StringComparison.Ordinal);
+        Assert.Equal(0, commitCalls);
+    }
+
+    [Fact]
+    public async Task Degraded_Apply_ForceWrites()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-degraded-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = Degrade(RenameTestWorkspace.Create((path, BasicSource)));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false, force: true);
+
+            Assert.True(result.Success);
+            Assert.True(result.Applied);
+            Assert.Contains("public class Sprocket", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Apply_DiskChangedSinceSnapshot_RefusedAndFileNotOverwritten()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-stale-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            // Concurrent edit AFTER the snapshot: the apply must refuse rather than clobber it.
+            var drifted = BasicSource + "\n// concurrent edit\n";
+            await File.WriteAllTextAsync(path, drifted);
+
+            var commitCalls = 0;
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+            Assert.False(result.Success);
+            Assert.False(result.Applied);
+            Assert.Contains(path, result.Message, StringComparison.Ordinal);
+            Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+            Assert.Equal(drifted, await File.ReadAllTextAsync(path));
+            Assert.Equal(0, commitCalls);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Apply_InvokesCommitHookWithExactlyTheChangedDocuments()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-commit-").FullName;
+        try
+        {
+            var widgetPath = Path.Combine(dir, "Widget.cs");
+            var otherPath = Path.Combine(dir, "Other.cs");
+            const string otherSource = "namespace RenameDemo;\npublic class Untouched { }\n";
+            await File.WriteAllTextAsync(widgetPath, BasicSource);
+            await File.WriteAllTextAsync(otherPath, otherSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create(
+                (widgetPath, BasicSource), (otherPath, otherSource));
+
+            var commits = new List<IReadOnlyList<(Microsoft.CodeAnalysis.DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)>>();
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (docs, _) => { commits.Add(docs); return Task.CompletedTask; });
+
+            Assert.True(result.Applied);
+            var docs = Assert.Single(commits);
+            var pair = Assert.Single(docs);   // only Widget.cs changed; Other.cs must not be committed
+            Assert.Equal(loaded.Solution.GetDocumentIdsWithFilePath(widgetPath).Single(), pair.Id);
+            Assert.Contains("public class Sprocket", pair.Text.ToString(), StringComparison.Ordinal);
+            // The committed text is exactly what landed on disk.
+            Assert.Equal(await File.ReadAllTextAsync(widgetPath), pair.Text.ToString());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Preview_DoesNotInvokeCommitHook()
+    {
+        var commitCalls = 0;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket",
+            commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+        Assert.False(result.Applied);
+        Assert.Equal(0, commitCalls);
+    }
+
+    [Fact]
+    public async Task Apply_CommitHookFailure_DoesNotFailTheRename()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-commitfail-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (_, _) => throw new InvalidOperationException("commit boom"));
+
+            Assert.True(result.Success);
+            Assert.True(result.Applied);   // the disk write DID succeed
+            Assert.Contains("commit boom", result.Message, StringComparison.Ordinal);
+            Assert.Contains("public class Sprocket", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
         }
         finally
         {

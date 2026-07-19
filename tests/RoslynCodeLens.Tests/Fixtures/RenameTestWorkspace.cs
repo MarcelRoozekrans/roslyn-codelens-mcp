@@ -6,38 +6,82 @@ using Microsoft.CodeAnalysis.Text;
 namespace RoslynCodeLens.Tests.Fixtures;
 
 /// <summary>
-/// Builds an in-memory single-project LoadedSolution + SymbolResolver from source
-/// strings. Pass absolute paths as file names when a test needs apply-mode disk writes.
+/// Builds an in-memory LoadedSolution + SymbolResolver from source strings.
+/// Pass absolute paths as file names when a test needs apply-mode disk writes.
+/// The multi-project overload adds projects in order, each referencing all
+/// earlier ones (ProjectReference), so later projects are downstream dependents.
+/// <see cref="CreateFromDisk"/> loads document text from the files themselves via
+/// SourceText.From(stream) — capturing the on-disk encoding/BOM exactly the way
+/// MSBuildWorkspace's file loader does — for tests that exercise encoding
+/// preservation on the write path.
 /// </summary>
 internal static class RenameTestWorkspace
 {
     public static (LoadedSolution Loaded, SymbolResolver Resolver) Create(
         params (string FilePath, string Source)[] files)
+        => Create(("RenameProj", files));
+
+    public static (LoadedSolution Loaded, SymbolResolver Resolver) Create(
+        params (string ProjectName, (string FilePath, string Source)[] Files)[] projects)
+        => CreateCore(projects
+            .Select(p => (p.ProjectName, p.Files
+                .Select(f => (f.FilePath, SourceText.From(f.Source)))
+                .ToArray()))
+            .ToArray());
+
+    /// <summary>
+    /// Single project whose documents are read from existing files on disk, so each
+    /// document's SourceText carries the detected encoding (incl. BOM presence).
+    /// </summary>
+    public static (LoadedSolution Loaded, SymbolResolver Resolver) CreateFromDisk(
+        params string[] filePaths)
+        => CreateCore(("RenameProj", filePaths
+            .Select(path =>
+            {
+                using var stream = File.OpenRead(path);
+                return (path, SourceText.From(stream));
+            })
+            .ToArray()));
+
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) CreateCore(
+        params (string ProjectName, (string FilePath, SourceText Text)[] Files)[] projects)
     {
         var workspace = new AdhocWorkspace();
-        var projectId = ProjectId.CreateNewId();
-        var projectInfo = ProjectInfo.Create(
-                projectId, VersionStamp.Create(), "RenameProj", "RenameProj", LanguageNames.CSharp,
-                compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
-            .WithMetadataReferences(
-                [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)]);
+        var solution = workspace.CurrentSolution;
+        var projectIds = new List<ProjectId>();
 
-        var solution = workspace.CurrentSolution.AddProject(projectInfo);
-        foreach (var (path, source) in files)
+        foreach (var (projectName, files) in projects)
         {
-            solution = solution.AddDocument(
-                DocumentId.CreateNewId(projectId), Path.GetFileName(path),
-                SourceText.From(source), filePath: path);
+            var projectId = ProjectId.CreateNewId();
+            var projectInfo = ProjectInfo.Create(
+                    projectId, VersionStamp.Create(), projectName, projectName, LanguageNames.CSharp,
+                    compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+                .WithMetadataReferences(
+                    [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)])
+                .WithProjectReferences(projectIds.Select(id => new ProjectReference(id)));
+
+            solution = solution.AddProject(projectInfo);
+            foreach (var (path, text) in files)
+            {
+                solution = solution.AddDocument(
+                    DocumentId.CreateNewId(projectId), Path.GetFileName(path),
+                    text, filePath: path);
+            }
+
+            projectIds.Add(projectId);
         }
 
-        var compilation = solution.GetProject(projectId)!
-            .GetCompilationAsync().GetAwaiter().GetResult()!;
+        var compilations = new ConcurrentDictionary<ProjectId, Compilation>();
+        foreach (var projectId in projectIds)
+        {
+            compilations[projectId] = solution.GetProject(projectId)!
+                .GetCompilationAsync().GetAwaiter().GetResult()!;
+        }
 
         var loaded = new LoadedSolution
         {
             Solution = solution,
-            Compilations = new ConcurrentDictionary<ProjectId, Compilation>(
-                [new KeyValuePair<ProjectId, Compilation>(projectId, compilation)]),
+            Compilations = compilations,
         };
         return (loaded, new SymbolResolver(loaded));
     }

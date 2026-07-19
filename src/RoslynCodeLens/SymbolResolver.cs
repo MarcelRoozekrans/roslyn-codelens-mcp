@@ -9,6 +9,7 @@ public class SymbolResolver
     private readonly List<INamedTypeSymbol> _allTypes;
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesBySimpleName;
     private readonly Dictionary<string, INamedTypeSymbol> _typesByFullName;
+    private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByStrippedFullName;
     private readonly Dictionary<string, string> _fileToProjectName;
     private readonly Dictionary<ProjectId, string> _projectIdToName;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _interfaceImplementors;
@@ -20,7 +21,7 @@ public class SymbolResolver
     public SymbolResolver(LoadedSolution loaded)
     {
         _allTypes = CollectAllTypes(loaded);
-        (_typesBySimpleName, _typesByFullName) = BuildTypeLookups(_allTypes);
+        (_typesBySimpleName, _typesByFullName, _typesByStrippedFullName) = BuildTypeLookups(_allTypes);
         (_fileToProjectName, _projectIdToName) = BuildProjectLookups(loaded);
         (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes);
 
@@ -48,15 +49,42 @@ public class SymbolResolver
         return allTypes;
     }
 
-    private static (Dictionary<string, List<INamedTypeSymbol>>, Dictionary<string, INamedTypeSymbol>)
+    /// <summary>
+    /// Fully qualified name without generic type parameters: renders
+    /// "Data.Repository&lt;T&gt;" as "Data.Repository" and nested
+    /// "Ns.Outer&lt;T&gt;.Inner" as "Ns.Outer.Inner".
+    /// </summary>
+    private static readonly SymbolDisplayFormat StrippedGenericsFormat = new(
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.None);
+
+    private static (Dictionary<string, List<INamedTypeSymbol>>, Dictionary<string, INamedTypeSymbol>,
+                     Dictionary<string, List<INamedTypeSymbol>>)
         BuildTypeLookups(List<INamedTypeSymbol> allTypes)
     {
         var bySimple = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
         var byFull = new Dictionary<string, INamedTypeSymbol>(StringComparer.Ordinal);
+        var byStripped = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
 
         foreach (ref readonly var type in CollectionsMarshal.AsSpan(allTypes))
         {
-            byFull[type.ToDisplayString()] = type;
+            var fullName = type.ToDisplayString();
+            byFull[fullName] = type;
+
+            // Generic types display with their type parameters ("Data.Repository<T>"),
+            // so the documented qualified form "Data.Repository" misses byFull. Index
+            // them under the arity-stripped name too; multiple arities share a key and
+            // surface as multiple matches for the caller's ambiguity handling.
+            var strippedName = type.ToDisplayString(StrippedGenericsFormat);
+            if (!string.Equals(strippedName, fullName, StringComparison.Ordinal))
+            {
+                if (!byStripped.TryGetValue(strippedName, out var strippedList))
+                {
+                    strippedList = new List<INamedTypeSymbol>();
+                    byStripped[strippedName] = strippedList;
+                }
+                strippedList.Add(type);
+            }
 
             if (!bySimple.TryGetValue(type.Name, out var list))
             {
@@ -66,7 +94,7 @@ public class SymbolResolver
             list.Add(type);
         }
 
-        return (bySimple, byFull);
+        return (bySimple, byFull, byStripped);
     }
 
     private static (Dictionary<string, string>, Dictionary<ProjectId, string>)
@@ -206,8 +234,13 @@ public class SymbolResolver
     {
         if (symbol.Contains('.', StringComparison.Ordinal))
         {
-            return _typesByFullName.TryGetValue(symbol, out var type)
-                ? [type]
+            if (_typesByFullName.TryGetValue(symbol, out var type))
+                return [type];
+
+            // Fall back to the arity-stripped index so the documented qualified form
+            // ("Data.Repository") reaches generic types ("Data.Repository<T>").
+            return _typesByStrippedFullName.TryGetValue(symbol, out var strippedMatches)
+                ? strippedMatches
                 : [];
         }
 

@@ -280,6 +280,71 @@ public sealed class SolutionManager : IDisposable
                 solution = solution.WithDocumentText(docId, text);
         }
 
+        await RecompileAndSwapAsync(solution, staleIds).ConfigureAwait(false);
+
+        await Console.Error.WriteLineAsync("[roslyn-codelens] Rebuild complete (incremental).").ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Commits already-written document texts to the in-memory snapshot immediately, so queries
+    /// issued right after a tool wrote files (rename_symbol apply) see the new text instead of
+    /// waiting out the file watcher's debounce window. Serialized with the watcher auto-rebuild
+    /// and ForceReloadAsync via <see cref="_rebuildGate"/> (waits, like ForceReloadAsync does),
+    /// then reuses the incremental-rebuild core: <c>WithDocumentText</c> per document, recompile
+    /// the changed projects plus their transitive dependents (mirroring the watcher's
+    /// transitive staleness), swap the snapshot, and re-map the tracker. Document ids that no
+    /// longer exist (a full reload swapped in fresh ids mid-flight) are skipped — that reload
+    /// already read the committed text from disk.
+    /// </summary>
+    public async Task CommitDocumentTextsAsync(
+        IReadOnlyList<(DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)> documents,
+        CancellationToken ct = default)
+    {
+        if (documents.Count == 0)
+            return;
+
+        await _rebuildGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var solution = _loaded.Solution;
+            var changedProjects = new HashSet<ProjectId>();
+            foreach (var (docId, text) in documents)
+            {
+                if (solution.GetDocument(docId) == null)
+                    continue;
+                solution = solution.WithDocumentText(docId, text);
+                changedProjects.Add(docId.ProjectId);
+            }
+
+            if (changedProjects.Count == 0)
+                return;
+
+            var staleIds = new HashSet<ProjectId>(changedProjects);
+            var graph = solution.GetProjectDependencyGraph();
+            foreach (var projectId in changedProjects)
+                staleIds.UnionWith(graph.GetProjectsThatTransitivelyDependOnThisProject(projectId));
+
+            await RecompileAndSwapAsync(solution, staleIds).ConfigureAwait(false);
+            await Console.Error.WriteLineAsync(
+                $"[roslyn-codelens] Committed {documents.Count} written document(s) to the in-memory snapshot.")
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _rebuildGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Shared tail of the in-place update paths (#282 pattern): recompiles the stale projects of
+    /// an already-updated solution fork (unchanged projects keep their carried-over compilations,
+    /// preserving symbol identity), swaps in the new LoadedSolution + resolvers under
+    /// <see cref="_lock"/>, and re-maps the tracker so future edits resolve against the new
+    /// authoritative snapshot. Callers must hold <see cref="_rebuildGate"/>.
+    /// </summary>
+    private async Task RecompileAndSwapAsync(Solution solution, IReadOnlySet<ProjectId> staleIds)
+    {
         var compilations = new ConcurrentDictionary<ProjectId, Compilation>(_loaded.Compilations);
         var staleProjects = solution.Projects.Where(p => staleIds.Contains(p.Id)).ToList();
         var tasks = staleProjects.Select(async project =>
@@ -310,10 +375,7 @@ public sealed class SolutionManager : IDisposable
 
         // Re-map file->project/document lookups against the new snapshot. Ids are preserved,
         // but a fresh snapshot instance is now authoritative and future edits resolve against it.
-        _tracker!.UpdateMappings(newLoaded);
-
-        await Console.Error.WriteLineAsync("[roslyn-codelens] Rebuild complete (incremental).").ConfigureAwait(false);
-        return true;
+        _tracker?.UpdateMappings(newLoaded);
     }
 
     /// <summary>

@@ -200,7 +200,7 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 Solutions passed on the CLI at server startup are auto-trusted in session scope — `get_diagnostics(includeAnalyzers=true)` against them works without an extra prompt.
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default.
-- `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses on conflicts unless `force=true`.
+- `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses unless `force=true` on: conflicts, a degraded solution load, or files changed on disk since the snapshot (freshness refusal — run `rebuild_solution` and retry; `force` does not bypass freshness). After apply the in-memory snapshot updates immediately — follow-up queries see the new name without waiting for a rebuild. Generic types accept the arity-free qualified form (`Data.Repository` finds `Repository<T>`).
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).
 - `analyze_control_flow` — reachability, returns, unreachable paths.
 
