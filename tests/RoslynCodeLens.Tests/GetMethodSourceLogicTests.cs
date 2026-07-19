@@ -207,6 +207,28 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
+    public void ExplicitInterfaceImplementation_ReachableByMemberName()
+    {
+        const string source = """
+            using System;
+            namespace Gadgets;
+            public class Widget : IDisposable
+            {
+                void IDisposable.Dispose() { }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", source));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["Widget.Dispose"]);
+
+        var item = Assert.Single(items);
+        Assert.Equal("ok", item.Status);
+        Assert.Equal("method", item.Kind);
+        Assert.Contains(".Dispose()", item.Source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NotFound_PerItem()
     {
         var items = Execute("Widget.Nope", "Widget.Name");

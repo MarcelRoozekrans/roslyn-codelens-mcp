@@ -51,6 +51,8 @@ public static class GetMethodSourceLogic
 
         var matches = resolver.FindSymbols(requested);
         if (matches.Count == 0)
+            matches = FindExplicitImplementations(resolver, requested);
+        if (matches.Count == 0)
         {
             var resolved = metadata.Resolve(requested);
             if (resolved != null)
@@ -76,6 +78,34 @@ public static class GetMethodSourceLogic
             return [NotInSource(requested, groups[0].First())];
 
         return sourceBacked.SelectMany(s => Items(resolver, requested, s));
+    }
+
+    /// <summary>
+    /// Explicit interface implementations are named after the interface
+    /// ("System.IDisposable.Dispose"), so a "Widget.Dispose" request misses the
+    /// member index. Resolve the type part and scan its members for names ending
+    /// in ".Dispose" (exact matches are already covered by FindSymbols).
+    /// </summary>
+    private static IReadOnlyList<ISymbol> FindExplicitImplementations(
+        SymbolResolver resolver, string requested)
+    {
+        var lastDot = requested.LastIndexOf('.');
+        if (lastDot <= 0)
+            return [];
+
+        var typeName = requested[..lastDot];
+        var memberSuffix = requested[lastDot..]; // "." + member part
+
+        var results = new List<ISymbol>();
+        foreach (var type in resolver.FindNamedTypes(typeName))
+        {
+            foreach (var member in type.GetMembers())
+            {
+                if (member.Name.EndsWith(memberSuffix, StringComparison.Ordinal))
+                    results.Add(member);
+            }
+        }
+        return results;
     }
 
     private static IEnumerable<MemberSourceInfo> CtorItems(
