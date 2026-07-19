@@ -20,6 +20,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["find_callers"]               = "navigation",
     ["find_implementations"]       = "navigation",
     ["find_attribute_usages"]      = "navigation",
+    ["resolve_stack_trace"]        = "navigation",
     ["get_symbol_context"]         = "analysis",
     ["get_type_overview"]          = "analysis",
     ["get_type_hierarchy"]         = "analysis",
@@ -32,6 +33,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["get_code_fixes"]             = "diagnostics",
     ["get_code_actions"]           = "diagnostics",
     ["apply_code_action"]          = "diagnostics",
+    ["rename_symbol"]              = "diagnostics",
     ["find_unused_symbols"]        = "code-quality",
     ["get_complexity_metrics"]     = "code-quality",
     ["find_naming_violations"]     = "code-quality",
@@ -122,7 +124,7 @@ foreach (var toolType in toolTypes)
         sb.AppendLine();
         sb.AppendLine($"# `{toolName}`");
         sb.AppendLine();
-        sb.AppendLine(toolDesc);
+        sb.AppendLine(EscapeMdx(toolDesc));
         sb.AppendLine();
 
         var userParams = method.GetParameters()
@@ -139,7 +141,7 @@ foreach (var toolType in toolTypes)
             {
                 var desc = p.GetCustomAttribute<DescriptionAttribute>()!.Description;
                 var optional = p.HasDefaultValue || ctx.Create(p).WriteState == NullabilityState.Nullable;
-                sb.AppendLine($"| `{p.Name}` | `{FormatType(p.ParameterType)}` | {(optional ? "" : "✓")} | {desc} |");
+                sb.AppendLine($"| `{p.Name}` | `{FormatType(p.ParameterType)}` | {(optional ? "" : "✓")} | {EscapeMdxTableCell(desc)} |");
             }
             sb.AppendLine();
         }
@@ -180,3 +182,24 @@ static string FormatType(Type t)
 
 static string EscapeYaml(string s) =>
     s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", " ").Replace("\r", "").Replace("\t", " ");
+
+// MDX parses '<' and '{' outside inline code spans as JSX, so tool descriptions containing
+// compiler-mangled names (<M>d__N.MoveNext, <>c) break the docs build. Backslash-escape them
+// everywhere except inside backtick code spans, where MDX already treats them literally.
+static string EscapeMdx(string s)
+{
+    var sb = new StringBuilder(s.Length + 8);
+    var inCode = false;
+    foreach (var ch in s)
+    {
+        if (ch == '`') { inCode = !inCode; sb.Append(ch); continue; }
+        if (!inCode && ch is '<' or '{') sb.Append('\\');
+        sb.Append(ch);
+    }
+    return sb.ToString();
+}
+
+// Table cells additionally need every '|' escaped — markdown splits cells before inline
+// parsing, so even pipes inside code spans would break the row.
+static string EscapeMdxTableCell(string s) =>
+    EscapeMdx(s).Replace("|", "\\|", StringComparison.Ordinal);

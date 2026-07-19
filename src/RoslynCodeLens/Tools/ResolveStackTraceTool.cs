@@ -11,8 +11,8 @@ public static class ResolveStackTraceTool
 
     [McpServerTool(Name = "resolve_stack_trace"),
      Description("Map a pasted .NET stack trace to file/line/symbol against the loaded solution, " +
-                 "undoing compiler name mangling: async/iterator state machines (<M>d__N.MoveNext), " +
-                 "lambdas (<>c / <>c__DisplayClass), local functions (g__Name|), generic arity. " +
+                 "undoing compiler name mangling: async/iterator state machines (`<M>d__N.MoveNext`), " +
+                 "lambdas (`<>c` / `<>c__DisplayClass`), local functions (`g__Name|`), generic arity. " +
                  "Handles Exception.ToString() output, log-prefixed lines, inner-exception chains, and " +
                  "Ben.Demystifier-style traces. Frames without 'in file:line' get the declaration site; " +
                  "frames with it keep the exact location. External frames resolve with origin=metadata. " +
