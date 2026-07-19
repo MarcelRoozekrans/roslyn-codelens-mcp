@@ -61,7 +61,13 @@ public static class CodeActionRunner
 
             if (!preview)
             {
-                await SolutionChangeWriter.WriteChangesToDiskAsync(applyOp.ChangedSolution, project.Solution, ct).ConfigureAwait(false);
+                var write = await SolutionChangeWriter.WriteChangesToDiskAsync(applyOp.ChangedSolution, project.Solution, ct).ConfigureAwait(false);
+                if (!write.Written)
+                {
+                    return new CodeActionResult(false, matchedAction.Title, edits,
+                        $"Refused to write: {write.StaleFiles.Count} file(s) changed on disk after the solution snapshot was loaded: " +
+                        $"{string.Join(", ", write.StaleFiles)}. Run rebuild_solution and retry.");
+                }
             }
 
             return new CodeActionResult(true, matchedAction.Title, edits);

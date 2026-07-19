@@ -28,6 +28,9 @@ public static class RenameSymbolTool
         var context = manager.GetAnalysisContext();
         return await RenameSymbolLogic.ExecuteAsync(
             context.Loaded, context.Resolver, symbol, newName,
-            renameOverloads, renameInStrings, renameInComments, preview, force, ct).ConfigureAwait(false);
+            renameOverloads, renameInStrings, renameInComments, preview, force,
+            // After a successful apply, push the written texts into the in-memory snapshot so
+            // follow-up queries see the new name immediately (no watcher-debounce stale window).
+            manager.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
     }
 }

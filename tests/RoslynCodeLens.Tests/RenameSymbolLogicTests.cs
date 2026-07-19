@@ -31,11 +31,25 @@ public class RenameSymbolLogicTests
     private static Task<RenameSymbolResult> RunAsync(
         LoadedSolution loaded, SymbolResolver resolver, string symbol, string newName,
         bool renameOverloads = true, bool renameInStrings = false, bool renameInComments = true,
-        bool preview = true, bool force = false)
+        bool preview = true, bool force = false,
+        RenameSymbolLogic.CommitWrittenDocuments? commit = null)
         => RenameSymbolLogic.ExecuteAsync(
             loaded, resolver, symbol, newName,
             renameOverloads, renameInStrings, renameInComments, preview, force,
-            CancellationToken.None);
+            commit, CancellationToken.None);
+
+    /// <summary>Rewraps a workspace as a degraded load (non-empty LoadDiagnostics).</summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) Degrade(
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace)
+    {
+        var degraded = new LoadedSolution
+        {
+            Solution = workspace.Loaded.Solution,
+            Compilations = workspace.Loaded.Compilations,
+            LoadDiagnostics = ["RenameProj: metadata reference 'Missing.dll' could not be resolved"],
+        };
+        return (degraded, new SymbolResolver(degraded));
+    }
 
     [Fact]
     public async Task InvalidIdentifier_ThrowsInvalidArgument()
@@ -395,6 +409,156 @@ public class RenameSymbolLogicTests
 
         var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before, after));
         Assert.Equal(7, conflict.Line);
+    }
+
+    [Fact]
+    public async Task Degraded_Preview_MessageCarriesWarning()
+    {
+        var (loaded, resolver) = Degrade(RenameTestWorkspace.Create(("Widget.cs", BasicSource)));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.Contains("degraded", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("1 load diagnostic", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("incomplete", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Degraded_Apply_RefusedWithoutForce()
+    {
+        var commitCalls = 0;
+        var (loaded, resolver) = Degrade(RenameTestWorkspace.Create(("Widget.cs", BasicSource)));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+            commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+        Assert.False(result.Success);
+        Assert.False(result.Applied);
+        Assert.Contains("degraded", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+        Assert.Contains("force=true", result.Message, StringComparison.Ordinal);
+        Assert.Equal(0, commitCalls);
+    }
+
+    [Fact]
+    public async Task Degraded_Apply_ForceWrites()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-degraded-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = Degrade(RenameTestWorkspace.Create((path, BasicSource)));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false, force: true);
+
+            Assert.True(result.Success);
+            Assert.True(result.Applied);
+            Assert.Contains("public class Sprocket", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Apply_DiskChangedSinceSnapshot_RefusedAndFileNotOverwritten()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-stale-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            // Concurrent edit AFTER the snapshot: the apply must refuse rather than clobber it.
+            var drifted = BasicSource + "\n// concurrent edit\n";
+            await File.WriteAllTextAsync(path, drifted);
+
+            var commitCalls = 0;
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+            Assert.False(result.Success);
+            Assert.False(result.Applied);
+            Assert.Contains(path, result.Message, StringComparison.Ordinal);
+            Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+            Assert.Equal(drifted, await File.ReadAllTextAsync(path));
+            Assert.Equal(0, commitCalls);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Apply_InvokesCommitHookWithExactlyTheChangedDocuments()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-commit-").FullName;
+        try
+        {
+            var widgetPath = Path.Combine(dir, "Widget.cs");
+            var otherPath = Path.Combine(dir, "Other.cs");
+            const string otherSource = "namespace RenameDemo;\npublic class Untouched { }\n";
+            await File.WriteAllTextAsync(widgetPath, BasicSource);
+            await File.WriteAllTextAsync(otherPath, otherSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create(
+                (widgetPath, BasicSource), (otherPath, otherSource));
+
+            var commits = new List<IReadOnlyList<(Microsoft.CodeAnalysis.DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)>>();
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (docs, _) => { commits.Add(docs); return Task.CompletedTask; });
+
+            Assert.True(result.Applied);
+            var docs = Assert.Single(commits);
+            var pair = Assert.Single(docs);   // only Widget.cs changed; Other.cs must not be committed
+            Assert.Equal(loaded.Solution.GetDocumentIdsWithFilePath(widgetPath).Single(), pair.Id);
+            Assert.Contains("public class Sprocket", pair.Text.ToString(), StringComparison.Ordinal);
+            // The committed text is exactly what landed on disk.
+            Assert.Equal(await File.ReadAllTextAsync(widgetPath), pair.Text.ToString());
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Preview_DoesNotInvokeCommitHook()
+    {
+        var commitCalls = 0;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket",
+            commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+        Assert.False(result.Applied);
+        Assert.Equal(0, commitCalls);
+    }
+
+    [Fact]
+    public async Task Apply_CommitHookFailure_DoesNotFailTheRename()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-commitfail-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false,
+                commit: (_, _) => throw new InvalidOperationException("commit boom"));
+
+            Assert.True(result.Success);
+            Assert.True(result.Applied);   // the disk write DID succeed
+            Assert.Contains("commit boom", result.Message, StringComparison.Ordinal);
+            Assert.Contains("public class Sprocket", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]

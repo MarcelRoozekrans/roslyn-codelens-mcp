@@ -16,7 +16,7 @@ public class RenameSymbolFixtureTests
         var result = await RenameSymbolLogic.ExecuteAsync(
             _fixture.Loaded, _fixture.Resolver, "Greeter", "Salutations",
             renameOverloads: true, renameInStrings: false, renameInComments: true,
-            preview: true, force: false, CancellationToken.None);
+            preview: true, force: false, commitToMemory: null, CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.False(result.Applied);

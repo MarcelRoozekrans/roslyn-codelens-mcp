@@ -1,17 +1,28 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Rename;
+using Microsoft.CodeAnalysis.Text;
 using RoslynCodeLens.Models;
 
 namespace RoslynCodeLens.Tools;
 
 public static class RenameSymbolLogic
 {
+    /// <summary>
+    /// Optional post-write hook: receives exactly the (documentId, newText) pairs that were
+    /// written to disk so the caller can commit them to the in-memory solution snapshot
+    /// (see <see cref="SolutionManager.CommitDocumentTextsAsync"/>). Null when no manager is
+    /// available (unit tests) — the file watcher then picks the change up after its debounce.
+    /// </summary>
+    public delegate Task CommitWrittenDocuments(
+        IReadOnlyList<(DocumentId Id, SourceText Text)> documents, CancellationToken ct);
+
     public static async Task<RenameSymbolResult> ExecuteAsync(
         LoadedSolution loaded, SymbolResolver resolver,
         string symbol, string newName,
         bool renameOverloads, bool renameInStrings, bool renameInComments,
-        bool preview, bool force, CancellationToken ct)
+        bool preview, bool force,
+        CommitWrittenDocuments? commitToMemory, CancellationToken ct)
     {
         if (!SyntaxFacts.IsValidIdentifier(newName))
         {
@@ -21,6 +32,18 @@ public static class RenameSymbolLogic
 
         var target = ResolveSingleTarget(resolver, symbol);
         ValidateRenameTarget(target, symbol);
+
+        // Degraded guard (finding 3): a load with dropped references can make Renamer miss
+        // references entirely, silently producing an incomplete rename. Refuse to write in
+        // that state unless the user explicitly forces it; previews warn instead (below).
+        if (!preview && loaded.Degraded && !force)
+        {
+            return new RenameSymbolResult(false, target.ToDisplayString(), newName, Applied: false,
+                [], 0, [],
+                $"Refused to apply: the solution loaded degraded ({loaded.LoadDiagnostics.Count} load " +
+                "diagnostic(s) — projects opened with dropped references), so the rename may be incomplete " +
+                "and silently miss references. Run rebuild_solution and retry, or re-run with force=true to apply anyway.");
+        }
 
         var options = new SymbolRenameOptions(
             RenameOverloads: renameOverloads,
@@ -40,11 +63,18 @@ public static class RenameSymbolLogic
 
         if (preview)
         {
+            var previewMessage = conflicts.Count > 0
+                ? $"{conflicts.Count} conflict(s) detected — applying would introduce new compiler errors."
+                : "Preview only — no files written. Re-run with preview=false to apply.";
+            if (loaded.Degraded)
+            {
+                previewMessage =
+                    $"WARNING: the solution loaded degraded ({loaded.LoadDiagnostics.Count} load diagnostic(s) — " +
+                    "projects opened with dropped references), so this rename may be incomplete and miss references. " +
+                    previewMessage;
+            }
             return new RenameSymbolResult(true, oldName, newName, Applied: false,
-                edits, filesChanged, conflicts,
-                conflicts.Count > 0
-                    ? $"{conflicts.Count} conflict(s) detected — applying would introduce new compiler errors."
-                    : "Preview only — no files written. Re-run with preview=false to apply.");
+                edits, filesChanged, conflicts, previewMessage);
         }
 
         if (conflicts.Count > 0 && !force)
@@ -55,11 +85,40 @@ public static class RenameSymbolLogic
                 "Inspect Conflicts, or re-run with force=true to apply anyway.");
         }
 
-        await SolutionChangeWriter.WriteChangesToDiskAsync(
+        var write = await SolutionChangeWriter.WriteChangesToDiskAsync(
             renamed, loaded.Solution, ct).ConfigureAwait(false);
+        if (!write.Written)
+        {
+            // Freshness refusal (finding 1): something edited these files after the solution
+            // snapshot was taken — writing snapshot-derived text would clobber those edits.
+            return new RenameSymbolResult(false, oldName, newName, Applied: false,
+                edits, filesChanged, conflicts,
+                $"Refused to apply: {write.StaleFiles.Count} file(s) changed on disk after the solution " +
+                $"snapshot was taken: {string.Join(", ", write.StaleFiles)}. No files were written. " +
+                "Run rebuild_solution and retry.");
+        }
+
+        var message = $"Renamed {oldName} to {newName} in {filesChanged} file(s).";
+        if (commitToMemory != null && write.Documents.Count > 0)
+        {
+            // Post-write commit (finding 5): make the in-memory snapshot reflect the new text
+            // immediately instead of waiting out the file watcher's debounce window. A commit
+            // failure must not fail the rename — the files ARE renamed on disk; the watcher
+            // rebuild (or an explicit rebuild_solution) will converge shortly.
+            try
+            {
+                await commitToMemory(write.Documents, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                message += " Warning: files were written, but refreshing the in-memory snapshot failed " +
+                    $"({ex.Message}); queries may briefly see stale text until the file watcher catches up, " +
+                    "or run rebuild_solution.";
+            }
+        }
+
         return new RenameSymbolResult(true, oldName, newName, Applied: true,
-            edits, filesChanged, conflicts,
-            $"Renamed {oldName} to {newName} in {filesChanged} file(s).");
+            edits, filesChanged, conflicts, message);
     }
 
     internal static ISymbol ResolveSingleTarget(SymbolResolver resolver, string symbol)
