@@ -13,13 +13,13 @@ public class ResolveStackTraceFixtureTests
     public void RealisticTrace_ResolvesSourceAndMetadataFrames_InOrder()
     {
         var frames = ResolveStackTraceLogic.Execute(
-            _fixture.Loaded, _fixture.Resolver, _fixture.Metadata, """
+            _fixture.Resolver, _fixture.Metadata, """
             System.InvalidOperationException: boom
                at System.String.Concat(String str0, String str1)
                at TestLib.Greeter.Greet(String name)
                --- End of stack trace from previous location ---
             random log noise
-            """);
+            """).Frames;
 
         Assert.Equal(3, frames.Count);   // header + 2 frames; separator + noise dropped
         Assert.Equal("exception", frames[0].Kind);

@@ -186,6 +186,9 @@ static string EscapeYaml(string s) =>
 // MDX parses '<' and '{' outside inline code spans as JSX, so tool descriptions containing
 // compiler-mangled names (<M>d__N.MoveNext, <>c) break the docs build. Backslash-escape them
 // everywhere except inside backtick code spans, where MDX already treats them literally.
+// If the backticks turn out unbalanced, the toggle would leave escaping disabled from the
+// stray backtick onward — fall back to escaping ALL '<'/'{' regardless of code spans.
+// (ToolDescriptionMdxSafetyTests is the authoring-time gate that keeps this path cold.)
 static string EscapeMdx(string s)
 {
     var sb = new StringBuilder(s.Length + 8);
@@ -194,6 +197,14 @@ static string EscapeMdx(string s)
     {
         if (ch == '`') { inCode = !inCode; sb.Append(ch); continue; }
         if (!inCode && ch is '<' or '{') sb.Append('\\');
+        sb.Append(ch);
+    }
+    if (!inCode) return sb.ToString();
+
+    sb.Clear();
+    foreach (var ch in s)
+    {
+        if (ch is '<' or '{') sb.Append('\\');
         sb.Append(ch);
     }
     return sb.ToString();

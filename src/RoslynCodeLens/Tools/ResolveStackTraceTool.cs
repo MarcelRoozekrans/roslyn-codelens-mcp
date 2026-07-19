@@ -24,8 +24,9 @@ public static class ResolveStackTraceTool
     {
         manager.EnsureLoaded();
         var context = manager.GetAnalysisContext();
-        var frames = ResolveStackTraceLogic.Execute(
-            context.Loaded, context.Resolver, context.Metadata, stackTrace);
+        var result = ResolveStackTraceLogic.Execute(
+            context.Resolver, context.Metadata, stackTrace);
+        var frames = result.Frames;
 
         var summary = new
         {
@@ -36,6 +37,7 @@ public static class ResolveStackTraceTool
                 unresolved = frames.Count(f => string.Equals(f.Origin, "unresolved", StringComparison.Ordinal)),
             },
             exceptions = frames.Count(f => string.Equals(f.Kind, "exception", StringComparison.Ordinal)),
+            skippedFrameLike = result.SkippedFrameLike,
         };
         return ToolListResult.Create(frames, limit ?? DefaultLimit, summary);
     }
