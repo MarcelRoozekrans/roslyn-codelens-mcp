@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.6.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.5.0...v2.6.0) (2026-07-19)
+
+
+### Features
+
+* resolve_stack_trace — map pasted stack traces to source, demangling compiler names ([#301](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/301)) ([016ccc3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/016ccc3bf340dbbd2a5739fb1103e55e22a74b78))
+
+
+### Bug Fixes
+
+* harden resolve_stack_trace for real-world trace shapes ([#304](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/304)) ([ee027fe](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/ee027feb9bfcd488aa085c6cd09856750a2ac956))
+
 ## [2.5.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.6...v2.5.0) (2026-07-19)
 
 
