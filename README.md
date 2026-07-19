@@ -39,6 +39,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_reflection_usage** — Detect dynamic/reflection-based usage
 - **find_references** — Find all references to any symbol (types, methods, properties, fields, events)
 - **go_to_definition** — Find the source file and line where a symbol is defined
+- **resolve_stack_trace** — Map a pasted .NET stack trace to file/line/symbol, undoing compiler name mangling (async/iterator state machines, lambdas, local functions, generic arity); handles inner-exception chains, log-prefixed lines, and Demystifier traces
 - **get_diagnostics** — List compiler errors, warnings, and Roslyn analyzer diagnostics
 - **get_code_fixes** — Get available code fixes with structured text edits for any diagnostic
 - **search_symbols** — Fuzzy workspace symbol search by name
@@ -60,6 +61,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **peek_il** — Decompile any method to ilasm-style IL bytecode from closed-source or generated assemblies
 - **get_code_actions** — Discover available refactorings and fixes at any position (extract method, rename, inline variable, and more)
 - **apply_code_action** — Execute any Roslyn refactoring by title, with preview mode (returns a diff before writing to disk)
+- **rename_symbol** — Solution-wide safe rename of a type or member via Roslyn's Renamer, with preview mode, conflict reporting, and a freshness check against on-disk edits
 - **list_solutions** — List all loaded solutions and which one is currently active
 - **set_active_solution** — Switch the active solution by partial name (all subsequent tools operate on it)
 - **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution

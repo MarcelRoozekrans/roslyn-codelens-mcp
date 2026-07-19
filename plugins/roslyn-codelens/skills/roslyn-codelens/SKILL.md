@@ -29,6 +29,7 @@ Tools that include a `summary` aggregate:
 - `find_unused_symbols` — `{ byKind: {...}, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
 - `find_naming_violations` — `{ byRule: {...} }`
 - `get_complexity_metrics` — `{ max, avg, overThreshold }`
+- `resolve_stack_trace` — `{ byOrigin: { source, metadata, unresolved }, exceptions, skippedFrameLike }` — `skippedFrameLike` counts frame-like-but-unparseable lines (also present in items as `Kind="unknown"`)
 
 Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) are unchanged — they return their bespoke shape directly.
 
@@ -202,7 +203,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default.
 - `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses unless `force=true` on: conflicts, a degraded solution load, or files changed on disk since the snapshot (freshness refusal — run `rebuild_solution` and retry; `force` does not bypass freshness). After apply the in-memory snapshot updates immediately — follow-up queries see the new name without waiting for a rebuild. Generic types accept the arity-free qualified form (`Data.Repository` finds `Repository<T>`).
-- `resolve_stack_trace` — map a pasted .NET stack trace to file/line/symbol; demangles async/iterator state machines, lambdas, and local functions; handles log-prefixed lines, inner-exception chains, and Demystifier-style traces. Source frames get the declaration site (exact location when the trace carries `in file:line`); external frames come back `origin="metadata"`. Items stay in trace order.
+- `resolve_stack_trace` — map a pasted .NET stack trace to file/line/symbol; demangles async/iterator state machines, lambdas, and local functions; handles log-prefixed lines, inner-exception chains, and Demystifier-style traces. Source frames get the declaration site (exact location when the trace carries `in file:line`); external frames resolve with `origin="metadata"` when the assembly is referenced by the solution — frames outside that closure come back `origin="unresolved"`. Frame-like lines that fail all grammars aren't dropped: they surface as `Kind="unknown"` items at their original position, and `summary.skippedFrameLike` counts them. Items stay in trace order.
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).
 - `analyze_control_flow` — reachability, returns, unreachable paths.
 
@@ -392,7 +393,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `get_code_actions` | No — source only | | |
 | `apply_code_action` | No — source only | | |
 | `rename_symbol` | No — source only | Locals/parameters and file renames unsupported | |
-| `resolve_stack_trace` | Yes — frames resolve to source or metadata symbols | Metadata frames carry no file/line | `peek_il` to inspect external method bodies |
+| `resolve_stack_trace` | Yes — external frames resolve when the assembly is referenced by the solution | Metadata frames carry no file/line; frames outside the solution's reference closure come back `origin="unresolved"` | `peek_il` to inspect external method bodies |
 | `analyze_data_flow` | No — source only | | |
 | `analyze_control_flow` | No — source only | | |
 | `analyze_change_impact` | No — source only | | |
