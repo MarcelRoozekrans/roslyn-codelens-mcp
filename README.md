@@ -39,6 +39,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_reflection_usage** — Detect dynamic/reflection-based usage
 - **find_references** — Find all references to any symbol (types, methods, properties, fields, events)
 - **go_to_definition** — Find the source file and line where a symbol is defined
+- **get_method_source** — Full declaration source (XML docs, attributes, signature, body — original formatting) for one or many members by name in a single call: methods (all overloads), constructors, properties, indexers, fields, events; per-item statuses (`ok`/`notFound`/`ambiguous`/`metadata`/`unsupportedKind`) so a batch never fails wholesale
 - **resolve_stack_trace** — Map a pasted .NET stack trace to file/line/symbol, undoing compiler name mangling (async/iterator state machines, lambdas, local functions, generic arity); handles inner-exception chains, log-prefixed lines, and Demystifier traces
 - **get_diagnostics** — List compiler errors, warnings, and Roslyn analyzer diagnostics
 - **get_code_fixes** — Get available code fixes with structured text edits for any diagnostic

@@ -103,6 +103,7 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Are there resource leaks?" / "Find missing `using`" / "Is this disposable handled?" | `find_disposable_misuse` |
 | "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
 | "Where did this exception come from?" / user pastes a stack trace / "What method is `<M>d__12.MoveNext`?" | `resolve_stack_trace` |
+| "Let me `Read` the file to see this method's body" / "Show me the source of these 5 methods" | `get_method_source` |
 
 **All of these mean: the MCP tool is the correct tool. Use it.**
 
@@ -134,7 +135,8 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 **Before `Read`ing a `.cs` file:**
 1. Do I just need structure (what's in it, what's defined)? → `get_file_overview` / `get_type_overview`.
 2. Do I need a specific method's shape? → `analyze_method`.
-3. Do I need the actual source lines to edit? → `Read` is OK.
+3. Do I need one or more members' actual source bodies? → `get_method_source` (batch-friendly — pass all the names at once).
+4. Do I need the actual source lines to edit? → `Read` is OK.
 
 ## When to Use Each Tool
 
@@ -163,6 +165,7 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 - `get_type_overview` — one-shot: context + hierarchy + diagnostics (replaces 3 calls).
 - `get_file_overview` — types defined in a file + diagnostics, without reading it.
 - `analyze_method` — signature + callers + outgoing calls, all in one.
+- `get_method_source` — full declaration source (XML docs, attributes, body, original formatting) for one or MANY members by name in a single call: methods (all overloads), constructors (request as `Type.TypeName` — simple or fully qualified; nested types need full qualification), properties, indexers (`Type.this` or `Type.this[]`), fields, events, explicit interface implementations. Per-item statuses (`ok`/`notFound`/`ambiguous`/`metadata`/`unsupportedKind`) — a batch never fails wholesale; `metadata` items carry `Origin` (assembly name/version for `peek_il`) and a `Note` explains non-`ok` outcomes. `StartLine` always matches the first line of `Source`. Whole types are out of scope (`get_type_overview` / `Read`).
 - `get_overloads` — Every overload of a method or constructor (source + metadata) with full parameter detail, modifiers, generic type params, XML doc summary, and location. One call instead of N analyze_method calls.
 - `get_operators` — every `+`, `-`, `==`, `<`, conversion, etc. on a type, with kind, signature, source location. Includes synthesized record equality. Covers what `get_overloads` excludes.
 - `get_call_graph` — Transitive caller/callee graph for a method, depth-bounded with cycle detection. Adjacency-list output. Use when you need depth > 1 (`analyze_method` is depth=1).
@@ -354,6 +357,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `analyze_change_impact` | "What breaks if I change this?" |
 | `get_type_overview` | "Give me everything about this type in one call" |
 | `analyze_method` | "Show signature, callers, and outgoing calls" |
+| `get_method_source` | "Show me this method's body" / "Give me the source of these members" |
 | `get_overloads` | "What overloads does this method have?" |
 | `get_operators` | "What operators does this type define?" |
 | `get_call_graph` | "Transitive callers/callees, depth-bounded" |
@@ -398,6 +402,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `analyze_control_flow` | No — source only | | |
 | `analyze_change_impact` | No — source only | | |
 | `analyze_method` | No — source only | | |
+| `get_method_source` | No — source only; metadata members reported with status `"metadata"` | | `peek_il` / `inspect_external_assembly` for external bodies |
 | `get_file_overview` | No — source only | | |
 | `find_unused_symbols` | No — source only | | |
 | `get_complexity_metrics` | No — source only | | |

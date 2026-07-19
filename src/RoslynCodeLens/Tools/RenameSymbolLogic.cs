@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Rename;
 using Microsoft.CodeAnalysis.Text;
 using RoslynCodeLens.Models;
+using RoslynCodeLens.Symbols;
 
 namespace RoslynCodeLens.Tools;
 
@@ -132,7 +133,7 @@ public static class RenameSymbolLogic
 
         // Overloads of one method are a single rename target (Renamer handles the
         // group via RenameOverloads); everything else groups by full display string.
-        var groups = matches.GroupBy(GroupKey).ToList();
+        var groups = LogicalMemberGroups.GroupLogicalTargets(matches);
         if (groups.Count > 1)
         {
             throw new McpToolException(ToolErrorCode.AmbiguousMatch,
@@ -142,10 +143,6 @@ public static class RenameSymbolLogic
 
         return groups[0].First();
     }
-
-    private static object GroupKey(ISymbol s) => s is IMethodSymbol m
-        ? (m.ContainingType?.ToDisplayString() ?? "", m.Name)
-        : s.ToDisplayString();
 
     internal static void ValidateRenameTarget(ISymbol target, string symbol)
     {
