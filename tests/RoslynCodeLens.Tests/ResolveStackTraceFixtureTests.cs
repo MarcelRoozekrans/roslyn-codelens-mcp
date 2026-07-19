@@ -19,7 +19,7 @@ public class ResolveStackTraceFixtureTests
                at TestLib.Greeter.Greet(String name)
                --- End of stack trace from previous location ---
             random log noise
-            """);
+            """).Frames;
 
         Assert.Equal(3, frames.Count);   // header + 2 frames; separator + noise dropped
         Assert.Equal("exception", frames[0].Kind);

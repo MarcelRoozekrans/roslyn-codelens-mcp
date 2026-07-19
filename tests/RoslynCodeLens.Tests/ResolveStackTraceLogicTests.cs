@@ -36,6 +36,9 @@ public class ResolveStackTraceLogicTests
         """;
 
     private static IReadOnlyList<StackFrameInfo> Resolve(string trace)
+        => ResolveFull(trace).Frames;
+
+    private static StackTraceResolution ResolveFull(string trace)
     {
         var (loaded, resolver) = RenameTestWorkspace.Create(("Demo.cs", SourceText));
         var metadata = new MetadataSymbolResolver(loaded, resolver);

@@ -8,7 +8,7 @@ public class StackTraceParserTests
     public void RuntimeFrame_WithFileAndLine_ParsesAllParts()
     {
         var lines = StackTraceParser.Parse(
-            @"at Demo.OrderService.Process(Int32 id) in C:\src\OrderService.cs:line 42");
+            @"at Demo.OrderService.Process(Int32 id) in C:\src\OrderService.cs:line 42").Lines;
         var f = Assert.Single(lines);
         Assert.False(f.IsExceptionHeader);
         Assert.Equal("Demo.OrderService", f.TypeFullName);
@@ -21,7 +21,7 @@ public class StackTraceParserTests
     [Fact]
     public void RuntimeFrame_WithoutFileInfo_ParsesTypeAndMethod()
     {
-        var f = Assert.Single(StackTraceParser.Parse("   at Demo.OrderService.Process(Int32 id)"));
+        var f = Assert.Single(StackTraceParser.Parse("   at Demo.OrderService.Process(Int32 id)").Lines);
         Assert.Equal("Demo.OrderService", f.TypeFullName);
         Assert.Null(f.File);
         Assert.Null(f.Line);
@@ -31,7 +31,7 @@ public class StackTraceParserTests
     public void LogPrefixedFrame_AnchorsOnAt()
     {
         var f = Assert.Single(StackTraceParser.Parse(
-            "2026-07-19 06:12:01.123 +02:00 [ERR]    at Demo.OrderService.Process(Int32 id)"));
+            "2026-07-19 06:12:01.123 +02:00 [ERR]    at Demo.OrderService.Process(Int32 id)").Lines);
         Assert.Equal("Demo.OrderService", f.TypeFullName);
         Assert.Equal("Process", f.MethodName);
     }
@@ -45,7 +45,7 @@ public class StackTraceParserTests
                at Demo.OrderService.Process(Int32 id)
                --- End of inner exception stack trace ---
                at Demo.Program.Main()
-            """);
+            """).Lines;
         Assert.Equal(4, lines.Count);          // separator line dropped
         Assert.True(lines[0].IsExceptionHeader);
         Assert.Equal("System.InvalidOperationException", lines[0].TypeFullName);
@@ -58,17 +58,17 @@ public class StackTraceParserTests
     public void MangledFrames_SplitOnLastDot_TypeKeepsMangledSegment()
     {
         var sm = Assert.Single(StackTraceParser.Parse(
-            "at Demo.OrderService+<ProcessAsync>d__12.MoveNext()"));
+            "at Demo.OrderService+<ProcessAsync>d__12.MoveNext()").Lines);
         Assert.Equal("Demo.OrderService+<ProcessAsync>d__12", sm.TypeFullName);
         Assert.Equal("MoveNext", sm.MethodName);
 
         var lambda = Assert.Single(StackTraceParser.Parse(
-            "at Demo.OrderService+<>c.<Process>b__5_0(Int32 x)"));
+            "at Demo.OrderService+<>c.<Process>b__5_0(Int32 x)").Lines);
         Assert.Equal("Demo.OrderService+<>c", lambda.TypeFullName);
         Assert.Equal("<Process>b__5_0", lambda.MethodName);
 
         var local = Assert.Single(StackTraceParser.Parse(
-            "at Demo.OrderService.<Process>g__Validate|5_0(Int32 x)"));
+            "at Demo.OrderService.<Process>g__Validate|5_0(Int32 x)").Lines);
         Assert.Equal("Demo.OrderService", local.TypeFullName);
         Assert.Equal("<Process>g__Validate|5_0", local.MethodName);
     }
@@ -77,7 +77,7 @@ public class StackTraceParserTests
     public void GenericTypeAndMethod_ParsesWithArityMarkers()
     {
         var f = Assert.Single(StackTraceParser.Parse(
-            "at Demo.Repository`1.GetById[TKey](TKey key)"));
+            "at Demo.Repository`1.GetById[TKey](TKey key)").Lines);
         Assert.Equal("Demo.Repository`1", f.TypeFullName);
         Assert.Equal("GetById", f.MethodName);      // [TKey] stripped from the name
     }
@@ -86,7 +86,7 @@ public class StackTraceParserTests
     public void DemystifiedFrame_IsRecognized_AndMarkedAsync()
     {
         var f = Assert.Single(StackTraceParser.Parse(
-            "at async Task<int> Demo.OrderService.ProcessAsync(int id)"));
+            "at async Task<int> Demo.OrderService.ProcessAsync(int id)").Lines);
         Assert.True(f.IsDemystified);
         Assert.True(f.DemystifiedAsync);
         Assert.Equal("Demo.OrderService", f.TypeFullName);
@@ -100,19 +100,19 @@ public class StackTraceParserTests
             some log chatter without a frame
             --- End of stack trace from previous location ---
             at Demo.Program.Main()
-            """);
+            """).Lines;
         var f = Assert.Single(lines);
         Assert.Equal("Main", f.MethodName);
     }
 
     [Fact]
     public void EmptyInput_ReturnsEmpty()
-        => Assert.Empty(StackTraceParser.Parse("   \n\n  "));
+        => Assert.Empty(StackTraceParser.Parse("   \n\n  ").Lines);
 
     [Fact]
     public void Constructor_Frame_Parses()
     {
-        var f = Assert.Single(StackTraceParser.Parse("at Demo.OrderService..ctor(String name)"));
+        var f = Assert.Single(StackTraceParser.Parse("at Demo.OrderService..ctor(String name)").Lines);
         Assert.Equal("Demo.OrderService", f.TypeFullName);
         Assert.Equal(".ctor", f.MethodName);
     }

@@ -5,26 +5,40 @@ using RoslynCodeLens.Symbols;
 
 namespace RoslynCodeLens.Tools;
 
+/// <summary>Resolved trace plus the count of frame-like lines that failed all grammars
+/// (those are also present in Frames as Kind="unknown"/Origin="unresolved" items, in order).</summary>
+public sealed record StackTraceResolution(IReadOnlyList<StackFrameInfo> Frames, int SkippedFrameLike);
+
 public static class ResolveStackTraceLogic
 {
-    public static IReadOnlyList<StackFrameInfo> Execute(
+    public static StackTraceResolution Execute(
         LoadedSolution loaded, SymbolResolver resolver, MetadataSymbolResolver metadata, string stackTrace)
     {
         var parsed = StackTraceParser.Parse(stackTrace);
-        if (parsed.Count == 0)
+        if (parsed.Lines.Count == 0)
         {
             throw new McpToolException(ToolErrorCode.InvalidArgument,
                 "No stack frames recognized in input.", new { });
         }
 
-        var frames = new List<StackFrameInfo>(parsed.Count);
-        foreach (var line in parsed)
+        var frames = new List<StackFrameInfo>(parsed.Lines.Count);
+        var skippedFrameLike = 0;
+        foreach (var line in parsed.Lines)
         {
+            if (line.IsFrameLikeUnparsed)
+            {
+                // Keep trace structure complete: emit the unrecognized frame-like line
+                // as an unknown item at its original position.
+                skippedFrameLike++;
+                frames.Add(new StackFrameInfo(frames.Count, line.Raw, "unknown", line.Raw,
+                    null, null, null, "unresolved", null));
+                continue;
+            }
             frames.Add(line.IsExceptionHeader
                 ? ResolveException(resolver, metadata, line, frames.Count)
                 : ResolveFrame(resolver, metadata, line, frames.Count));
         }
-        return frames;
+        return new StackTraceResolution(frames, skippedFrameLike);
     }
 
     private static StackFrameInfo ResolveException(
@@ -42,7 +56,8 @@ public static class ResolveStackTraceLogic
     {
         var target = line.IsDemystified
             ? new DemangledTarget(line.TypeFullName.Replace('+', '.'), line.MethodName,
-                line.DemystifiedAsync ? DemangledKind.StateMachine : DemangledKind.Plain, null, null)
+                line.DemystifiedAsync ? DemangledKind.StateMachine : DemangledKind.Plain, null, null,
+                line.TypeFullName)
             : StackFrameDemangler.Demangle(line.TypeFullName, line.MethodName);
 
         var method = ResolveMethod(resolver, metadata, target, line.Parameters);

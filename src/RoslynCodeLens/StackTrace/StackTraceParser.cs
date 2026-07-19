@@ -13,7 +13,23 @@ public sealed record ParsedTraceLine(
     string? File,
     int? Line,
     bool IsDemystified,
-    bool DemystifiedAsync);
+    bool DemystifiedAsync,
+    bool IsFrameLikeUnparsed = false,          // 'at '-anchored line no grammar recognized; only Raw is meaningful
+    bool DemystifiedLambda = false,            // Demystifier '+(...) => { }' suffix
+    string? DemystifiedLocalFunction = null);  // Demystifier '+Name(...)' suffix
+
+/// <summary>
+/// Result of parsing a pasted stack trace. <see cref="Lines"/> is ONE ordered list covering
+/// every recognized or frame-like line in original order — frame-like-but-unparsed lines are
+/// discriminated via <see cref="ParsedTraceLine.IsFrameLikeUnparsed"/> so downstream consumers
+/// preserve trace positions trivially. <see cref="FrameLikeUnparsed"/> is a convenience view.
+/// </summary>
+public sealed record StackTraceParseResult(IReadOnlyList<ParsedTraceLine> Lines)
+{
+    /// <summary>Frame-like lines that failed all grammars (also present in Lines, in order).</summary>
+    public IReadOnlyList<string> FrameLikeUnparsed
+        => Lines.Where(l => l.IsFrameLikeUnparsed).Select(l => l.Raw).ToList();
+}
 
 public static partial class StackTraceParser
 {
@@ -30,7 +46,7 @@ public static partial class StackTraceParser
     [GeneratedRegex(@"^(?:--->\s+)?(?<type>[A-Za-z_][A-Za-z0-9_.+`]*\.[A-Za-z0-9_.+`]+)\s*:\s+.+$")]
     private static partial Regex ExceptionHeader();
 
-    public static IReadOnlyList<ParsedTraceLine> Parse(string text)
+    public static StackTraceParseResult Parse(string text)
     {
         var results = new List<ParsedTraceLine>();
         foreach (var rawLine in text.Split('\n'))
@@ -58,7 +74,7 @@ public static partial class StackTraceParser
             }
             // else: noise — dropped
         }
-        return results;
+        return new StackTraceParseResult(results);
     }
 
     private static bool TryParseFrame(string raw, string body, out ParsedTraceLine frame)
