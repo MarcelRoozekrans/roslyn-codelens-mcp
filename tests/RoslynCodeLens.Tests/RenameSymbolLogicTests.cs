@@ -99,4 +99,83 @@ public class RenameSymbolLogicTests
         var result = await RunAsync(loaded, resolver, "Widget.Compute", "Calculate");
         Assert.True(result.Success);
     }
+
+    private static string ApplyEditsToSource(string source, IEnumerable<TextEdit> edits, string filePath)
+    {
+        var text = Microsoft.CodeAnalysis.Text.SourceText.From(source);
+        var changes = edits
+            .Where(e => string.Equals(e.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+            .Select(e => new Microsoft.CodeAnalysis.Text.TextChange(
+                Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(
+                    text.Lines[e.StartLine - 1].Start + e.StartColumn - 1,
+                    text.Lines[e.EndLine - 1].Start + e.EndColumn - 1),
+                e.NewText));
+        return text.WithChanges(changes).ToString();
+    }
+
+    [Fact]
+    public async Task RenameType_CascadesToUsagesCtorAndNameof()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.Empty(result.Conflicts);
+
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("public class Sprocket", after, StringComparison.Ordinal);
+        Assert.Contains("public Sprocket()", after, StringComparison.Ordinal);
+        Assert.Contains("new Sprocket().Compute(1)", after, StringComparison.Ordinal);
+        Assert.Contains("nameof(Sprocket)", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("class Widget", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameInComments_OnByDefault_RewritesComment()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("// Sprocket appears in this comment.", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameInComments_Off_LeavesComment()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", renameInComments: false);
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("// Widget appears in this comment.", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameInStrings_OffByDefault_LeavesString()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket");
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("\"Widget in a string\"", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameInStrings_On_RewritesString()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", renameInStrings: true);
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("\"Sprocket in a string\"", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameOverloads_On_RenamesAllOverloadsAndCallSites()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Widget.cs", BasicSource));
+        var result = await RunAsync(loaded, resolver, "Widget.Compute", "Calculate");
+        var after = ApplyEditsToSource(BasicSource, result.Edits, "Widget.cs");
+        Assert.Contains("public int Calculate(int value)", after, StringComparison.Ordinal);
+        Assert.Contains("public int Calculate(int a, int b)", after, StringComparison.Ordinal);
+        Assert.Contains(".Calculate(1)", after, StringComparison.Ordinal);
+        Assert.Empty(result.Conflicts);
+    }
 }
