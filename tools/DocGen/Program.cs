@@ -26,6 +26,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["get_type_hierarchy"]         = "analysis",
     ["get_file_overview"]          = "analysis",
     ["analyze_method"]             = "analysis",
+    ["get_method_source"]          = "analysis",
     ["analyze_change_impact"]      = "analysis",
     ["analyze_data_flow"]          = "analysis",
     ["analyze_control_flow"]       = "analysis",
