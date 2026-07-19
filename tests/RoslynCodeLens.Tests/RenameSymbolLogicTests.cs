@@ -178,4 +178,34 @@ public class RenameSymbolLogicTests
         Assert.Contains(".Calculate(1)", after, StringComparison.Ordinal);
         Assert.Empty(result.Conflicts);
     }
+
+    private const string CollisionSource = """
+        namespace RenameDemo;
+        public class First { }
+        public class Second { }
+        """;
+
+    [Fact]
+    public async Task CollidingRename_Preview_ReportsConflicts()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Types.cs", CollisionSource));
+        var result = await RunAsync(loaded, resolver, "First", "Second");
+
+        Assert.True(result.Success);
+        Assert.False(result.Applied);
+        Assert.NotEmpty(result.Conflicts);   // CS0101: duplicate type in namespace
+        Assert.Contains(result.Conflicts, c => string.Equals(c.Id, "CS0101", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CollidingRename_Apply_RefusesWithoutForce()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Types.cs", CollisionSource));
+        var result = await RunAsync(loaded, resolver, "First", "Second", preview: false);
+
+        Assert.False(result.Success);
+        Assert.False(result.Applied);
+        Assert.NotEmpty(result.Conflicts);
+        Assert.Contains("force", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }
