@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.6...v2.5.0) (2026-07-19)
+
+
+### Features
+
+* rename_symbol — solution-wide safe rename via Roslyn Renamer ([#298](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/298)) ([74b8024](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/74b80248bd2e9791220cc379e591f52ec301f432))
+
+
+### Bug Fixes
+
+* harden rename_symbol — conflict gate, write safety, snapshot commit, generic lookup ([#300](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/300)) ([3bc2bcf](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/3bc2bcf7565e33a1c9bc5a30506a9b67c27d407e))
+
 ## [2.4.6](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.4.5...v2.4.6) (2026-07-15)
 
 
