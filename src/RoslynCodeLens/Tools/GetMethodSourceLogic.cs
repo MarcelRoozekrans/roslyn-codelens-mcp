@@ -7,6 +7,13 @@ namespace RoslynCodeLens.Tools;
 
 public static class GetMethodSourceLogic
 {
+    private const string MetadataNote =
+        "member is defined in metadata — use peek_il or inspect_external_assembly";
+    private const string CompilerGeneratedCtorNote =
+        "type exists; its only constructors are compiler-generated";
+    private const string WholeTypeNote =
+        "whole types are not returned — use get_type_overview or Read";
+
     public static IReadOnlyList<MemberSourceInfo> Execute(
         SymbolResolver resolver, MetadataSymbolResolver metadata, IReadOnlyList<string> symbols)
     {
@@ -65,19 +72,59 @@ public static class GetMethodSourceLogic
     private static IEnumerable<MemberSourceInfo> CtorItems(
         SymbolResolver resolver, string requested, string typeName)
     {
-        foreach (var type in resolver.FindSymbols(typeName).OfType<INamedTypeSymbol>())
-        {
-            foreach (var ctor in type.InstanceConstructors.Concat(type.StaticConstructors))
-            {
-                // Only source-backed constructors: implicit default (and other
-                // compiler-generated) ctors have no declaration to show — skip them
-                // rather than emitting metadata items for a source type.
-                if (ctor.IsImplicitlyDeclared || ctor.DeclaringSyntaxReferences.Length == 0)
-                    continue;
+        var types = resolver.FindSymbols(typeName)
+            .OfType<INamedTypeSymbol>()
+            .Distinct(SymbolEqualityComparer.Default)
+            .Cast<INamedTypeSymbol>()
+            .ToList();
 
-                foreach (var item in Items(resolver, requested, ctor))
-                    yield return item;
+        // No such type — this wasn't a ctor request after all; the caller falls
+        // through to normal member resolution.
+        if (types.Count == 0)
+            yield break;
+
+        // Multiple distinct types share the simple name: merging their ctors as
+        // "ok" would silently interleave unrelated constructors. Report ambiguity,
+        // consistent with the member path.
+        if (types.Count > 1)
+        {
+            yield return new MemberSourceInfo(requested, "ambiguous", null, null,
+                null, null, null, null, null,
+                types.Select(t => t.ToDisplayString()).ToList());
+            yield break;
+        }
+
+        var type = types[0];
+        var emitted = false;
+        foreach (var ctor in type.InstanceConstructors.Concat(type.StaticConstructors))
+        {
+            // Only source-backed constructors: implicit default (and other
+            // compiler-generated) ctors have no declaration to show — skip them
+            // rather than emitting metadata items for a source type.
+            if (ctor.IsImplicitlyDeclared || ctor.DeclaringSyntaxReferences.Length == 0)
+                continue;
+
+            foreach (var item in Items(resolver, requested, ctor))
+            {
+                emitted = true;
+                yield return item;
             }
+        }
+        if (emitted)
+            yield break;
+
+        // The type exists but yielded no source-backed ctors — say why instead of
+        // a bare notFound.
+        if (!type.Locations.Any(l => l.IsInSource))
+        {
+            yield return new MemberSourceInfo(requested, "metadata", type.ToDisplayString(),
+                "constructor", null, null, null, null, null, null,
+                MetadataSymbolResolver.ToOrigin(type), MetadataNote);
+        }
+        else
+        {
+            yield return new MemberSourceInfo(requested, "notFound", type.ToDisplayString(),
+                null, null, null, null, null, null, null, null, CompilerGeneratedCtorNote);
         }
     }
 

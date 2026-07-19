@@ -107,6 +107,60 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
+    public void CtorRequest_AmbiguousAcrossNamespaces_SingleAmbiguousItem()
+    {
+        const string firstSource = """
+            namespace First;
+            public class Dup { public Dup(int x) { } }
+            """;
+        const string secondSource = """
+            namespace Second;
+            public class Dup { public Dup(string s) { } }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("First.cs", firstSource), ("Second.cs", secondSource));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Dup.Dup"]));
+
+        Assert.Equal("ambiguous", item.Status);
+        Assert.Null(item.Source);
+        Assert.NotNull(item.Candidates);
+        Assert.Equal(2, item.Candidates!.Count);
+        Assert.Contains("First.Dup", item.Candidates);
+        Assert.Contains("Second.Dup", item.Candidates);
+    }
+
+    [Fact]
+    public void CtorRequest_MetadataType_SingleMetadataItem()
+    {
+        var item = Assert.Single(Execute("System.Text.StringBuilder.StringBuilder"));
+
+        Assert.Equal("metadata", item.Status);
+        Assert.Equal("constructor", item.Kind);
+        Assert.Null(item.Source);
+        Assert.NotNull(item.Note);
+    }
+
+    [Fact]
+    public void CtorRequest_ImplicitCtorsOnly_NotFoundWithNote()
+    {
+        const string source = """
+            namespace Plainville;
+            public class Plain { public void M() { } }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Plain.cs", source));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Plain.Plain"]));
+
+        Assert.Equal("notFound", item.Status);
+        Assert.Null(item.Source);
+        Assert.NotNull(item.Note);
+        Assert.Contains("compiler-generated", item.Note, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PartialMethod_OneItemPerPart()
     {
         var items = Execute("Split.Run");
