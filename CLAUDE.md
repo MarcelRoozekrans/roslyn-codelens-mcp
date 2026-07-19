@@ -8,7 +8,7 @@ The `.mcp.json` configures the roslyn-codelens MCP server to analyze this soluti
 
 ## Skill
 
-The `plugins/roslyn-codelens/skills/roslyn-codelens/SKILL.md` skill teaches Claude when and how to use the 58 code intelligence tools. Use the MCP tools instead of Grep/Glob for any .NET semantic queries (finding implementations, callers, references, diagnostics, etc.).
+The `plugins/roslyn-codelens/skills/roslyn-codelens/SKILL.md` skill teaches Claude when and how to use the 59 code intelligence tools. Use the MCP tools instead of Grep/Glob for any .NET semantic queries (finding implementations, callers, references, diagnostics, etc.).
 
 ## Project Structure
 
