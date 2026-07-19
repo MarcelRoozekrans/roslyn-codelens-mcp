@@ -28,17 +28,20 @@ public static class GetMethodSourceTool
         var context = manager.GetAnalysisContext();
         var items = GetMethodSourceLogic.Execute(context.Resolver, context.Metadata, symbols);
 
-        var summary = new
+        int ok = 0, notFound = 0, ambiguous = 0, metadata = 0, unsupportedKind = 0;
+        foreach (var item in items)
         {
-            byStatus = new
+            switch (item.Status)
             {
-                ok = items.Count(i => string.Equals(i.Status, "ok", StringComparison.Ordinal)),
-                notFound = items.Count(i => string.Equals(i.Status, "notFound", StringComparison.Ordinal)),
-                ambiguous = items.Count(i => string.Equals(i.Status, "ambiguous", StringComparison.Ordinal)),
-                metadata = items.Count(i => string.Equals(i.Status, "metadata", StringComparison.Ordinal)),
-                unsupportedKind = items.Count(i => string.Equals(i.Status, "unsupportedKind", StringComparison.Ordinal)),
-            },
-        };
+                case "ok": ok++; break;
+                case "notFound": notFound++; break;
+                case "ambiguous": ambiguous++; break;
+                case "metadata": metadata++; break;
+                case "unsupportedKind": unsupportedKind++; break;
+                default: break;
+            }
+        }
+        var summary = new { byStatus = new { ok, notFound, ambiguous, metadata, unsupportedKind } };
         return ToolListResult.Create(items, limit ?? DefaultLimit, summary);
     }
 }

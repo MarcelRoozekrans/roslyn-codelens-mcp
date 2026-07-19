@@ -191,15 +191,11 @@ public static class GetMethodSourceLogic
 
         foreach (var reference in refs)
         {
+            // Climb to the member declaration: fields/events resolve to the variable
+            // declarator, accessors to the accessor node — the useful source is the
+            // whole declaration (modifiers, type, initializer).
             var node = reference.GetSyntax();
-            // Fields/events resolve to the variable declarator; the useful source is
-            // the whole declaration statement (modifiers, type, initializer).
-            if (node is VariableDeclaratorSyntax declarator)
-                node = declarator.Parent?.Parent ?? node;
-
-            // Implicit accessors etc. — climb to the member declaration.
-            while (node is not MemberDeclarationSyntax && node.Parent != null)
-                node = node.Parent;
+            node = node.FirstAncestorOrSelf<MemberDeclarationSyntax>() ?? node;
 
             var span = node.GetLocation().GetLineSpan();
             var (source, skippedLeadingLines) = ExtractSource(node);
