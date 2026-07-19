@@ -52,7 +52,7 @@ public static class GetMethodSourceLogic
         }
 
         // Overloads of one method are ONE logical request; distinct symbols are ambiguity.
-        var groups = matches.GroupBy(GroupKey).ToList();
+        var groups = LogicalMemberGroups.GroupLogicalTargets(matches);
         if (groups.Count > 1)
         {
             return [new MemberSourceInfo(requested, "ambiguous", null, null, null, null, null, null, null,
@@ -61,10 +61,6 @@ public static class GetMethodSourceLogic
 
         return groups[0].SelectMany(s => Items(resolver, requested, s));
     }
-
-    private static object GroupKey(ISymbol s) => s is IMethodSymbol m
-        ? (m.ContainingType?.ToDisplayString() ?? "", m.Name)
-        : s.ToDisplayString();
 
     private static IEnumerable<MemberSourceInfo> CtorItems(
         SymbolResolver resolver, string requested, string typeName)
