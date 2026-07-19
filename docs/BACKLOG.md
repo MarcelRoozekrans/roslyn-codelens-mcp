@@ -38,7 +38,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 ### High value
 
-- **`rename_symbol`** — solution-wide safe rename via the Roslyn `Renamer` API. Rename is *not* a code action, so `apply_code_action` cannot do it; today an agent renaming a symbol falls back to multi-file text edits — exactly the failure mode this server exists to prevent.
+- 🔧 **In flight: `rename_symbol`** — solution-wide safe rename via the Roslyn `Renamer` API. Rename is *not* a code action, so `apply_code_action` cannot do it; today an agent renaming a symbol falls back to multi-file text edits — exactly the failure mode this server exists to prevent. Design: [docs/plans/2026-07-19-rename-symbol-design.md](plans/2026-07-19-rename-symbol-design.md).
 - **`resolve_stack_trace`** — map a pasted runtime stack trace to file/line/symbol, undoing name mangling (async state machines, lambdas, generics, `<>c__DisplayClass`). Perfect fit for debugging workflows; nothing comparable today.
 - **`get_method_source` / `get_method_source_batch`** — return a method's source body by name. `analyze_method` gives signature + callers but not the body, so agents still `Read` whole files. Batch variant is very token-efficient.
 - **Reference kind classification on `find_references`** — tag each reference as read/write/invocation/cast/typeof/nameof/attribute, with an optional `kind` filter. Enhancement to the existing tool, not a new one; also subsumes a would-be `find_pattern_usages` (is/as/pattern-match sites).
@@ -59,7 +59,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 Active branches with no merged PR yet.
 
-_(none currently)_
+- **`rename_symbol`** — branch `feature/rename-symbol`, design [docs/plans/2026-07-19-rename-symbol-design.md](plans/2026-07-19-rename-symbol-design.md).
 
 ---
 

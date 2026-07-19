@@ -100,6 +100,7 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Will this break consumers?" / "Show me breaking changes vs the previous release" / "Diff this build's API against baseline" | `find_breaking_changes` |
 | "Are there async bugs?" / "Find sync-over-async" / "Are we using `.Result` anywhere?" | `find_async_violations` |
 | "Are there resource leaks?" / "Find missing `using`" / "Is this disposable handled?" | `find_disposable_misuse` |
+| "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
 
 **All of these mean: the MCP tool is the correct tool. Use it.**
 
@@ -199,6 +200,7 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 Solutions passed on the CLI at server startup are auto-trusted in session scope — `get_diagnostics(includeAnalyzers=true)` against them works without an extra prompt.
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default.
+- `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses on conflicts unless `force=true`.
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).
 - `analyze_control_flow` — reachability, returns, unreachable paths.
 
@@ -321,6 +323,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `get_code_fixes` | "How do I fix this warning?" |
 | `get_code_actions` | "What refactorings are available here?" |
 | `apply_code_action` | "Apply this refactoring" / "Extract method" |
+| `rename_symbol` | "Rename this symbol everywhere" / "Change this name across the solution" |
 | `find_unused_symbols` | "Any dead code?" |
 | `get_complexity_metrics` | "Which methods are too complex?" |
 | `find_naming_violations` | "Check naming conventions" |
@@ -385,6 +388,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `get_code_fixes` | No — source only | | |
 | `get_code_actions` | No — source only | | |
 | `apply_code_action` | No — source only | | |
+| `rename_symbol` | No — source only | Locals/parameters and file renames unsupported | |
 | `analyze_data_flow` | No — source only | | |
 | `analyze_control_flow` | No — source only | | |
 | `analyze_change_impact` | No — source only | | |
