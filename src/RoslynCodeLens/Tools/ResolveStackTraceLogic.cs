@@ -44,7 +44,7 @@ public static class ResolveStackTraceLogic
     private static StackFrameInfo ResolveException(
         SymbolResolver resolver, MetadataSymbolResolver metadata, ParsedTraceLine line, int index)
     {
-        var typeName = line.TypeFullName.Replace('+', '.');
+        var typeName = line.TypeFullName; // parser emits headers already display-normalized
         var type = resolver.FindSymbols(typeName).FirstOrDefault() ?? metadata.Resolve(typeName)?.Symbol;
         var (origin, file, srcLine, project) = Locate(resolver, type);
         return new StackFrameInfo(index, line.Raw, "exception", typeName,
@@ -55,9 +55,7 @@ public static class ResolveStackTraceLogic
         SymbolResolver resolver, MetadataSymbolResolver metadata, ParsedTraceLine line, int index)
     {
         var target = line.IsDemystified
-            ? new DemangledTarget(line.TypeFullName.Replace('+', '.'), line.MethodName,
-                line.DemystifiedAsync ? DemangledKind.StateMachine : DemangledKind.Plain, null, null,
-                line.TypeFullName)
+            ? DemystifiedTarget(line)
             : StackFrameDemangler.Demangle(line.TypeFullName, line.MethodName);
 
         var method = ResolveMethod(resolver, metadata, target, line.Parameters);
@@ -76,6 +74,27 @@ public static class ResolveStackTraceLogic
         return new StackFrameInfo(index, line.Raw, kind, symbol,
             target.Kind is DemangledKind.Lambda or DemangledKind.LocalFunction ? target.EnclosingMethod : null,
             file, srcLine, origin, project);
+    }
+
+    /// <summary>Demystifier lines carry display-form names plus optional
+    /// '+LocalFunc(...)' / '+(...) =&gt; { }' suffixes mapped here.</summary>
+    private static DemangledTarget DemystifiedTarget(ParsedTraceLine line)
+    {
+        var runtime = TypeNameNormalizer.StripInstantiations(line.TypeFullName);
+        var typeName = TypeNameNormalizer.Normalize(line.TypeFullName);
+        if (line.DemystifiedLambda)
+        {
+            return new DemangledTarget(typeName, line.MethodName,
+                DemangledKind.Lambda, line.MethodName, null, runtime);
+        }
+        if (line.DemystifiedLocalFunction is { } localFunction)
+        {
+            return new DemangledTarget(typeName, line.MethodName,
+                DemangledKind.LocalFunction, line.MethodName, localFunction, runtime);
+        }
+        return new DemangledTarget(typeName, line.MethodName,
+            line.DemystifiedAsync ? DemangledKind.StateMachine : DemangledKind.Plain,
+            null, null, runtime);
     }
 
     private static ISymbol? ResolveMethod(

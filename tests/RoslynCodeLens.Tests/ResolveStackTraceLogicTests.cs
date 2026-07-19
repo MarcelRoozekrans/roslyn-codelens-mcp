@@ -35,12 +35,36 @@ public class ResolveStackTraceLogicTests
         }
         """;
 
+    // Global-namespace Program matching the empirical modern .NET trace fixtures.
+    private const string ProgramSource = """
+        public class Program
+        {
+            public static async System.Threading.Tasks.Task Case1_AsyncLambda()
+            {
+                var f = new System.Func<System.Threading.Tasks.Task>(async () =>
+                {
+                    await System.Threading.Tasks.Task.Yield();
+                });
+                await f();
+            }
+            public static void Case2b_CapturingLocalFunctionWithLambda()
+            {
+                var captured = 0;
+                void Boom() => captured++;
+                var f = new System.Func<int>(() => captured);
+                Boom();
+                f();
+            }
+        }
+        """;
+
     private static IReadOnlyList<StackFrameInfo> Resolve(string trace)
         => ResolveFull(trace).Frames;
 
     private static StackTraceResolution ResolveFull(string trace)
     {
-        var (loaded, resolver) = RenameTestWorkspace.Create(("Demo.cs", SourceText));
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Demo.cs", SourceText), ("Program.cs", ProgramSource));
         var metadata = new MetadataSymbolResolver(loaded, resolver);
         return ResolveStackTraceLogic.Execute(loaded, resolver, metadata, trace);
     }
@@ -153,5 +177,64 @@ public class ResolveStackTraceLogicTests
     {
         var ex = Assert.Throws<McpToolException>(() => Resolve("no frames here at all"));
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+    }
+
+    // ---- item 8: multi-line noise still throws (fallback is single-line only) ----
+
+    [Fact]
+    public void MultiLineNoiseOnlyInput_ThrowsInvalidArgument()
+    {
+        var ex = Assert.Throws<McpToolException>(() => Resolve("noise line one\nnoise line two"));
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+    }
+
+    // ---- items 1/2: empirical dot-nested modern .NET frames resolve to source ----
+
+    [Fact]
+    public void Empirical_AsyncLambdaFrame_DotNested_ResolvesToSource()
+    {
+        var f = Assert.Single(Resolve("at Program.<>c.<<Case1_AsyncLambda>b__8_0>d.MoveNext()"));
+        Assert.Equal("lambda", f.Kind);
+        Assert.Equal("Case1_AsyncLambda", f.EnclosingMethod);
+        Assert.Equal("source", f.Origin);
+        Assert.Equal("Program.cs", f.File);
+    }
+
+    [Fact]
+    public void Empirical_LocalFunctionFrame_DotNestedDisplayClass_ResolvesToSource()
+    {
+        var f = Assert.Single(Resolve(
+            "at Program.<>c__DisplayClass10_0.<Case2b_CapturingLocalFunctionWithLambda>g__Boom|1()"));
+        Assert.Equal("localFunction", f.Kind);
+        Assert.Equal("Case2b_CapturingLocalFunctionWithLambda", f.EnclosingMethod);
+        Assert.Equal("source", f.Origin);
+        Assert.Equal("Program.cs", f.File);
+    }
+
+    // ---- items 4/5: AOT offset frames parse; garbage frame-like lines interleave ----
+
+    [Fact]
+    public void FrameLikeGarbage_EmitsUnknownItem_InOrder_AndIsCounted()
+    {
+        var result = ResolveFull("""
+            System.InvalidOperationException: boom
+               at ???bogus
+               at MyApp.Foo.Bar() + 0x39
+            """);
+        Assert.Equal(3, result.Frames.Count);
+        Assert.Equal(1, result.SkippedFrameLike);
+
+        var unknown = result.Frames[1];
+        Assert.Equal(1, unknown.Index);
+        Assert.Equal("unknown", unknown.Kind);
+        Assert.Equal("unresolved", unknown.Origin);
+        Assert.Equal("at ???bogus", unknown.Symbol);
+        Assert.Null(unknown.File);
+        Assert.Null(unknown.Line);
+
+        // The AOT frame now parses (offset tolerated) instead of being dropped.
+        var aot = result.Frames[2];
+        Assert.Equal(2, aot.Index);
+        Assert.Contains("MyApp.Foo", aot.Symbol, StringComparison.Ordinal);
     }
 }
