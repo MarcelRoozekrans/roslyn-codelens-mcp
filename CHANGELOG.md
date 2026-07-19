@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.6.0...v2.7.0) (2026-07-19)
+
+
+### Features
+
+* get_method_source — member source bodies by name, batch-friendly ([#305](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/305)) ([03cdbd8](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/03cdbd8ec16554c4a6c698b09498687884e351f9))
+
 ## [2.6.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.5.0...v2.6.0) (2026-07-19)
 
 
