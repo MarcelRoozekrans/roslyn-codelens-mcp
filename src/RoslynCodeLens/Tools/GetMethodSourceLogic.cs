@@ -66,7 +66,16 @@ public static class GetMethodSourceLogic
                 groups.Select(g => g.First().ToDisplayString()).ToList())];
         }
 
-        return groups[0].SelectMany(s => Items(resolver, requested, s));
+        // A logical group with no source-backed symbol is ONE metadata answer for
+        // the request — not one stub per overload. In a mixed group (some source,
+        // some metadata overloads) the metadata-only overloads are simply skipped.
+        var sourceBacked = groups[0]
+            .Where(s => s.Locations.Any(l => l.IsInSource))
+            .ToList();
+        if (sourceBacked.Count == 0)
+            return [NotInSource(requested, groups[0].First())];
+
+        return sourceBacked.SelectMany(s => Items(resolver, requested, s));
     }
 
     private static IEnumerable<MemberSourceInfo> CtorItems(
@@ -133,8 +142,7 @@ public static class GetMethodSourceLogic
     {
         if (symbol is INamedTypeSymbol)
         {
-            yield return new MemberSourceInfo(requested, "unsupportedKind", symbol.ToDisplayString(),
-                null, null, null, null, null, null);
+            yield return WholeType(requested, symbol);
             yield break;
         }
 
@@ -205,8 +213,17 @@ public static class GetMethodSourceLogic
     }
 
     private static MemberSourceInfo NotInSource(string requested, ISymbol symbol)
-        => new(requested, "metadata", symbol.ToDisplayString(), KindOf(symbol),
-            null, null, null, null, null);
+        // A TYPE that only resolves via metadata (e.g. the backtick metadata-name
+        // form) is still a whole type — not a kind='method' metadata member.
+        => symbol is INamedTypeSymbol
+            ? WholeType(requested, symbol)
+            : new(requested, "metadata", symbol.ToDisplayString(), KindOf(symbol),
+                null, null, null, null, null, null,
+                MetadataSymbolResolver.ToOrigin(symbol), MetadataNote);
+
+    private static MemberSourceInfo WholeType(string requested, ISymbol type)
+        => new(requested, "unsupportedKind", type.ToDisplayString(), null,
+            null, null, null, null, null, null, null, WholeTypeNote);
 
     private static string KindOf(ISymbol s) => s switch
     {

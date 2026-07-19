@@ -209,13 +209,38 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
-    public void Metadata_Status()
+    public void Metadata_Status_OneItemPerRequest()
     {
-        var items = Execute("System.String.Concat");
+        // String.Concat has ~16 overloads; a metadata-only logical group must
+        // collapse to ONE item for the request, not one stub per overload.
+        var item = Assert.Single(Execute("System.String.Concat"));
 
-        Assert.NotEmpty(items);
-        Assert.All(items, i => Assert.Equal("metadata", i.Status));
-        Assert.All(items, i => Assert.Null(i.Source));
+        Assert.Equal("metadata", item.Status);
+        Assert.Null(item.Source);
+        Assert.NotNull(item.Note);
+    }
+
+    [Fact]
+    public void Metadata_Item_CarriesOrigin()
+    {
+        var item = Assert.Single(Execute("System.String.Concat"));
+
+        Assert.NotNull(item.Origin);
+        Assert.NotNull(item.Origin!.AssemblyName);
+    }
+
+    [Fact]
+    public void MetadataType_ViaMetadataNameFallback_UnsupportedKind()
+    {
+        // The backtick metadata-name form misses the source index and resolves via
+        // Compilation.GetTypeByMetadataName — a TYPE must not surface as a
+        // kind='method' metadata item.
+        var item = Assert.Single(Execute("System.Collections.Generic.List`1"));
+
+        Assert.Equal("unsupportedKind", item.Status);
+        Assert.Null(item.Kind);
+        Assert.Null(item.Source);
+        Assert.NotNull(item.Note);
     }
 
     [Fact]
