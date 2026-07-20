@@ -359,7 +359,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `list_running_tasks` | "What background work is in flight?" |
 | `analyze_data_flow` | "What variables are read/written here?" |
 | `analyze_control_flow` | "Is this code reachable?" |
-| `analyze_change_impact` | "What breaks if I change this?" |
+| `analyze_change_impact` | "What breaks if I change this?" (its `directReferenceCount` counts reference *occurrences*, so a line referencing the symbol twice counts twice) |
 | `get_type_overview` | "Give me everything about this type in one call" |
 | `analyze_method` | "Show signature, callers, and outgoing calls" |
 | `get_method_source` | "Show me this method's body" / "Give me the source of these members" |

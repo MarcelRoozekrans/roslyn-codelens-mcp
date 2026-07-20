@@ -18,11 +18,17 @@ public static class ReferenceClassifier
         "attribute", "nameof", "xml_doc", "usage",
     ];
 
-    public static string Classify(SyntaxNode node, ISymbol symbol, SemanticModel model)
+    public static string Classify(SyntaxNode node, ISymbol symbol, Func<SemanticModel?> semanticModel)
     {
         var name = node as SimpleNameSyntax ?? node.FirstAncestorOrSelf<SimpleNameSyntax>();
         if (name == null)
-            return "usage";
+        {
+            // `: base(x)` / `: this(x)` spell the target with a keyword token rather than a
+            // name, so there is no SimpleName to read — but it is still a constructor call.
+            return node.FirstAncestorOrSelf<ConstructorInitializerSyntax>() != null
+                ? "invocation"
+                : "usage";
+        }
 
         // nameof(...) and cref both reference a symbol without using it, so they win over
         // the syntactic context they happen to sit in.
@@ -40,7 +46,7 @@ public static class ReferenceClassifier
 
         return isTypeLike
             ? ClassifyTypeContext(name)
-            : ClassifyValueContext(name, symbol, model);
+            : ClassifyValueContext(name, symbol, semanticModel);
     }
 
     /// <summary>
@@ -76,7 +82,8 @@ public static class ReferenceClassifier
         return "declaration";
     }
 
-    private static string ClassifyValueContext(SimpleNameSyntax name, ISymbol symbol, SemanticModel model)
+    private static string ClassifyValueContext(
+        SimpleNameSyntax name, ISymbol symbol, Func<SemanticModel?> semanticModel)
     {
         // The effective expression: the outermost expression whose value *is* this reference.
         ExpressionSyntax expr = name;
@@ -101,6 +108,13 @@ public static class ReferenceClassifier
                 // mutation spelled `_dict.Add(key, value)`.
                 case ParenthesizedExpressionSyntax pe:
                     expr = pe;
+                    break;
+                // Tuple elements are ArgumentSyntax, so without this the deconstruction
+                // `(a, b) = (1, 2)` would reach the by-value argument branch and report a
+                // read. Climbing to the tuple lets the assignment check below see the write;
+                // a tuple used as a value (`var t = (a, b)`) still falls through to read.
+                case ArgumentSyntax { Parent: TupleExpressionSyntax tuple }:
+                    expr = tuple;
                     break;
                 default:
                     climbing = false;
@@ -128,12 +142,18 @@ public static class ReferenceClassifier
             case ArgumentSyntax arg:
                 if (arg.RefKindKeyword.IsKind(SyntaxKind.OutKeyword)) return "write";
                 if (arg.RefKindKeyword.IsKind(SyntaxKind.RefKeyword)) return "readwrite";
-                return ResolveArgRefKind(arg, model) switch
+                // C# requires `out`/`ref` at the call site, so the semantic model is consulted
+                // only for the cases that may omit it (COM interop). Resolving it lazily keeps
+                // whole-solution scans from building a model for every document they touch.
+                return ResolveArgRefKind(arg, semanticModel()) switch
                 {
                     RefKind.Out => "write",
                     RefKind.Ref => "readwrite",
                     _ => "read",
                 };
+            // `ref int r = ref _x;` hands out an alias that can write through to _x.
+            case RefExpressionSyntax:
+                return "readwrite";
         }
 
         return "read";
@@ -143,8 +163,11 @@ public static class ReferenceClassifier
     /// The declared ref-kind of the parameter this argument binds to. Named arguments bind by
     /// name and may be reordered, so positional indexing is only valid without a name colon.
     /// </summary>
-    private static RefKind ResolveArgRefKind(ArgumentSyntax arg, SemanticModel model)
+    private static RefKind ResolveArgRefKind(ArgumentSyntax arg, SemanticModel? model)
     {
+        if (model is null)
+            return RefKind.None;
+
         if (arg.Parent is not BaseArgumentListSyntax list || list.Parent is null)
             return RefKind.None;
 

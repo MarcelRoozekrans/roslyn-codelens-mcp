@@ -32,7 +32,7 @@ public class ReferenceClassifierTests
             var symbol = info.Symbol ?? info.CandidateSymbols.FirstOrDefault();
             if (symbol == null)
                 continue;
-            kinds.Add(ReferenceClassifier.Classify(name, symbol, model));
+            kinds.Add(ReferenceClassifier.Classify(name, symbol, () => model));
         }
         return kinds;
     }
@@ -77,6 +77,42 @@ public class ReferenceClassifierTests
     [Fact]
     public void ArrayElementAssignment_ReadsTheArray()
         => Assert.Equal(["read"], KindsOf("class C { int[] _a; void W() { _a[0] = 1; } }", "_a"));
+
+    /// <summary>
+    /// Tuple elements are ArgumentSyntax, so a deconstruction target would otherwise reach the
+    /// by-value argument branch and report a read — hiding it from the mutation-site query.
+    /// </summary>
+    [Fact]
+    public void DeconstructionAssignmentTarget_IsWrite()
+        => Assert.Equal(["write"], KindsOf(
+            "class C { int _x; void W() { int other; (_x, other) = (1, 2); } }", "_x"));
+
+    [Fact]
+    public void TupleUsedAsValue_StillReads()
+        => Assert.Equal(["read"], KindsOf(
+            "class C { int _x; (int, int) R() { return (_x, 0); } }", "_x"));
+
+    [Fact]
+    public void RefAliasInitializer_IsReadWrite()
+        => Assert.Equal(["readwrite"], KindsOf(
+            "class C { int _x; void W() { ref int r = ref _x; r++; } }", "_x"));
+
+    [Fact]
+    public void ConstructorInitializerCall_IsInvocation()
+    {
+        // `: this(0)` names its target with a keyword, so the classifier sees no SimpleName.
+        const string source = "class C { public C() : this(0) { } public C(int x) { } }";
+        var tree = CSharpSyntaxTree.ParseText(source);
+        var refs = new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) };
+        var comp = CSharpCompilation.Create("C", [tree], refs,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var model = comp.GetSemanticModel(tree);
+        var initializer = tree.GetRoot().DescendantNodes()
+            .OfType<ConstructorInitializerSyntax>().Single();
+        var target = model.GetSymbolInfo(initializer).Symbol!;
+
+        Assert.Equal("invocation", ReferenceClassifier.Classify(initializer, target, () => model));
+    }
 
     [Fact]
     public void OutArgument_IsWrite()
@@ -144,7 +180,7 @@ public class ReferenceClassifierTests
         var ctor = (IMethodSymbol)model.GetSymbolInfo(creation).Symbol!;
 
         Assert.Equal(MethodKind.Constructor, ctor.MethodKind);
-        Assert.Equal("object_creation", ReferenceClassifier.Classify(creation.Type, ctor, model));
+        Assert.Equal("object_creation", ReferenceClassifier.Classify(creation.Type, ctor, () => model));
     }
 
     [Fact]

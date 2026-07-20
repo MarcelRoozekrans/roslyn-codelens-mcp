@@ -37,7 +37,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **get_public_api_surface** — Enumerate every public/protected type and member in production projects; flat, deterministically-sorted list suitable for API review or breaking-change baselines.
 - **find_breaking_changes** — Diff the current API against a baseline JSON or DLL; report removed members, kind changes, and accessibility changes with Breaking/NonBreaking severity.
 - **find_reflection_usage** — Detect dynamic/reflection-based usage
-- **find_references** — Find all references to any symbol (types, methods, properties, fields, events)
+- **find_references** — Find all references to any symbol (types, methods, properties, fields, events), each tagged with a kind (`read`, `write`, `readwrite`, `invocation`, `method_group`, `object_creation`, `cast`, `type_check`, `typeof`, `base_type`, `type_constraint`, `type_argument`, `declaration`, `attribute`, `nameof`, `xml_doc`) and reported per occurrence with a column; filter server-side with `kinds` (e.g. `["write","readwrite"]` for mutation sites)
 - **go_to_definition** — Find the source file and line where a symbol is defined
 - **get_method_source** — Full declaration source (XML docs, attributes, signature, body — original formatting) for one or many members by name in a single call: methods (all overloads), constructors, properties, indexers, fields, events; per-item statuses (`ok`/`notFound`/`ambiguous`/`metadata`/`unsupportedKind`) so a batch never fails wholesale
 - **resolve_stack_trace** — Map a pasted .NET stack trace to file/line/symbol, undoing compiler name mangling (async/iterator state machines, lambdas, local functions, generic arity); handles inner-exception chains, log-prefixed lines, and Demystifier traces
@@ -103,7 +103,8 @@ When `truncated` is `true`, the items are the **top N by the tool's natural sort
 Tools that include a `summary` aggregate today:
 
 - `get_diagnostics` — `{ error, warning, info, hidden }` counts
-- `find_references`, `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
+- `find_references` — `{ byProject: { name: count }, byKind: { kind: count } }`
+- `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
 - `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
 - `find_unused_symbols` — `{ byKind, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
 - `find_naming_violations` — `{ byRule: {...} }`

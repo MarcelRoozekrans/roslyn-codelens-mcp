@@ -29,7 +29,8 @@ public static class FindReferencesLogic
     {
         var results = new List<SymbolReference>();
         var seen = new HashSet<(string File, int Line, int Column)>();
-        // Semantic models are expensive; one per document serves every reference in it.
+        // Semantic models are expensive, and only the rare COM-interop argument needs one.
+        // Built on demand (see GetModel) and reused per document for the rest of the scan.
         var models = new Dictionary<DocumentId, SemanticModel>();
 
         foreach (var target in targets)
@@ -63,13 +64,13 @@ public static class FindReferencesLogic
                     // classifier a node with no SimpleName to read.
                     var node = sourceTree.GetRoot()
                         .FindNode(location.Location.SourceSpan, getInnermostNodeForTie: true);
-                    if (!models.TryGetValue(location.Document.Id, out var model))
-                    {
-                        model = location.Document.GetSemanticModelAsync().GetAwaiter().GetResult()!;
-                        models[location.Document.Id] = model;
-                    }
 
-                    var kind = ReferenceClassifier.Classify(node, referencedSymbol.Definition, model);
+                    // Resolved lazily: only the rare argument that omits an explicit `out`/`ref`
+                    // (COM interop) needs a model, so a solution-wide scan no longer builds and
+                    // pins one for every document it touches.
+                    var document = location.Document;
+                    var kind = ReferenceClassifier.Classify(
+                        node, referencedSymbol.Definition, () => GetModel(models, document));
                     var snippet = GetContainingStatement(node);
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
@@ -80,6 +81,17 @@ public static class FindReferencesLogic
         }
 
         return results;
+    }
+
+    private static SemanticModel? GetModel(Dictionary<DocumentId, SemanticModel> cache, Document document)
+    {
+        if (cache.TryGetValue(document.Id, out var cached))
+            return cached;
+
+        var model = document.GetSemanticModelAsync().GetAwaiter().GetResult();
+        if (model != null)
+            cache[document.Id] = model;
+        return model;
     }
 
     private static string GetContainingStatement(SyntaxNode node)

@@ -10,15 +10,18 @@ public static class FindReferencesTool
 {
     private const int DefaultLimit = 500;
 
+    // Case-insensitive: a caller writing "Write" means the same kind as "write", and failing
+    // an otherwise valid request over capitalisation buys nothing.
     private static readonly IReadOnlySet<string> ValidKinds =
-        new HashSet<string>(ReferenceClassifier.AllKinds, StringComparer.Ordinal);
+        new HashSet<string>(ReferenceClassifier.AllKinds, StringComparer.OrdinalIgnoreCase);
 
     [McpServerTool(Name = "find_references"),
      Description("Find all references to a symbol (type, method, property, field, or event) across the " +
                  "solution, each tagged with a kind. Kinds: `read`, `write`, `readwrite` (compound " +
                  "assignment / `++` / `ref`), `invocation`, `method_group`, `object_creation`, `cast`, " +
                  "`type_check` (`is` / patterns / `as`-tests), `typeof`, `base_type`, `type_constraint`, " +
-                 "`type_argument`, `declaration`, `attribute`, `nameof`, `xml_doc`. Pass `kinds` to return " +
+                 "`type_argument`, `declaration`, `attribute`, `nameof`, `xml_doc`, and `usage` " +
+                 "(rare fallback). Pass `kinds` to return " +
                  "only some (e.g. `[\"write\",\"readwrite\"]` for mutation sites). Envelope adds a `byKind` " +
                  "summary. Multiple references on one line are reported separately with a `column`.")]
     public static ToolListResult<SymbolReference> Execute(
@@ -30,10 +33,10 @@ public static class FindReferencesTool
         [Description("Maximum number of items to return (default: 500). Items are sorted by file, line, column.")]
             int? limit = null)
     {
-        manager.EnsureLoaded();
-        // Validate before the solution-wide scan so a typo fails fast.
+        // Before EnsureLoaded: a typo should not pay for a cold solution load first.
         ValidateKinds(kinds);
 
+        manager.EnsureLoaded();
         var context = manager.GetAnalysisContext();
         var raw = FindReferencesLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
 
@@ -64,7 +67,7 @@ public static class FindReferencesTool
     {
         if (kinds is { Length: > 0 })
         {
-            var wanted = new HashSet<string>(kinds, StringComparer.Ordinal);
+            var wanted = new HashSet<string>(kinds, StringComparer.OrdinalIgnoreCase);
             raw = raw.Where(r => wanted.Contains(r.ReferenceKind)).ToList();
         }
 

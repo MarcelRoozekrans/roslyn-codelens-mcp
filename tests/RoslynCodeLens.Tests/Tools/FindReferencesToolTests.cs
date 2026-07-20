@@ -113,6 +113,17 @@ public class FindReferencesToolTests
         Assert.Equal(2, result.TotalCount);
     }
 
+    /// <summary>Callers drift on casing; rejecting "Write" over a capital letter buys nothing.</summary>
+    [Fact]
+    public void KindsFilter_IsCaseInsensitive()
+    {
+        FindReferencesTool.ValidateKinds(["Write", "READWRITE"]);
+        var result = FindReferencesTool.BuildResult(SampleRefs(), ["Write", "READWRITE"], limit: 500);
+
+        Assert.Equal(["write", "readwrite"], result.Items.Select(r => r.ReferenceKind));
+        Assert.Equal(2, result.TotalCount);
+    }
+
     [Fact]
     public void NoKindsFilter_ReturnsEverything()
     {
