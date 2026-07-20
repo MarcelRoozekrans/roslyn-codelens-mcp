@@ -264,6 +264,94 @@ public class CheckArchitectureLogicTests
         Assert.Equal(2, violation.Sites.Count);
     }
 
+    // 8e — an object initializer's member names are not separate dependencies. A human reading
+    // `new Demo.Domain.Order { Id = 1, Name = "x" }` points at Order ONCE; counting `Id` and
+    // `Name` (whose ContainingType is Order) turns one written reference into three. Same
+    // over-count class as `var`.
+    [Fact]
+    public void ObjectInitializerMembers_AreNotCountedSeparately()
+    {
+        var violation = Assert.Single(
+            Run(InitializerWorkspace("""
+                public object Make() => new Demo.Domain.Order { Id = 1, Name = "x" };
+                """),
+                [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        Assert.Equal(1, violation.ReferenceCount);
+        Assert.Equal(1, violation.Sites.Count);
+    }
+
+    // 8f — nested and `with` initializers take the same path: the member being assigned belongs
+    // to the type the initializer is initializing, which is already counted.
+    [Fact]
+    public void NestedInitializerMembers_AreNotCountedSeparately()
+    {
+        var violation = Assert.Single(
+            Run(InitializerWorkspace("""
+                public object Make() => new Demo.Domain.Box { Inner = { Id = 1, Name = "x" } };
+                """),
+                [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        // One: the single written type name, `Demo.Domain.Box`. `Inner` is a member of the type
+        // the outer initializer initializes, and `Id`/`Name` are members of the type the NESTED
+        // one initializes, so all three are the same over-count `new Order { Id = 1 }` avoids.
+        // `Order` itself is never written here — like `var`, an inferred type is not a reference a
+        // reader would point at.
+        Assert.Equal(1, violation.ReferenceCount);
+    }
+
+    // 8g — the control for 8e: assignment to a member through a LOCAL is not an initializer and
+    // is a genuine, separately written reference. It must still count.
+    [Fact]
+    public void MemberAssignmentThroughALocal_StillCounts()
+    {
+        var violation = Assert.Single(
+            Run(InitializerWorkspace("""
+                public void Set(Demo.Domain.Order other) { other.Id = 1; }
+                """),
+                [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        // The parameter type, and the `other.Id` member access.
+        Assert.Equal(2, violation.ReferenceCount);
+    }
+
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) InitializerWorkspace(string body)
+        => RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id { get; set; } public string? Name { get; set; } }
+                public class Box { public Order Inner { get; } = new(); }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", $$"""
+                namespace Demo.Infrastructure;
+                public class Repo
+                {
+                    {{body}}
+                }
+                """) }));
+
+    // A site inside a field declaration must still name the field. GetDeclaredSymbol on a
+    // FieldDeclarationSyntax returns null (a declaration can declare several variables), so a
+    // naive walk reports an empty SourceSymbol — a violation site with no owner.
+    [Fact]
+    public void FieldDeclarationSite_NamesTheField()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? A; }
+                """) }));
+
+        var site = Assert.Single(
+            Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")])).Sites);
+
+        Assert.Equal("Demo.Infrastructure.Repo.A", site.SourceSymbol, StringComparer.Ordinal);
+    }
+
     // 9 — grouping: 5 human-visible references, sites capped at 2.
     [Fact]
     public void Grouping_CountsAllReferencesButLimitsSites()
@@ -300,6 +388,55 @@ public class CheckArchitectureLogicTests
 
         Assert.Equal("Infra", violation.SourceScope);
         Assert.Equal("Domain", violation.TargetScope);
+    }
+
+    // 10b — a LINKED file (one path, compiled into two projects) has a DIFFERENT source scope in
+    // each project under `scope: "project"`. Deduping the walk by path alone attributes it to
+    // whichever project was enumerated first and silently drops the other project's violations —
+    // exactly the case a linked-file repo would rely on the tool to catch.
+    [Fact]
+    public void LinkedFile_UnderProjectScope_IsReportedForEveryProject()
+    {
+        var violations = Run(LinkedFileWorkspace(), [Forbid("App.*", "Domain")], scope: "project");
+
+        Assert.Equal(2, violations.Count);
+        Assert.Equal(
+            new[] { "App.A", "App.B" },
+            violations.Select(v => v.SourceScope).OrderBy(s => s, StringComparer.Ordinal));
+        Assert.All(violations, v => Assert.Equal("Domain", v.TargetScope));
+    }
+
+    // 10c — the counterpart: under `scope: "namespace"` the source scope of a linked file is the
+    // SAME in every compilation, so walking it once per project would double-count a single
+    // written reference. The dedupe must still apply there.
+    [Fact]
+    public void LinkedFile_UnderNamespaceScope_IsStillCountedOnce()
+    {
+        var violation = Assert.Single(
+            Run(LinkedFileWorkspace(), [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        Assert.Equal(1, violation.ReferenceCount);
+        Assert.Equal(1, violation.Sites.Count);
+    }
+
+    /// <summary>
+    /// One source path compiled into two projects — the shape a `&lt;Compile Include="..\Shared.cs" /&gt;`
+    /// link produces. Both documents carry the identical FilePath, which is what makes them linked.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) LinkedFileWorkspace()
+    {
+        const string Linked = """
+            namespace Demo.Infrastructure;
+            public class Repo { public Demo.Domain.Order? A; }
+            """;
+
+        return RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("App.A", new[] { ("Shared.cs", Linked) }),
+            ("App.B", new[] { ("Shared.cs", Linked) }));
     }
 
     // 11

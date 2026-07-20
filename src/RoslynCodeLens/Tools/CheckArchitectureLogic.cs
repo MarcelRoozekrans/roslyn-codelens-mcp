@@ -48,11 +48,25 @@ public static class CheckArchitectureLogic
 
         var byNamespace = string.Equals(scope, NamespaceScope, StringComparison.Ordinal);
         var groups = new Dictionary<(int RuleIndex, string Source, string Target), Accumulator>();
+
         // A linked or multi-targeted file appears in several compilations; walking it once keeps
         // reference counts honest and project attribution deterministic (see FindThrowSitesLogic).
-        var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
-        var generatedTargets = new Dictionary<ISymbol, bool>(SymbolEqualityComparer.Default);
+        //
+        // The key is SCOPE-AWARE, because "the same work twice" means different things per scope.
+        // Under namespace scope a linked file declares the same namespace in every compilation, so
+        // walking it twice would double-count one written reference — dedupe by path alone. Under
+        // project scope its source scope DIFFERS per compilation, so a path-only key would credit
+        // the file to whichever project was enumerated first and silently drop the other project's
+        // violations entirely. Including the project name still collapses multi-targeting, where
+        // the several compilations share one project name.
+        var walkedTrees = new HashSet<(string Scope, string Identity)>();
+        var generatedTargets = new Dictionary<string, bool>(StringComparer.Ordinal);
         var solutionScopeNames = SolutionScopeNames(loaded.Solution);
+
+        // Hoisted: with a forbid-only rule set nothing ever consults this, and computing it per
+        // name node meant re-resolving generated-ness and solution membership for every reference
+        // in the solution to answer a question no rule asked.
+        var hasAllowOnly = rules.Any(r => string.Equals(r.Kind, AllowOnlyKind, StringComparison.Ordinal));
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
@@ -69,7 +83,7 @@ public static class CheckArchitectureLogic
                 if (GeneratedCodeDetector.IsGenerated(tree))
                     continue;
 
-                if (!string.IsNullOrEmpty(tree.FilePath) && !walkedPaths.Add(tree.FilePath))
+                if (!walkedTrees.Add((byNamespace ? string.Empty : projectName, TreeIdentity(tree, cancellationToken))))
                     continue;
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -91,10 +105,18 @@ public static class CheckArchitectureLogic
                 // accusation against a scope that wrote no code), and an in-namespace using or
                 // alias double-counts the single real usage below it. Skipping them is also what
                 // makes the tool's own promise true: "an unused `using` is not reported".
+                var walkedNodes = 0;
                 foreach (var name in root
                              .DescendantNodes(descendIntoChildren: n => n is not UsingDirectiveSyntax)
                              .OfType<SimpleNameSyntax>())
                 {
+                    // One generated or machine-written file can hold hundreds of thousands of name
+                    // nodes, so a token checked only per tree leaves the caller unable to cancel
+                    // partway through one. Every 1024 nodes is far below human latency and costs
+                    // nothing measurable.
+                    if ((++walkedNodes & 0x3FF) == 0)
+                        cancellationToken.ThrowIfCancellationRequested();
+
                     var target = ResolveTargetType(name, model);
                     if (target is null)
                         continue;
@@ -111,8 +133,8 @@ public static class CheckArchitectureLogic
                     // allowOnly's target set is open-ended, so it only evaluates targets the
                     // author can actually act on: solution-internal, and not pure generator
                     // output. `forbid` names its target explicitly and evaluates everything.
-                    var eligibleForAllowOnly =
-                        IsSolutionInternal(target, solutionScopeNames)
+                    var eligibleForAllowOnly = hasAllowOnly
+                        && IsSolutionInternal(target, solutionScopeNames)
                         && !IsGeneratedOnly(target, generatedTargets);
 
                     for (var i = 0; i < rules.Count; i++)
@@ -151,7 +173,7 @@ public static class CheckArchitectureLogic
                                 File: position.Path,
                                 Line: position.StartLinePosition.Line + 1,
                                 Column: position.StartLinePosition.Character + 1,
-                                SourceSymbol: DescribeSource(name, model),
+                                SourceSymbol: ExceptionQueries.DescribeContainingMember(name, model),
                                 TargetSymbol: target.ToDisplayString()));
                         }
                     }
@@ -337,18 +359,46 @@ public static class CheckArchitectureLogic
         if (target is null)
             return null;
 
+        if (symbol is ITypeSymbol)
+            return target;
+
         // Drop the trailing member of `SomeType.Member` — the qualifier already counted it.
-        if (name.Parent is MemberAccessExpressionSyntax access
-            && access.Name == name
-            && symbol is not ITypeSymbol)
+        if (name.Parent is MemberAccessExpressionSyntax access && access.Name == name)
         {
             var qualifier = TypeOf(model.GetSymbolInfo(access.Expression).Symbol);
             if (qualifier is not null && SymbolEqualityComparer.Default.Equals(qualifier, target))
                 return null;
         }
 
+        // Drop an initializer's member name for the same reason: `new Demo.Domain.Order { Id = 1 }`
+        // writes Order once, and `Id`'s ContainingType IS Order, so counting it would report one
+        // dependency per assigned member. `other.Id = 1` is untouched — that is an assignment
+        // through a local, not an initializer, and is a separately written reference.
+        if (name.Parent is AssignmentExpressionSyntax { Parent: InitializerExpressionSyntax initializer } assignment
+            && assignment.Left == name
+            && initializer.Parent is ExpressionSyntax initialized)
+        {
+            // Covers `new T { ... }`, `new() { ... }`, `x with { ... }` and the nested
+            // `P = { ... }` form — in every one of them the type of the expression the initializer
+            // hangs off IS the type whose members are being assigned.
+            var initializedType = model.GetTypeInfo(initialized).Type;
+            if (initializedType is not null && SymbolEqualityComparer.Default.Equals(initializedType, target))
+                return null;
+        }
+
         return target;
     }
+
+    /// <summary>
+    /// A stable per-tree key for the walk dedupe. File path when there is one; otherwise a hash of
+    /// the tree's own text, because a pathless tree (in-memory documents, some generators) is a
+    /// different object in every compilation and would otherwise be walked — and counted — once per
+    /// compilation it appears in.
+    /// </summary>
+    private static string TreeIdentity(SyntaxTree tree, CancellationToken cancellationToken)
+        => string.IsNullOrEmpty(tree.FilePath)
+            ? "\0content:" + Convert.ToBase64String(tree.GetText(cancellationToken).GetContentHash().AsSpan())
+            : tree.FilePath;
 
     private static ITypeSymbol? TypeOf(ISymbol? symbol)
     {
@@ -417,28 +467,24 @@ public static class CheckArchitectureLogic
     /// editable, so a dependency on it is actionable.
     /// </summary>
     /// <remarks>
-    /// Cached per symbol: the same target type is re-resolved at every reference site, and
-    /// <see cref="GeneratedCodeDetector.IsGenerated"/> reads tree text.
+    /// Cached: the same target type is re-resolved at every reference site, and
+    /// <see cref="GeneratedCodeDetector.IsGenerated"/> reads tree text. Keyed by fully-qualified
+    /// name rather than by symbol — the convention <see cref="ExceptionQueries.Fqn"/> already
+    /// adopted — because symbols are compilation-scoped: the same logical type bound in two
+    /// projects is not <c>SymbolEqualityComparer</c>-equal, so a symbol key re-reads the tree text
+    /// once per compilation that references it.
     /// </remarks>
-    private static bool IsGeneratedOnly(ITypeSymbol type, Dictionary<ISymbol, bool> cache)
+    private static bool IsGeneratedOnly(ITypeSymbol type, Dictionary<string, bool> cache)
     {
-        if (cache.TryGetValue(type, out var known))
+        var key = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (cache.TryGetValue(key, out var known))
             return known;
 
         var declarations = type.DeclaringSyntaxReferences;
         var generated = declarations.Length > 0
             && declarations.All(r => GeneratedCodeDetector.IsGenerated(r.SyntaxTree));
 
-        cache[type] = generated;
+        cache[key] = generated;
         return generated;
-    }
-
-    private static string DescribeSource(SyntaxNode node, SemanticModel model)
-    {
-        var member = node.Ancestors()
-            .OfType<MemberDeclarationSyntax>()
-            .FirstOrDefault(m => m is not BaseNamespaceDeclarationSyntax);
-
-        return member is null ? string.Empty : model.GetDeclaredSymbol(member)?.ToDisplayString() ?? string.Empty;
     }
 }
