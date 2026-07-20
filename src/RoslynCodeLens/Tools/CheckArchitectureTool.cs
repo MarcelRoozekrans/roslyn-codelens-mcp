@@ -38,16 +38,19 @@ public static class CheckArchitectureTool
                  "Rule kinds: `forbid` (a dependency from `from` to `to` is a violation) and " +
                  "`allowOnly` (a dependency from `from` to anything outside `to` is a violation). " +
                  "TWO SEMANTICS YOU MUST KNOW TO READ AN EMPTY RESULT CORRECTLY. " +
-                 "(1) `allowOnly` evaluates ONLY solution-internal targets: references to framework " +
-                 "and NuGet namespaces such as `System.Collections.Generic` are ignored, otherwise " +
-                 "every file would violate every `allowOnly` rule. To restrict a framework " +
-                 "namespace, write an explicit `forbid` — that path DOES evaluate metadata targets. " +
+                 "(1) `allowOnly` evaluates ONLY solution-internal, non-generated targets: " +
+                 "references to framework and NuGet namespaces such as `System.Collections.Generic` " +
+                 "are ignored (otherwise every file would violate every `allowOnly` rule), and so " +
+                 "are types declared entirely in generated code, which the caller cannot remove. " +
+                 "To restrict a framework or generated namespace, write an explicit `forbid` — that " +
+                 "path DOES evaluate metadata and generated targets. " +
                  "(2) Self-references are always allowed: a scope depending on itself is never a " +
                  "violation, under either kind. " +
                  "Results are grouped per violated `rule` plus `sourceScope` plus `targetScope` " +
                  "edge, each with a full `referenceCount` and the first `maxSitesPerViolation` " +
                  "sites. Sorted by rule order, then by descending reference count. Generated code " +
-                 "is skipped. Envelope adds a `byRule` / `totalReferences` / `rulesEvaluated` " +
+                 "is never reported as the SOURCE of a violation under either kind. Envelope adds " +
+                 "a `byRule` / `totalReferences` / `rulesEvaluated` " +
                  "summary.")]
     public static ToolListResult<ArchitectureViolation> Execute(
         MultiSolutionManager manager,

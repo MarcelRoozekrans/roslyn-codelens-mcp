@@ -11,10 +11,13 @@ namespace RoslynCodeLens.Tools;
 /// <remarks>
 /// Two semantics decide whether this tool is usable, and both are deliberate:
 /// <list type="number">
-/// <item><description><b>allowOnly considers only solution-internal targets.</b> Otherwise
-/// <c>using System;</c> violates "Api may depend only on Application" — absurd, and it would bury
-/// every real finding. To restrict a framework namespace, write an explicit <c>forbid</c>; that
-/// path <i>does</i> evaluate metadata targets.</description></item>
+/// <item><description><b>allowOnly considers only solution-internal, non-generated targets.</b>
+/// Otherwise <c>using System;</c> violates "Api may depend only on Application" — absurd, and it
+/// would bury every real finding; likewise generator output (regex implementations, JSON contexts,
+/// DI registries) would be reported as an unlisted dependency the author cannot remove. Its target
+/// set is open-ended, so it only reports targets the author can act on. To restrict a framework or
+/// generated namespace, write an explicit <c>forbid</c>; that path names its target and <i>does</i>
+/// evaluate metadata and generated ones.</description></item>
 /// <item><description><b>Self-references are always allowed.</b> A scope depending on itself is
 /// not a layering violation, under either rule kind.</description></item>
 /// </list>
@@ -48,6 +51,7 @@ public static class CheckArchitectureLogic
         // A linked or multi-targeted file appears in several compilations; walking it once keeps
         // reference counts honest and project attribution deterministic (see FindThrowSitesLogic).
         var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
+        var generatedTargets = new Dictionary<ISymbol, bool>(SymbolEqualityComparer.Default);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
@@ -103,7 +107,12 @@ public static class CheckArchitectureLogic
                     if (string.Equals(sourceScope, targetScope, StringComparison.Ordinal))
                         continue;
 
-                    var isInternal = target.Locations.Any(l => l.IsInSource);
+                    // allowOnly's target set is open-ended, so it only evaluates targets the
+                    // author can actually act on: solution-internal, and not pure generator
+                    // output. `forbid` names its target explicitly and evaluates everything.
+                    var eligibleForAllowOnly =
+                        target.Locations.Any(l => l.IsInSource)
+                        && !IsGeneratedOnly(target, generatedTargets);
 
                     for (var i = 0; i < rules.Count; i++)
                     {
@@ -121,7 +130,7 @@ public static class CheckArchitectureLogic
                         else
                         {
                             // allowOnly ignores everything outside the solution.
-                            if (!isInternal || rule.To.Any(p => ScopePattern.Matches(p, targetScope)))
+                            if (!eligibleForAllowOnly || rule.To.Any(p => ScopePattern.Matches(p, targetScope)))
                                 continue;
                             toPattern = string.Join(", ", rule.To);
                         }
@@ -355,6 +364,28 @@ public static class CheckArchitectureLogic
             { TypeKind: TypeKind.Error or TypeKind.Dynamic or TypeKind.Submission } => null,
             _ => candidate,
         };
+    }
+
+    /// <summary>
+    /// True when every syntax tree that declares the type is generated code — nothing the author
+    /// could edit. A partial type with one hand-written part is NOT generated-only: that part is
+    /// editable, so a dependency on it is actionable.
+    /// </summary>
+    /// <remarks>
+    /// Cached per symbol: the same target type is re-resolved at every reference site, and
+    /// <see cref="GeneratedCodeDetector.IsGenerated"/> reads tree text.
+    /// </remarks>
+    private static bool IsGeneratedOnly(ITypeSymbol type, Dictionary<ISymbol, bool> cache)
+    {
+        if (cache.TryGetValue(type, out var known))
+            return known;
+
+        var declarations = type.DeclaringSyntaxReferences;
+        var generated = declarations.Length > 0
+            && declarations.All(r => GeneratedCodeDetector.IsGenerated(r.SyntaxTree));
+
+        cache[type] = generated;
+        return generated;
     }
 
     private static string DescribeSource(SyntaxNode node, SemanticModel model)

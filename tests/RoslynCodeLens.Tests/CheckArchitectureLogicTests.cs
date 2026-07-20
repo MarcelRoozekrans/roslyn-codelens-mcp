@@ -266,6 +266,39 @@ public class CheckArchitectureLogicTests
         Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
     }
 
+    // 11b — the target side. allowOnly's target set is open-ended, so generator output (regex
+    // implementations, JSON contexts, DI registries) would show up as "unlisted dependencies"
+    // the user can neither list naturally nor delete. Mirrors the metadata-target rule.
+    [Fact]
+    public void AllowOnly_IgnoresGeneratedTargets()
+    {
+        var workspace = GeneratedTargetWorkspace();
+
+        Assert.Empty(Run(workspace, [AllowOnly("Demo.Infrastructure.*", "Demo.Shared.*")]));
+    }
+
+    // 11c — the contrast, exactly as with metadata targets: an explicit `forbid` names its
+    // target, so it DOES evaluate generated ones.
+    [Fact]
+    public void Forbid_StillTargetsGeneratedCode()
+    {
+        var violation = Assert.Single(
+            Run(GeneratedTargetWorkspace(), [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        Assert.Equal("Demo.Domain", violation.TargetScope);
+    }
+
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) GeneratedTargetWorkspace()
+        => RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.g.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? A; }
+                """) }));
+
     // 12
     [Fact]
     public void ExactPatternDoesNotMatchChildren()
