@@ -458,21 +458,78 @@ public static class ChangeSignatureLogic
     /// <summary>
     /// Overrides and interface implementations Roslyn's engine rewrites alongside the target, so
     /// the blast radius is visible before applying.
+    /// <para>
+    /// The walk goes UP before it goes down. Roslyn cascades over the entire hierarchy, so
+    /// enumerating only what the target itself is overridden/implemented by under-reports
+    /// whenever the target is not the root: changing a derived override also rewrites the base
+    /// and every sibling override, and changing one interface implementation also rewrites the
+    /// interface member and every other implementer. The roots are found first
+    /// (<see cref="FindHierarchyRoots"/>), then the downward enumeration runs from each.
+    /// </para>
     /// </summary>
     private static async Task<IReadOnlyList<string>> FindCascadeSetAsync(
         LoadedSolution loaded, IMethodSymbol target, CancellationToken ct)
     {
         var cascade = new List<ISymbol>();
-        cascade.AddRange(await SymbolFinder.FindOverridesAsync(
-            target, loaded.Solution, cancellationToken: ct).ConfigureAwait(false));
-        cascade.AddRange(await SymbolFinder.FindImplementationsAsync(
-            target, loaded.Solution, cancellationToken: ct).ConfigureAwait(false));
+        foreach (var root in FindHierarchyRoots(target))
+        {
+            // The root itself is rewritten too, unless it IS the target.
+            if (!SymbolEqualityComparer.Default.Equals(root, target))
+                cascade.Add(root);
+
+            cascade.AddRange(await SymbolFinder.FindOverridesAsync(
+                root, loaded.Solution, cancellationToken: ct).ConfigureAwait(false));
+            cascade.AddRange(await SymbolFinder.FindImplementationsAsync(
+                root, loaded.Solution, cancellationToken: ct).ConfigureAwait(false));
+        }
 
         return cascade
+            .Where(s => !SymbolEqualityComparer.Default.Equals(s, target))
             .Select(s => s.ToDisplayString())
             .Distinct(StringComparer.Ordinal)
             .OrderBy(s => s, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// The base-most declaration(s) the target participates in: the top of its override chain,
+    /// plus every interface member it implements (explicitly or implicitly). The target itself
+    /// is the only root when it heads its own hierarchy.
+    /// </summary>
+    private static List<IMethodSymbol> FindHierarchyRoots(IMethodSymbol target)
+    {
+        var roots = new List<IMethodSymbol>();
+
+        var topOfChain = target;
+        while (topOfChain.OverriddenMethod is { } overridden)
+            topOfChain = overridden;
+        roots.Add(topOfChain);
+
+        // Explicit implementations name their interface members directly.
+        roots.AddRange(target.ExplicitInterfaceImplementations);
+
+        // Implicit ones must be matched through the containing type: an interface member whose
+        // implementation resolves to the target (or to the base it overrides) shares the cascade.
+        var containingType = target.ContainingType;
+        if (containingType != null)
+        {
+            foreach (var @interface in containingType.AllInterfaces)
+            {
+                foreach (var member in @interface.GetMembers(target.Name).OfType<IMethodSymbol>())
+                {
+                    var implementation = containingType.FindImplementationForInterfaceMember(member);
+                    if (implementation != null
+                        && (SymbolEqualityComparer.Default.Equals(implementation, target)
+                            || SymbolEqualityComparer.Default.Equals(implementation, topOfChain)))
+                    {
+                        roots.Add(member);
+                    }
+                }
+            }
+        }
+
+        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        return roots.Where(r => seen.Add(r)).ToList();
     }
 
     // ------------------------------------------------------------------ display

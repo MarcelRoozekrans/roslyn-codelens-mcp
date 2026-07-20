@@ -316,6 +316,82 @@ public class ChangeSignatureLogicTests
         Assert.DoesNotContain("int times", after, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Roslyn cascades across the WHOLE hierarchy, not downward from the target. Targeting a
+    /// derived override must therefore report the base it overrides and the sibling overrides
+    /// that Roslyn also rewrites — walking only downward reported none of them.
+    /// </summary>
+    [Fact]
+    public async Task DerivedOverrideTarget_CascadesUpToTheBaseAndAcrossToSiblings()
+    {
+        const string source = """
+            namespace SigDemo;
+            public class Base
+            {
+                public virtual string Greet(string name, int times) => name;
+            }
+            public class Derived : Base
+            {
+                public override string Greet(string name, int times) => name;
+            }
+            public class Sibling : Base
+            {
+                public override string Greet(string name, int times) => name;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Greet.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Derived.Greet",
+            [new SignatureOperation("remove", Parameter: "times")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains(result.CascadedTo, s => s.Contains("Base.Greet", StringComparison.Ordinal));
+        Assert.Contains(result.CascadedTo, s => s.Contains("Sibling.Greet", StringComparison.Ordinal));
+        // The target itself is not part of its own blast radius.
+        Assert.DoesNotContain(result.CascadedTo, s => s.Contains("Derived.Greet", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ImplementationTarget_CascadesUpToTheInterfaceAndAcrossToOtherImplementers()
+    {
+        const string source = """
+            namespace SigDemo;
+            public interface IGreet
+            {
+                string Greet(string name, int times);
+            }
+            public class First : IGreet
+            {
+                public string Greet(string name, int times) => name;
+            }
+            public class Second : IGreet
+            {
+                public string Greet(string name, int times) => name;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Greet.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "First.Greet",
+            [new SignatureOperation("remove", Parameter: "times")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains(result.CascadedTo, s => s.Contains("IGreet.Greet", StringComparison.Ordinal));
+        Assert.Contains(result.CascadedTo, s => s.Contains("Second.Greet", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.CascadedTo, s => s.Contains("First.Greet", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NoHierarchy_CascadesToNothing()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));
+
+        var result = await RunAsync(loaded, resolver, "Svc.Add",
+            [new SignatureOperation("remove", Parameter: "b")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.CascadedTo);
+    }
+
     [Fact]
     public async Task ExtensionMethod_ThisParameterPreserved()
     {
