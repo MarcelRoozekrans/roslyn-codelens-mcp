@@ -80,7 +80,15 @@ public static class CheckArchitectureLogic
 
                 var model = compilation.GetSemanticModel(tree);
 
-                foreach (var name in root.DescendantNodes().OfType<SimpleNameSyntax>())
+                // `using` directives are deliberately NOT walked. A using is not itself a
+                // dependency — it is a name-resolution convenience — and counting it breaks the
+                // tool twice over: a file-level using is attributed to the GLOBAL namespace (an
+                // accusation against a scope that wrote no code), and an in-namespace using or
+                // alias double-counts the single real usage below it. Skipping them is also what
+                // makes the tool's own promise true: "an unused `using` is not reported".
+                foreach (var name in root
+                             .DescendantNodes(descendIntoChildren: n => n is not UsingDirectiveSyntax)
+                             .OfType<SimpleNameSyntax>())
                 {
                     var target = ResolveTargetType(name, model);
                     if (target is null)

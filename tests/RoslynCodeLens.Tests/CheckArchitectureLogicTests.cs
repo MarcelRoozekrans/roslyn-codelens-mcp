@@ -139,6 +139,49 @@ public class CheckArchitectureLogicTests
         Assert.Equal("Demo.Domain", violation.TargetScope);
     }
 
+    // 8b — a `using` directive is NOT itself a dependency. The tool's description promises
+    // "an unused `using` is not reported"; a file-level using also sits in the GLOBAL namespace,
+    // so counting it accuses the wrong scope entirely.
+    [Fact]
+    public void FileLevelUsingStatic_WithNoOtherUsage_IsNotReported()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Constants.cs", """
+                namespace Demo.Domain;
+                public static class Constants { public const int Zero = 0; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                using static Demo.Domain.Constants;
+                namespace Demo.Infrastructure;
+                public class Repo { public int Id; }
+                """) }));
+
+        // `*` so the global namespace the using lives in is in scope: without the fix this
+        // reports a violation whose SourceScope is "" — an accusation against nobody.
+        Assert.Empty(Run(workspace, [Forbid("*", "Demo.Domain.*")]));
+    }
+
+    // 8c — an in-namespace using alias must not double-count the one real usage.
+    [Fact]
+    public void UsingAlias_CountsOnlyTheActualUsage()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                using Alias = Demo.Domain.Order;
+                public class Repo { public Alias? A; }
+                """) }));
+
+        var violation = Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        Assert.Equal("Demo.Infrastructure", violation.SourceScope);
+        Assert.Equal(1, violation.ReferenceCount);
+    }
+
     // 9 — grouping: 5 human-visible references, sites capped at 2.
     [Fact]
     public void Grouping_CountsAllReferencesButLimitsSites()
