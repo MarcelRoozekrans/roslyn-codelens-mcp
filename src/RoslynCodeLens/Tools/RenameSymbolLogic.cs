@@ -46,56 +46,18 @@ public static class RenameSymbolLogic
         var renamed = await Renamer.RenameSymbolAsync(
             loaded.Solution, target, options, newName, ct).ConfigureAwait(false);
 
-        var edits = await SolutionChangeWriter.ExtractTextEditsAsync(
-            renamed, loaded.Solution, ct).ConfigureAwait(false);
-        var conflicts = await SolutionChangeSafety.ComputeConflictsAsync(
-            loaded, renamed, ct).ConfigureAwait(false);
-        var filesChanged = edits.Select(e => e.FilePath)
-            .Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var oldName = target.ToDisplayString();
 
-        if (preview)
-        {
-            var previewMessage = conflicts.Count > 0
-                ? $"{conflicts.Count} conflict(s) detected — applying would introduce new compiler errors."
-                : "Preview only — no files written. Re-run with preview=false to apply.";
-            previewMessage = SolutionChangeSafety.DegradedPreviewWarning(loaded, "rename", previewMessage);
-            return new RenameSymbolResult(true, oldName, newName, Applied: false,
-                edits, filesChanged, conflicts, previewMessage);
-        }
+        // The preview/conflict-gate/write/freshness/commit sequence is shared verbatim with
+        // change_signature — it decides whether bytes hit disk, so it lives in one place.
+        var outcome = await SolutionChangeSafety.PreviewOrApplyAsync(
+            loaded, renamed, "rename", preview, force,
+            filesChanged => $"Renamed {oldName} to {newName} in {filesChanged} file(s).",
+            commitToMemory, ct).ConfigureAwait(false);
 
-        if (conflicts.Count > 0 && !force)
-        {
-            return new RenameSymbolResult(false, oldName, newName, Applied: false,
-                edits, filesChanged, conflicts,
-                $"Refused to apply: {conflicts.Count} new compiler error(s) would be introduced. " +
-                "Inspect Conflicts, or re-run with force=true to apply anyway.");
-        }
-
-        var write = await SolutionChangeWriter.WriteChangesToDiskAsync(
-            renamed, loaded.Solution, ct).ConfigureAwait(false);
-        if (!write.Written)
-        {
-            // Freshness refusal (finding 1): something edited these files after the solution
-            // snapshot was taken — writing snapshot-derived text would clobber those edits.
-            return new RenameSymbolResult(false, oldName, newName, Applied: false,
-                edits, filesChanged, conflicts,
-                $"Refused to apply: {write.StaleFiles.Count} file(s) changed on disk after the solution " +
-                $"snapshot was taken: {string.Join(", ", write.StaleFiles)}. No files were written. " +
-                "Run rebuild_solution and retry.");
-        }
-
-        var message = $"Renamed {oldName} to {newName} in {filesChanged} file(s).";
-        // Post-write commit: make the in-memory snapshot reflect the new text immediately instead
-        // of waiting out the file watcher's debounce window. Shared with apply_code_action, and
-        // like it, no outcome here — cancellation included — may fail the rename: the files are
-        // already renamed on disk, so reporting failure would misdescribe what happened.
-        var commitWarning = await SolutionChangeWriter.CommitAsync(commitToMemory, write, ct).ConfigureAwait(false);
-        if (commitWarning != null)
-            message += " Warning: " + commitWarning;
-
-        return new RenameSymbolResult(true, oldName, newName, Applied: true,
-            edits, filesChanged, conflicts, message);
+        return new RenameSymbolResult(
+            outcome.Success, oldName, newName, outcome.Applied,
+            outcome.Edits, outcome.FilesChanged, outcome.Conflicts, outcome.Message);
     }
 
     internal static ISymbol ResolveSingleTarget(SymbolResolver resolver, string symbol)

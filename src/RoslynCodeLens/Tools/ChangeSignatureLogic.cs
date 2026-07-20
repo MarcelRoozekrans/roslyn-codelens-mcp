@@ -57,59 +57,24 @@ public static class ChangeSignatureLogic
         }
 
         var updated = bridge.UpdatedSolution;
-        var edits = await SolutionChangeWriter.ExtractTextEditsAsync(
-            updated, loaded.Solution, ct).ConfigureAwait(false);
-        var conflicts = await SolutionChangeSafety.ComputeConflictsAsync(
-            loaded, updated, ct).ConfigureAwait(false);
         var cascadedTo = await FindCascadeSetAsync(loaded, target, ct).ConfigureAwait(false);
-        var filesChanged = edits.Select(e => e.FilePath)
-            .Distinct(StringComparer.OrdinalIgnoreCase).Count();
 
-        if (preview)
-        {
-            var previewMessage = conflicts.Count > 0
-                ? $"{conflicts.Count} conflict(s) detected — applying would introduce new compiler errors."
-                : "Preview only — no files written. Re-run with preview=false to apply.";
-            previewMessage = SolutionChangeSafety.DegradedPreviewWarning(
-                loaded, "signature change", previewMessage);
-            return new ChangeSignatureResult(true, resolvedName, oldSignature, newSignature,
-                Applied: false, edits, filesChanged, cascadedTo, conflicts, previewMessage);
-        }
+        // The preview/conflict-gate/write/freshness/commit sequence is shared verbatim with
+        // rename_symbol — it decides whether bytes hit disk, so it lives in one place.
+        var outcome = await SolutionChangeSafety.PreviewOrApplyAsync(
+            loaded, updated, "signature change", preview, force,
+            filesChanged =>
+            {
+                var applied = $"Changed {resolvedName} to {newSignature} in {filesChanged} file(s).";
+                return cascadedTo.Count > 0
+                    ? applied + $" Cascaded to {cascadedTo.Count} override(s)/implementation(s)."
+                    : applied;
+            },
+            commitToMemory, ct).ConfigureAwait(false);
 
-        if (conflicts.Count > 0 && !force)
-        {
-            return new ChangeSignatureResult(false, resolvedName, oldSignature, newSignature,
-                Applied: false, edits, filesChanged, cascadedTo, conflicts,
-                $"Refused to apply: {conflicts.Count} new compiler error(s) would be introduced. " +
-                "Inspect Conflicts, or re-run with force=true to apply anyway.");
-        }
-
-        var write = await SolutionChangeWriter.WriteChangesToDiskAsync(
-            updated, loaded.Solution, ct).ConfigureAwait(false);
-        if (!write.Written)
-        {
-            // Something edited these files after the snapshot was taken — writing snapshot-derived
-            // text would clobber those edits.
-            return new ChangeSignatureResult(false, resolvedName, oldSignature, newSignature,
-                Applied: false, edits, filesChanged, cascadedTo, conflicts,
-                $"Refused to apply: {write.StaleFiles.Count} file(s) changed on disk after the solution " +
-                $"snapshot was taken: {string.Join(", ", write.StaleFiles)}. No files were written. " +
-                "Run rebuild_solution and retry.");
-        }
-
-        var message = $"Changed {resolvedName} to {newSignature} in {filesChanged} file(s).";
-        if (cascadedTo.Count > 0)
-            message += $" Cascaded to {cascadedTo.Count} override(s)/implementation(s).";
-
-        // Post-write commit: the files are already changed on disk, so no outcome here —
-        // cancellation included — may fail the operation.
-        var commitWarning = await SolutionChangeWriter.CommitAsync(
-            commitToMemory, write, ct).ConfigureAwait(false);
-        if (commitWarning != null)
-            message += " Warning: " + commitWarning;
-
-        return new ChangeSignatureResult(true, resolvedName, oldSignature, newSignature,
-            Applied: true, edits, filesChanged, cascadedTo, conflicts, message);
+        return new ChangeSignatureResult(
+            outcome.Success, resolvedName, oldSignature, newSignature, outcome.Applied,
+            outcome.Edits, outcome.FilesChanged, cascadedTo, outcome.Conflicts, outcome.Message);
     }
 
     // ------------------------------------------------------------------ resolution

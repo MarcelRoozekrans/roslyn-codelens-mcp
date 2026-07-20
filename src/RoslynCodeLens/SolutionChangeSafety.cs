@@ -43,6 +43,87 @@ public static class SolutionChangeSafety
     }
 
     /// <summary>
+    /// What <see cref="PreviewOrApplyAsync"/> decided, in the vocabulary both rewriting tools
+    /// share. Each tool maps this onto its own result record; nothing here is tool-specific.
+    /// </summary>
+    public sealed record SolutionChangeOutcome(
+        bool Success,
+        bool Applied,
+        IReadOnlyList<TextEdit> Edits,
+        int FilesChanged,
+        IReadOnlyList<RenameConflict> Conflicts,
+        string Message);
+
+    /// <summary>
+    /// The single decision procedure for whether bytes hit disk, shared by rename_symbol and
+    /// change_signature: diff the change into edits, compute conflicts, and then either report a
+    /// preview, refuse over conflicts, refuse over a stale file, or write and commit.
+    /// <para>
+    /// This lives here rather than in each tool because these are the steps that decide whether a
+    /// user's files are modified. Two copies drift, and a drift in this sequence is the difference
+    /// between refusing to clobber a concurrent edit and clobbering it. Only the success sentence
+    /// varies per tool, which is what <paramref name="describeApplied"/> supplies;
+    /// <paramref name="operation"/> names the edit in prose ("rename", "signature change") for the
+    /// degraded-load warning.
+    /// </para>
+    /// </summary>
+    public static async Task<SolutionChangeOutcome> PreviewOrApplyAsync(
+        LoadedSolution loaded, Solution changed, string operation,
+        bool preview, bool force,
+        Func<int, string> describeApplied,
+        CommitWrittenDocuments? commitToMemory, CancellationToken ct)
+    {
+        var edits = await SolutionChangeWriter.ExtractTextEditsAsync(
+            changed, loaded.Solution, ct).ConfigureAwait(false);
+        var conflicts = await ComputeConflictsAsync(loaded, changed, ct).ConfigureAwait(false);
+        var filesChanged = edits.Select(e => e.FilePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+
+        if (preview)
+        {
+            var previewMessage = conflicts.Count > 0
+                ? $"{conflicts.Count} conflict(s) detected — applying would introduce new compiler errors."
+                : "Preview only — no files written. Re-run with preview=false to apply.";
+            previewMessage = DegradedPreviewWarning(loaded, operation, previewMessage);
+            return new SolutionChangeOutcome(true, false, edits, filesChanged, conflicts, previewMessage);
+        }
+
+        if (conflicts.Count > 0 && !force)
+        {
+            return new SolutionChangeOutcome(false, false, edits, filesChanged, conflicts,
+                $"Refused to apply: {conflicts.Count} new compiler error(s) would be introduced. " +
+                "Inspect Conflicts, or re-run with force=true to apply anyway.");
+        }
+
+        var write = await SolutionChangeWriter.WriteChangesToDiskAsync(
+            changed, loaded.Solution, ct).ConfigureAwait(false);
+        if (!write.Written)
+        {
+            // Freshness refusal: something edited these files after the solution snapshot was
+            // taken, so writing snapshot-derived text would clobber those edits. Deliberately NOT
+            // overridable by force — unlike conflicts, this is not a risk the caller can accept,
+            // because the text that would be written was computed from something else entirely.
+            return new SolutionChangeOutcome(false, false, edits, filesChanged, conflicts,
+                $"Refused to apply: {write.StaleFiles.Count} file(s) changed on disk after the solution " +
+                $"snapshot was taken: {string.Join(", ", write.StaleFiles)}. No files were written. " +
+                "Run rebuild_solution and retry.");
+        }
+
+        var message = describeApplied(filesChanged);
+
+        // Post-write commit: make the in-memory snapshot reflect the new text immediately instead
+        // of waiting out the file watcher's debounce window. No outcome here — cancellation
+        // included — may fail the operation: the files are already changed on disk, so reporting
+        // failure would misdescribe what happened.
+        var commitWarning = await SolutionChangeWriter.CommitAsync(
+            commitToMemory, write, ct).ConfigureAwait(false);
+        if (commitWarning != null)
+            message += " Warning: " + commitWarning;
+
+        return new SolutionChangeOutcome(true, true, edits, filesChanged, conflicts, message);
+    }
+
+    /// <summary>
     /// New compiler errors the changed solution would introduce, over the scan set
     /// (<see cref="ComputeScanSet"/>) and using the count-based delta in <see cref="DiffNewErrors"/>.
     /// </summary>
