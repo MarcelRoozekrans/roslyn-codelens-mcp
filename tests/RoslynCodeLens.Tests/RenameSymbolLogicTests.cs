@@ -369,7 +369,7 @@ public class RenameSymbolLogicTests
             new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
             CancellationToken.None);
 
-        var scanSet = RenameSymbolLogic.ComputeScanSet(loaded.Solution, renamed);
+        var scanSet = SolutionChangeSafety.ComputeScanSet(loaded.Solution, renamed);
         var libA = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibA", StringComparison.Ordinal)).Id;
         var libB = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibB", StringComparison.Ordinal)).Id;
 
@@ -418,10 +418,10 @@ public class RenameSymbolLogicTests
         // level with a synthetic suppressed diagnostic (Diagnostic.Create supports
         // isSuppressed directly).
         var suppressed = MakeError("CS9999", "File.cs", 3, suppressed: true);
-        Assert.Empty(RenameSymbolLogic.DiffNewErrors(before: [], after: [suppressed]));
+        Assert.Empty(SolutionChangeSafety.DiffNewErrors(before: [], after: [suppressed]));
 
         var unsuppressed = MakeError("CS9999", "File.cs", 3);
-        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before: [], after: [unsuppressed]));
+        var conflict = Assert.Single(SolutionChangeSafety.DiffNewErrors(before: [], after: [unsuppressed]));
         Assert.Equal("CS9999", conflict.Id);
         Assert.Equal(3, conflict.Line);
     }
@@ -432,7 +432,7 @@ public class RenameSymbolLogicTests
         var before = new[] { MakeError("CS0101", "Types.cs", 3) };
         var after = new[] { MakeError("CS0101", "Types.cs", 3), MakeError("CS0101", "Types.cs", 7) };
 
-        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before, after));
+        var conflict = Assert.Single(SolutionChangeSafety.DiffNewErrors(before, after));
         Assert.Equal(7, conflict.Line);
     }
 
