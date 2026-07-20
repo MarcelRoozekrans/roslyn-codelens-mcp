@@ -370,8 +370,6 @@ public static class ChangeSignatureLogic
                 new { name = operation.Name });
         }
 
-        // A type that doesn't resolve is still usable: Roslyn writes the literal type name with
-        // typeBinds:false rather than refusing (the caller may be adding a type it is about to write).
         var type = ResolveType(loaded, resolver, document, operation.Type);
         return new DesiredParameter(
             Existing: null,
@@ -402,7 +400,19 @@ public static class ChangeSignatureLogic
         ["string"] = SpecialType.System_String,
     };
 
-    private static ITypeSymbol? ResolveType(
+    /// <summary>
+    /// The added parameter's type, or a refusal. Both failure modes are explicit rather than
+    /// degrading to null:
+    /// <list type="bullet">
+    /// <item>More than one match — binding to an arbitrary candidate would give the parameter a
+    /// type the caller never named.</item>
+    /// <item>No match — <c>CSharpChangeSignatureService.CreateNewParameterSyntax</c> calls
+    /// <c>addedParameter.Type.GenerateTypeSyntax()</c> unconditionally, so a null type
+    /// NullReferenceExceptions inside Roslyn (verified) instead of being written literally. The
+    /// <c>typeBinds</c> flag does not gate that path.</item>
+    /// </list>
+    /// </summary>
+    private static ITypeSymbol ResolveType(
         LoadedSolution loaded, SymbolResolver resolver, Document document, string typeName)
     {
         var compilation = document.Project.Id is { } projectId
@@ -421,7 +431,26 @@ public static class ChangeSignatureLogic
         }
 
         var matches = resolver.FindNamedTypes(typeName);
-        return matches.Count == 1 ? matches[0] : null;
+        if (matches.Count > 1)
+        {
+            var candidates = matches.Select(t => t.ToDisplayString())
+                .OrderBy(s => s, StringComparer.Ordinal).ToList();
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"Type '{typeName}' is ambiguous — it matches {candidates.Count} types: "
+                    + string.Join(", ", candidates) + ". Use the fully qualified name.",
+                new { type = typeName, candidates });
+        }
+
+        if (matches.Count == 0)
+        {
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"Type '{typeName}' could not be resolved in this solution. Use the fully "
+                    + "qualified name, or add the type first — an unresolved type cannot be "
+                    + "written into a signature.",
+                new { type = typeName });
+        }
+
+        return matches[0];
     }
 
     // ------------------------------------------------------------------ cascade

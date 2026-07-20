@@ -19,7 +19,8 @@ public static class ChangeSignatureTool
                  "since the tool never guesses call-site semantics — with an optional " +
                  "`defaultValue` that instead makes the parameter optional and leaves existing " +
                  "calls untouched. Rejected as unsafe: an added name that is not a valid C# "
-                 + "identifier or collides with an existing parameter; moving or removing an "
+                 + "identifier or collides with an existing parameter; a `type` that does not "
+                 + "resolve, or resolves ambiguously (qualify it); moving or removing an "
                  + "extension method's `this` parameter (it must stay first); and any signature "
                  + "that would leave a surviving `params` array anywhere but last — add the "
                  + "parameter and reorder it before the `params` array, or remove that array. "

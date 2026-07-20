@@ -189,6 +189,81 @@ public class ChangeSignatureLogicTests
         Assert.Contains("Add(1, 0)", after, StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------- added-parameter types
+
+    private const string AmbiguousTypeSource = """
+        namespace Left { public class Thing { } }
+        namespace Right { public class Thing { } }
+        namespace SigDemo
+        {
+            public class Svc
+            {
+                public int Add(int a) => a;
+                public int Use() => Add(1);
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task Add_AmbiguousTypeName_ThrowsInvalidArgumentNamingTheCandidates()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", AmbiguousTypeSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "SigDemo.Svc.Add",
+                [new SignatureOperation("add", Name: "thing", Type: "Thing", CallSiteValue: "null")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("Left.Thing", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Right.Thing", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Add_QualifiedFormOfAnOtherwiseAmbiguousType_Resolves()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", AmbiguousTypeSource));
+
+        var result = await RunAsync(loaded, resolver, "SigDemo.Svc.Add",
+            [new SignatureOperation("add", Name: "thing", Type: "Left.Thing", CallSiteValue: "null")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.DoesNotContain("could not be resolved", result.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An unresolvable type CANNOT be written as a literal, contrary to what the original code
+    /// assumed: CSharpChangeSignatureService.CreateNewParameterSyntax calls
+    /// <c>addedParameter.Type.GenerateTypeSyntax()</c> unconditionally, so a null Type
+    /// NullReferenceExceptions deep inside Roslyn (surfacing as an opaque Internal error) rather
+    /// than degrading. It is therefore refused up front, with the reason stated.
+    /// </summary>
+    [Fact]
+    public async Task Add_UnresolvableType_ThrowsInvalidArgumentRatherThanCrashingRoslyn()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", OneParamSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("add", Name: "thing", Type: "Nowhere.NotYetWritten", CallSiteValue: "null")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("Nowhere.NotYetWritten", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be resolved", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Add_KeywordAliasType_Resolves()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", OneParamSource));
+
+        var result = await RunAsync(loaded, resolver, "Svc.Add",
+            [new SignatureOperation("add", Name: "count", Type: "int", CallSiteValue: "0")]);
+
+        Assert.True(result.Success, result.Message);
+        var after = ApplyEdits(OneParamSource, result.Edits, "Svc.cs");
+        Assert.Contains("int count", after, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- cascade
 
     [Fact]

@@ -82,3 +82,27 @@ Matrix on `RenameTestWorkspace`: each operation alone and combined; named argume
 ## Docs
 
 SKILL.md: Red Flags row ("add/remove/reorder a parameter" / "let me edit N call sites"), tool bullet next to `rename_symbol`, Quick Reference row, metadata-support row (source only). CLAUDE.md 63 → **64**. `tools/DocGen/Program.cs` categoryMap → `diagnostics` (alongside `rename_symbol`). README bullet. BACKLOG: mark shipped + Recently-shipped row.
+
+## Corrections found during pre-merge review
+
+Three assumptions in the sections above were verified against the running Roslyn build and did
+not hold. The implementation now guards each one:
+
+- **`ParameterConfiguration.Create` does not "preserve" the `this` and `params` slots — it
+  re-derives them by POSITION.** Index 0 of the updated list becomes the extension-method
+  receiver, and only the final element can be `params`. A reorder or remove is therefore capable
+  of rebinding `this` to a different parameter, or of stranding a `params` array mid-list (CS0231).
+  Both are refused before the bridge is reached.
+- **An unresolved added-parameter type is not written literally.**
+  `CSharpChangeSignatureService.CreateNewParameterSyntax` calls
+  `addedParameter.Type.GenerateTypeSyntax()` unconditionally; the `typeBinds` flag does not gate
+  that path, so a null `ITypeSymbol` NullReferenceExceptions inside Roslyn. An unresolvable — or
+  ambiguous — `type` is now an `InvalidArgument` refusal.
+- **`CascadedTo` must be computed from the ROOT of the hierarchy, not from the target.** Roslyn
+  cascades across the whole override/implementation set, so a target that is itself a derived
+  override or an interface implementation under-reported its blast radius when the walk only went
+  downward.
+
+`InvalidArgument` accordingly also covers: an added name that is not a valid C# identifier or
+collides with an existing parameter, a `type` that does not resolve or is ambiguous, displacing or
+removing an extension receiver, and leaving a surviving `params` array anywhere but last.
