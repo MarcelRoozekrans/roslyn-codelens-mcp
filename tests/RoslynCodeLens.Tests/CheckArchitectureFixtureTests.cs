@@ -1,3 +1,4 @@
+using System.Text.Json;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Tests.Fixtures;
 using RoslynCodeLens.Tools;
@@ -17,9 +18,17 @@ public class CheckArchitectureFixtureTests
     private IReadOnlyList<ArchitectureViolation> Run(IReadOnlyList<ArchitectureRule> rules, string scope = "namespace")
         => CheckArchitectureLogic.Execute(_fixture.Loaded, _fixture.Resolver, rules, scope, maxSitesPerViolation: 5);
 
+    /// <summary>
+    /// XUnitFixture does not touch TestLib2. The control assertion is what makes this a test:
+    /// swap TestLib2 for TestLib — a namespace the same source really does reference — and the
+    /// same rule shape fires, so emptiness above cannot come from a walk that found nothing.
+    /// </summary>
     [Fact]
     public void ForbidARelationshipTheSolutionDoesNotHave_IsClean()
-        => Assert.Empty(Run([new ArchitectureRule("forbid", "XUnitFixture", ["TestLib2.*"])]));
+    {
+        Assert.Empty(Run([new ArchitectureRule("forbid", "XUnitFixture", ["TestLib2.*"])]));
+        Assert.NotEmpty(Run([new ArchitectureRule("forbid", "XUnitFixture", ["TestLib.*"])]));
+    }
 
     [Fact]
     public void AllowOnlyWithAnImplausibleAllowList_CatchesTheRealDependency()
@@ -56,8 +65,17 @@ public class CheckArchitectureFixtureTests
 
         var result = CheckArchitectureTool.BuildResult(raw, rules, limit: 100);
 
+        Assert.NotEmpty(raw);
         Assert.Equal(raw.Count, result.TotalCount);
         Assert.False(result.Truncated);
         Assert.NotNull(result.Summary);
+
+        // The envelope must actually describe the findings, not merely exist.
+        using var summary = JsonDocument.Parse(JsonSerializer.Serialize(result.Summary));
+        Assert.Equal(1, summary.RootElement.GetProperty("rulesEvaluated").GetInt32());
+        Assert.Equal(
+            raw.Sum(v => v.ReferenceCount),
+            summary.RootElement.GetProperty("totalReferences").GetInt32());
+        Assert.Single(summary.RootElement.GetProperty("byRule").EnumerateObject());
     }
 }

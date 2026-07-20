@@ -60,10 +60,17 @@ public class CheckArchitectureLogicTests
         Assert.Contains("Order", site.TargetSymbol, StringComparison.Ordinal);
     }
 
-    // 2
+    // 2 — Domain does not reference Infrastructure. The second assertion is the control: the
+    // same fixture DOES produce a violation the other way round, so this test cannot pass just
+    // because Execute returned nothing.
     [Fact]
     public void Forbid_Satisfied()
-        => Assert.Empty(Run(Layered(), [Forbid("Demo.Domain.*", "Demo.Infrastructure.*")]));
+    {
+        var workspace = Layered();
+
+        Assert.Empty(Run(workspace, [Forbid("Demo.Domain.*", "Demo.Infrastructure.*")]));
+        Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+    }
 
     // 3
     [Fact]
@@ -76,10 +83,15 @@ public class CheckArchitectureLogicTests
         Assert.Equal("Demo.Domain", violation.TargetScope);
     }
 
-    // 4
+    // 4 — with the control: drop Demo.Domain from the allow-list and the same fixture fires.
     [Fact]
     public void AllowOnly_SatisfiedWhenListed()
-        => Assert.Empty(Run(Layered(), [AllowOnly("Demo.Infrastructure.*", "Demo.Domain.*")]));
+    {
+        var workspace = Layered();
+
+        Assert.Empty(Run(workspace, [AllowOnly("Demo.Infrastructure.*", "Demo.Domain.*")]));
+        Assert.Single(Run(workspace, [AllowOnly("Demo.Infrastructure.*", "Demo.Shared.*")]));
+    }
 
     // 5 — THE key semantic: allowOnly considers only solution-internal targets.
     [Fact]
@@ -92,6 +104,10 @@ public class CheckArchitectureLogicTests
              """));
 
         Assert.Empty(Run(workspace, [AllowOnly("Demo.Domain.*", "Demo.Shared.*")]));
+
+        // Control: the reference IS there and IS reachable — a `forbid` naming it fires on the
+        // very same fixture, so the emptiness above is the metadata rule, not a dead walk.
+        Assert.Single(Run(workspace, [Forbid("Demo.Domain.*", "System.Collections.Generic")]));
     }
 
     // 6 — the contrast: forbid DOES evaluate metadata targets.
@@ -124,6 +140,22 @@ public class CheckArchitectureLogicTests
 
         Assert.Empty(Run(workspace, [Forbid("Demo.Domain.*", "Demo.Domain.*")]));
         Assert.Empty(Run(workspace, [AllowOnly("Demo.Domain.*", "Demo.Nothing.AtAll")]));
+
+        // Control: the OrderService -> Order reference is real and visible. Put the two types in
+        // different namespaces and the identical rules fire — what was suppressed above is the
+        // self-reference, not the walk.
+        var split = RenameTestWorkspace.Create(
+            ("Order.cs", """
+             namespace Demo.Domain;
+             public class Order { public int Id; }
+             """),
+            ("Service.cs", """
+             namespace Demo.Services;
+             public class OrderService { public Demo.Domain.Order? Current; }
+             """));
+
+        Assert.Single(Run(split, [Forbid("Demo.Services.*", "Demo.Domain.*")]));
+        Assert.Single(Run(split, [AllowOnly("Demo.Services.*", "Demo.Nothing.AtAll")]));
     }
 
     // 8 — the test that justifies a semantic tool over the usings-based one. Do not weaken.
@@ -163,6 +195,23 @@ public class CheckArchitectureLogicTests
         // `*` so the global namespace the using lives in is in scope: without the fix this
         // reports a violation whose SourceScope is "" — an accusation against nobody.
         Assert.Empty(Run(workspace, [Forbid("*", "Demo.Domain.*")]));
+
+        // Control: add one real use of what the using imports and exactly one violation appears,
+        // attributed to the DECLARING namespace rather than the global one.
+        var used = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Constants.cs", """
+                namespace Demo.Domain;
+                public static class Constants { public const int Zero = 0; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                using static Demo.Domain.Constants;
+                namespace Demo.Infrastructure;
+                public class Repo { public int Id = Zero; }
+                """) }));
+
+        var violation = Assert.Single(Run(used, [Forbid("*", "Demo.Domain.*")]));
+        Assert.Equal("Demo.Infrastructure", violation.SourceScope);
+        Assert.Equal(1, violation.ReferenceCount);
     }
 
     // 8c — an in-namespace using alias must not double-count the one real usage.
@@ -268,6 +317,20 @@ public class CheckArchitectureLogicTests
                 """) }));
 
         Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        // Control: the identical file under a non-generated name DOES violate, so the emptiness
+        // above is the generated-source skip and nothing else.
+        var handWritten = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? Load() => null; }
+                """) }));
+
+        Assert.Single(Run(handWritten, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
     }
 
     // 11b — the target side. allowOnly's target set is open-ended, so generator output (regex
@@ -279,6 +342,20 @@ public class CheckArchitectureLogicTests
         var workspace = GeneratedTargetWorkspace();
 
         Assert.Empty(Run(workspace, [AllowOnly("Demo.Infrastructure.*", "Demo.Shared.*")]));
+
+        // Control: an identical allowOnly over the same fixture with the target hand-written
+        // DOES fire, so the emptiness above is the generated-target rule, not a dead walk.
+        var handWritten = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? A; }
+                """) }));
+
+        Assert.Single(Run(handWritten, [AllowOnly("Demo.Infrastructure.*", "Demo.Shared.*")]));
     }
 
     // 11c — the contrast, exactly as with metadata targets: an explicit `forbid` names its
@@ -414,6 +491,41 @@ public class CheckArchitectureLogicTests
 
         Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain")]));
         Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+    }
+
+    // 12b — the FROM side, end to end. Nothing else pins that an exact `from` is exact: every
+    // other from-pattern in this file is a wildcard, so a prefix-matching bug would go unseen.
+    // "Demo.Infra" must not match the source scope "Demo.Infrastructure".
+    [Fact]
+    public void ExactFromPattern_DoesNotPrefixMatchALongerSourceScope()
+    {
+        var workspace = Layered();
+
+        Assert.Empty(Run(workspace, [Forbid("Demo.Infra", "Demo.Domain.*")]));
+
+        var violation = Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure", "Demo.Domain.*")]));
+        Assert.Equal("Demo.Infrastructure", violation.SourceScope);
+    }
+
+    // 12c — and the from side must not match a CHILD of an exact pattern either, while the
+    // wildcard form does.
+    [Fact]
+    public void ExactFromPattern_DoesNotMatchChildScopes()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure.Persistence;
+                public class Repo { public Demo.Domain.Order? A; }
+                """) }));
+
+        Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure", "Demo.Domain.*")]));
+
+        var violation = Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+        Assert.Equal("Demo.Infrastructure.Persistence", violation.SourceScope);
     }
 
     // 13 — error cases
