@@ -102,6 +102,9 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Will this break consumers?" / "Show me breaking changes vs the previous release" / "Diff this build's API against baseline" | `find_breaking_changes` |
 | "Are there async bugs?" / "Find sync-over-async" / "Are we using `.Result` anywhere?" | `find_async_violations` |
 | "Are there resource leaks?" / "Find missing `using`" / "Is this disposable handled?" | `find_disposable_misuse` |
+| "What exceptions can escape this method?" / "Is this call safe to make?" / "Do I need a try here?" | `get_exception_flow` |
+| "Where is this exception thrown?" / "Who raises `TimeoutException`?" | `find_throw_sites` |
+| "Who catches this?" / "Is anything swallowing exceptions?" / "Find empty catch blocks" | `find_catch_blocks` |
 | "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
 | "Where did this exception come from?" / user pastes a stack trace / "What method is `<M>d__12.MoveNext`?" | `resolve_stack_trace` |
 | "Let me `Read` the file to see this method's body" / "Show me the source of these 5 methods" | `get_method_source` |
@@ -230,6 +233,14 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - `find_naming_violations` — .NET naming conventions.
 - `find_async_violations` — Detects sync-over-async (`.Result`/`.Wait()`/`GetAwaiter().GetResult()`), `async void` outside event handlers, missing awaits in async methods, and fire-and-forget tasks. Severity error/warning per violation. Static analysis; no runtime data.
 - `find_disposable_misuse` — Detects `IDisposable`/`IAsyncDisposable` instances not wrapped in `using`/`await using`/returned/assigned-to-field-or-out-parameter (warning), and bare-expression-statement discards of a disposable creator/factory (error). Static analysis; no runtime data.
+
+### Exception analysis
+
+- `get_exception_flow` — What can escape a method. Walks callees to `maxDepth` (default 3, cycle-safe) collecting explicit throws, propagates each one up the call chain through every enclosing `try`/`catch`, and reports whether it still escapes the method you asked about — with the propagation `path`, `depth`, and where it was caught. `origin` is `thrown` (a real throw site) or `documented` (an `exception` XML tag on a metadata callee, e.g. the BCL — set `includeDocumented: false` to drop those). Filtered `catch` clauses are skipped rather than accepted, because a `when` filter may decline at runtime — the search continues to the next clause and outward. `hasFilter` describes the reported outcome: it is true only when the exception escaped past a filtered clause that might have caught it, so `escapes: false` always comes with `hasFilter: false`.
+- `find_throw_sites` — Every place an exception type is thrown, solution-wide; `includeDerived` also matches subclasses. Rethrows (`throw;`) are flagged and resolved to the enclosing catch's type. Unlike `get_exception_flow`, this counts throws inside lambdas and local functions — they are throw sites, they just don't escape at their enclosing method's boundary.
+- `find_catch_blocks` — Every `catch` for a type; `includeBaseClauses` also surfaces `catch (Exception)` and bare `catch`. Each item carries `hasFilter`, `rethrows`, and `isEmpty`, so "what is silently swallowing this?" is one call (`isEmpty: true, rethrows: false`).
+
+**Limits (all three):** static analysis of explicit `throw` only — no runtime-implicit exceptions (null deref, division by zero, OOM), no reflection-invoked throws. Virtual/interface calls follow the declared symbol, not runtime overrides. `get_exception_flow` explores a given callee via the shallowest call path it finds, so a method reached from two call sites at the same depth is analysed via one of them. **Async is modelled as synchronous:** a `throw` inside an `async` method is reported as propagating at the call site, so an enclosing `try` counts as catching it. That is right for `await`ed calls and wrong for fire-and-forget ones (`_ = M();`), where the exception actually surfaces later on another stack and no enclosing `try` sees it.
 - `find_large_classes` — oversized types.
 - `find_god_objects` — Types crossing all 3 size thresholds (lines/members/fields) AND a coupling threshold (incoming or outgoing namespace count). Sharper than raw size: a large but isolated class isn't flagged; a 200-line class with 15 callers across many namespaces is.
 - `find_circular_dependencies` — project/namespace cycles.
@@ -341,6 +352,9 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `find_naming_violations` | "Check naming conventions" |
 | `find_async_violations` | "Are there async bugs?" / "Find sync-over-async" |
 | `find_disposable_misuse` | "Are there resource leaks?" / "Find missing `using`" |
+| `get_exception_flow` | "What can escape this method?" / "Where does this exception get caught?" |
+| `find_throw_sites` | "Where is this exception type thrown?" |
+| `find_catch_blocks` | "Who catches this?" / "What's swallowing exceptions?" |
 | `find_large_classes` | "Find classes that need splitting" |
 | `find_god_objects` | "Which classes are doing too much?" |
 | `find_circular_dependencies` | "Any circular dependencies?" |
@@ -421,6 +435,9 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `find_reflection_usage` | No — source only | | |
 | `find_async_violations` | No — source only | | |
 | `find_disposable_misuse` | No — source only | | |
+| `get_exception_flow` | Partial — source methods are analysed; metadata callees contribute their documented exceptions | Documented items are the library's XML docs, not analysis | `includeDocumented: false` to exclude |
+| `find_throw_sites` | Source scan — the exception *type* may be a metadata type | Only explicit `throw`, never runtime-implicit exceptions | |
+| `find_catch_blocks` | Source scan — the exception *type* may be a metadata type | | |
 | `find_obsolete_usage` | No — source only — but `[Obsolete]` source/metadata attribute type both detected | | |
 | `find_god_objects` | No — source only | | |
 | `find_breaking_changes` | Partial — current side is source; baseline can be a `.dll` from metadata | | |

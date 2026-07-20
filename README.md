@@ -37,6 +37,9 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **get_public_api_surface** — Enumerate every public/protected type and member in production projects; flat, deterministically-sorted list suitable for API review or breaking-change baselines.
 - **find_breaking_changes** — Diff the current API against a baseline JSON or DLL; report removed members, kind changes, and accessibility changes with Breaking/NonBreaking severity.
 - **find_reflection_usage** — Detect dynamic/reflection-based usage
+- **get_exception_flow** — What exceptions can escape a method: walks callees depth-bounded, propagates each throw up through every enclosing try/catch, and reports what still escapes with its propagation path; metadata callees contribute their documented exceptions
+- **find_throw_sites** — Every place an exception type is thrown, optionally including derived types; rethrows flagged
+- **find_catch_blocks** — Every catch for a type, optionally via base clauses; flags filtered, rethrowing, and empty (swallowing) handlers
 - **find_references** — Find all references to any symbol (types, methods, properties, fields, events), each tagged with a kind (`read`, `write`, `readwrite`, `invocation`, `method_group`, `object_creation`, `cast`, `type_check`, `typeof`, `base_type`, `type_constraint`, `type_argument`, `declaration`, `attribute`, `nameof`, `xml_doc`) and reported per occurrence with a column; filter server-side with `kinds` (e.g. `["write","readwrite"]` for mutation sites)
 - **go_to_definition** — Find the source file and line where a symbol is defined
 - **get_method_source** — Full declaration source (XML docs, attributes, signature, body — original formatting) for one or many members by name in a single call: methods (all overloads), constructors, properties, indexers, fields, events; per-item statuses (`ok`/`notFound`/`ambiguous`/`metadata`/`unsupportedKind`) so a batch never fails wholesale
