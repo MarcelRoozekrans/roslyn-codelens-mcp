@@ -518,6 +518,41 @@ public class RenameSymbolLogicTests
         }
     }
 
+    /// <summary>
+    /// The invariant rename shares with change_signature: force overrides RISK judgements
+    /// (conflicts, a degraded load), never the freshness check. The text that would be written was
+    /// computed from a snapshot that no longer describes the file, so caller intent cannot make
+    /// writing it safe.
+    /// </summary>
+    [Fact]
+    public async Task Apply_DiskChangedSinceSnapshot_ForceStillRefusesAndWritesNothing()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-force-stale-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var drifted = BasicSource + "\n// concurrent edit\n";
+            await File.WriteAllTextAsync(path, drifted);
+
+            var commitCalls = 0;
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false, force: true,
+                commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+            Assert.False(result.Success);
+            Assert.False(result.Applied);
+            Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+            Assert.Equal(drifted, await File.ReadAllTextAsync(path));
+            Assert.Equal(0, commitCalls);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task Apply_InvokesCommitHookWithExactlyTheChangedDocuments()
     {

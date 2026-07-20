@@ -890,6 +890,95 @@ public class ChangeSignatureLogicTests
         }
     }
 
+    // ---------------------------------------------------------------- force
+
+    /// <summary>
+    /// force=true is the conflict override: the caller has inspected the reported errors and
+    /// wants the change anyway.
+    /// </summary>
+    [Fact]
+    public async Task Conflicts_Apply_ForceWrites()
+    {
+        var dir = Directory.CreateTempSubdirectory("sig-force-conflict-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Svc.cs");
+            await File.WriteAllTextAsync(path, BodyUsesParamSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BodyUsesParamSource));
+
+            var result = await RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("remove", Parameter: "b")], preview: false, force: true);
+
+            Assert.True(result.Success, result.Message);
+            Assert.True(result.Applied);
+            Assert.NotEmpty(result.Conflicts);   // reported, but not refused
+            Assert.Contains("Add(int a)", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Degraded_Apply_ForceWrites()
+    {
+        var dir = Directory.CreateTempSubdirectory("sig-force-degraded-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Svc.cs");
+            await File.WriteAllTextAsync(path, TwoParamSource);
+            var (loaded, resolver) = Degrade(RenameTestWorkspace.Create((path, TwoParamSource)));
+
+            var result = await RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("remove", Parameter: "b")], preview: false, force: true);
+
+            Assert.True(result.Success, result.Message);
+            Assert.True(result.Applied);
+            Assert.Contains("Add(int a)", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// force overrides RISK judgements (conflicts, a degraded load) — never the freshness check.
+    /// That one guards against clobbering an edit the snapshot never saw, which no amount of
+    /// caller intent makes safe, because the text that would be written was computed from
+    /// something else entirely.
+    /// </summary>
+    [Fact]
+    public async Task Apply_DiskChangedSinceSnapshot_ForceStillRefusesAndWritesNothing()
+    {
+        var dir = Directory.CreateTempSubdirectory("sig-force-stale-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Svc.cs");
+            await File.WriteAllTextAsync(path, TwoParamSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, TwoParamSource));
+
+            var drifted = TwoParamSource + "\n// concurrent edit\n";
+            await File.WriteAllTextAsync(path, drifted);
+
+            var commitCalls = 0;
+            var result = await RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("remove", Parameter: "b")], preview: false, force: true,
+                commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+            Assert.False(result.Success);
+            Assert.False(result.Applied);
+            Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+            Assert.Equal(drifted, await File.ReadAllTextAsync(path));
+            Assert.Equal(0, commitCalls);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     // ---------------------------------------------------------------- Roslyn's own refusal
 
     /// <summary>
