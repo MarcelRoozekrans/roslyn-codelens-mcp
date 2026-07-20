@@ -43,23 +43,30 @@ public static class CheckArchitectureLogic
         string scope = NamespaceScope,
         int maxSitesPerViolation = 5,
         CancellationToken cancellationToken = default)
+        => ExecuteCore(loaded, resolver, rules, scope, maxSitesPerViolation, null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="Execute"/>, with a seam for tests to COUNT semantic models.
+    /// </summary>
+    /// <param name="modelFactory">
+    /// Test observability seam ONLY; <see cref="Execute"/> passes null. The pre-model scope filter
+    /// below is this tool's central performance claim, and the only evidence that it is still doing
+    /// anything is how many models a scan builds — a number nothing else exposes.
+    /// </param>
+    internal static IReadOnlyList<ArchitectureViolation> ExecuteCore(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        IReadOnlyList<ArchitectureRule> rules,
+        string scope,
+        int maxSitesPerViolation,
+        Func<Compilation, SyntaxTree, SemanticModel>? modelFactory,
+        CancellationToken cancellationToken = default)
     {
         Validate(rules, scope, maxSitesPerViolation);
 
         var byNamespace = string.Equals(scope, NamespaceScope, StringComparison.Ordinal);
         var groups = new Dictionary<(int RuleIndex, string Source, string Target), Accumulator>();
 
-        // A linked or multi-targeted file appears in several compilations; walking it once keeps
-        // reference counts honest and project attribution deterministic (see FindThrowSitesLogic).
-        //
-        // The key is SCOPE-AWARE, because "the same work twice" means different things per scope.
-        // Under namespace scope a linked file declares the same namespace in every compilation, so
-        // walking it twice would double-count one written reference — dedupe by path alone. Under
-        // project scope its source scope DIFFERS per compilation, so a path-only key would credit
-        // the file to whichever project was enumerated first and silently drop the other project's
-        // violations entirely. Including the project name still collapses multi-targeting, where
-        // the several compilations share one project name.
-        var walkedTrees = new HashSet<(string Scope, string Identity)>();
         var generatedTargets = new Dictionary<string, bool>(StringComparer.Ordinal);
         var solutionScopeNames = SolutionScopeNames(loaded.Solution);
 
@@ -68,114 +75,115 @@ public static class CheckArchitectureLogic
         // in the solution to answer a question no rule asked.
         var hasAllowOnly = rules.Any(r => string.Equals(r.Kind, AllowOnlyKind, StringComparison.Ordinal));
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var projectName = resolver.GetProjectName(projectId);
+        // Source-side filtering, part 1: under project scope a whole compilation is either in play
+        // or not, so the scanner is told to decide before touching its trees.
+        //
+        // The dedupe key is SCOPE-AWARE, because "the same work twice" means different things per
+        // scope. Under namespace scope a linked file declares the same namespace in every
+        // compilation, so walking it twice would double-count one written reference — dedupe by
+        // identity alone. Under project scope its source scope DIFFERS per compilation, so an
+        // undiscriminated key would credit the file to whichever project was enumerated first and
+        // silently drop the other project's violations entirely. Discriminating by project name
+        // still collapses multi-targeting, where the several compilations share one project name.
+        var scans = SolutionScanner.EnumerateTrees(
+            loaded,
+            resolver,
+            projectFilter: byNamespace
+                ? null
+                : projectName => rules.Any(r => ScopePattern.Matches(r.From, projectName)),
+            scopeDiscriminator: byNamespace ? null : (projectName, _) => projectName,
+            modelFactory: modelFactory,
+            cancellationToken: cancellationToken);
 
-            // Source-side filtering, part 1: under project scope a whole compilation is either in
-            // play or not, so decide before touching its trees.
-            if (!byNamespace && !rules.Any(r => ScopePattern.Matches(r.From, projectName)))
+        foreach (var scan in scans)
+        {
+            var projectName = scan.ProjectName;
+
+            // Source-side filtering, part 2: if none of the scopes this tree declares can match
+            // any rule's From, the tree cannot produce a violation — skip it BEFORE creating a
+            // semantic model. This is what keeps cost proportional to the rules written rather
+            // than to solution size, and is why ScanTree hands over a model FACTORY.
+            if (byNamespace && !DeclaredScopes(scan.Root).Any(s => rules.Any(r => ScopePattern.Matches(r.From, s))))
                 continue;
 
-            foreach (var tree in compilation.SyntaxTrees)
+            var model = scan.SemanticModel();
+
+            // `using` directives are deliberately NOT walked. A using is not itself a
+            // dependency — it is a name-resolution convenience — and counting it breaks the
+            // tool twice over: a file-level using is attributed to the GLOBAL namespace (an
+            // accusation against a scope that wrote no code), and an in-namespace using or
+            // alias double-counts the single real usage below it. Skipping them is also what
+            // makes the tool's own promise true: "an unused `using` is not reported".
+            var walkedNodes = 0;
+            foreach (var name in scan.Root
+                         .DescendantNodes(descendIntoChildren: n => n is not UsingDirectiveSyntax)
+                         .OfType<SimpleNameSyntax>())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                // One generated or machine-written file can hold hundreds of thousands of name
+                // nodes, so a token checked only per tree leaves the caller unable to cancel
+                // partway through one. Every 1024 nodes is far below human latency and costs
+                // nothing measurable.
+                if ((++walkedNodes & 0x3FF) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                var target = ResolveTargetType(name, model);
+                if (target is null)
                     continue;
 
-                if (!walkedTrees.Add((byNamespace ? string.Empty : projectName, TreeIdentity(tree, cancellationToken))))
+                var sourceScope = byNamespace ? EnclosingNamespace(name) : projectName;
+                var targetScope = byNamespace
+                    ? NamespaceOf(target)
+                    : TargetProject(target, resolver);
+
+                // Self-reference: never a violation, under either rule kind.
+                if (string.Equals(sourceScope, targetScope, StringComparison.Ordinal))
                     continue;
 
-                cancellationToken.ThrowIfCancellationRequested();
+                // allowOnly's target set is open-ended, so it only evaluates targets the
+                // author can actually act on: solution-internal, and not pure generator
+                // output. `forbid` names its target explicitly and evaluates everything.
+                var eligibleForAllowOnly = hasAllowOnly
+                    && IsSolutionInternal(target, solutionScopeNames)
+                    && !IsGeneratedOnly(target, generatedTargets);
 
-                var root = tree.GetRoot(cancellationToken);
-
-                // Source-side filtering, part 2: if none of the scopes this tree declares can match
-                // any rule's From, the tree cannot produce a violation — skip it BEFORE creating a
-                // semantic model. This is what keeps cost proportional to the rules written rather
-                // than to solution size.
-                if (byNamespace && !DeclaredScopes(root).Any(s => rules.Any(r => ScopePattern.Matches(r.From, s))))
-                    continue;
-
-                var model = compilation.GetSemanticModel(tree);
-
-                // `using` directives are deliberately NOT walked. A using is not itself a
-                // dependency — it is a name-resolution convenience — and counting it breaks the
-                // tool twice over: a file-level using is attributed to the GLOBAL namespace (an
-                // accusation against a scope that wrote no code), and an in-namespace using or
-                // alias double-counts the single real usage below it. Skipping them is also what
-                // makes the tool's own promise true: "an unused `using` is not reported".
-                var walkedNodes = 0;
-                foreach (var name in root
-                             .DescendantNodes(descendIntoChildren: n => n is not UsingDirectiveSyntax)
-                             .OfType<SimpleNameSyntax>())
+                for (var i = 0; i < rules.Count; i++)
                 {
-                    // One generated or machine-written file can hold hundreds of thousands of name
-                    // nodes, so a token checked only per tree leaves the caller unable to cancel
-                    // partway through one. Every 1024 nodes is far below human latency and costs
-                    // nothing measurable.
-                    if ((++walkedNodes & 0x3FF) == 0)
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                    var target = ResolveTargetType(name, model);
-                    if (target is null)
+                    var rule = rules[i];
+                    if (!ScopePattern.Matches(rule.From, sourceScope))
                         continue;
 
-                    var sourceScope = byNamespace ? EnclosingNamespace(name) : projectName;
-                    var targetScope = byNamespace
-                        ? NamespaceOf(target)
-                        : TargetProject(target, resolver);
-
-                    // Self-reference: never a violation, under either rule kind.
-                    if (string.Equals(sourceScope, targetScope, StringComparison.Ordinal))
-                        continue;
-
-                    // allowOnly's target set is open-ended, so it only evaluates targets the
-                    // author can actually act on: solution-internal, and not pure generator
-                    // output. `forbid` names its target explicitly and evaluates everything.
-                    var eligibleForAllowOnly = hasAllowOnly
-                        && IsSolutionInternal(target, solutionScopeNames)
-                        && !IsGeneratedOnly(target, generatedTargets);
-
-                    for (var i = 0; i < rules.Count; i++)
+                    string? toPattern;
+                    if (string.Equals(rule.Kind, ForbidKind, StringComparison.Ordinal))
                     {
-                        var rule = rules[i];
-                        if (!ScopePattern.Matches(rule.From, sourceScope))
+                        toPattern = rule.To.FirstOrDefault(p => ScopePattern.Matches(p, targetScope));
+                        if (toPattern is null)
                             continue;
+                    }
+                    else
+                    {
+                        // allowOnly ignores everything outside the solution.
+                        if (!eligibleForAllowOnly || rule.To.Any(p => ScopePattern.Matches(p, targetScope)))
+                            continue;
+                        toPattern = string.Join(", ", rule.To);
+                    }
 
-                        string? toPattern;
-                        if (string.Equals(rule.Kind, ForbidKind, StringComparison.Ordinal))
-                        {
-                            toPattern = rule.To.FirstOrDefault(p => ScopePattern.Matches(p, targetScope));
-                            if (toPattern is null)
-                                continue;
-                        }
-                        else
-                        {
-                            // allowOnly ignores everything outside the solution.
-                            if (!eligibleForAllowOnly || rule.To.Any(p => ScopePattern.Matches(p, targetScope)))
-                                continue;
-                            toPattern = string.Join(", ", rule.To);
-                        }
+                    var key = (i, sourceScope, targetScope);
+                    if (!groups.TryGetValue(key, out var accumulator))
+                    {
+                        accumulator = new Accumulator { ToPattern = toPattern };
+                        groups[key] = accumulator;
+                    }
 
-                        var key = (i, sourceScope, targetScope);
-                        if (!groups.TryGetValue(key, out var accumulator))
-                        {
-                            accumulator = new Accumulator { ToPattern = toPattern };
-                            groups[key] = accumulator;
-                        }
-
-                        accumulator.Count++;
-                        if (accumulator.Sites.Count < maxSitesPerViolation)
-                        {
-                            var position = name.GetLocation().GetLineSpan();
-                            accumulator.Sites.Add(new ViolationSite(
-                                File: position.Path,
-                                Line: position.StartLinePosition.Line + 1,
-                                Column: position.StartLinePosition.Character + 1,
-                                SourceSymbol: ExceptionQueries.DescribeContainingMember(name, model),
-                                TargetSymbol: target.ToDisplayString()));
-                        }
+                    accumulator.Count++;
+                    if (accumulator.Sites.Count < maxSitesPerViolation)
+                    {
+                        var position = name.GetLocation().GetLineSpan();
+                        accumulator.Sites.Add(new ViolationSite(
+                            File: position.Path,
+                            Line: position.StartLinePosition.Line + 1,
+                            Column: position.StartLinePosition.Character + 1,
+                            SourceSymbol: ExceptionQueries.DescribeContainingMember(name, model),
+                            TargetSymbol: target.ToDisplayString()));
                     }
                 }
             }
@@ -388,17 +396,6 @@ public static class CheckArchitectureLogic
 
         return target;
     }
-
-    /// <summary>
-    /// A stable per-tree key for the walk dedupe. File path when there is one; otherwise a hash of
-    /// the tree's own text, because a pathless tree (in-memory documents, some generators) is a
-    /// different object in every compilation and would otherwise be walked — and counted — once per
-    /// compilation it appears in.
-    /// </summary>
-    private static string TreeIdentity(SyntaxTree tree, CancellationToken cancellationToken)
-        => string.IsNullOrEmpty(tree.FilePath)
-            ? "\0content:" + Convert.ToBase64String(tree.GetText(cancellationToken).GetContentHash().AsSpan())
-            : tree.FilePath;
 
     private static ITypeSymbol? TypeOf(ISymbol? symbol)
     {

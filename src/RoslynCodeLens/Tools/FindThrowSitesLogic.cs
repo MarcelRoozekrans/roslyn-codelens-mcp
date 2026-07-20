@@ -33,63 +33,51 @@ public static class FindThrowSitesLogic
         // A linked file belongs to several projects and therefore several compilations; the same
         // physical throw would otherwise be reported once per compilation.
         var seen = new HashSet<(string File, int Line, int Column)>();
-        // A multi-targeted project compiles the same file once per target framework. Skipping
-        // repeats here — before the walk and the binding, not after — means the work is done once
-        // instead of N times, and it also makes `Project` attribution deterministic: the first
-        // compilation to reach a file is the one that gets to name it, consistently.
-        var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, generated ones skipped, project attribution
+        // deterministic — is SolutionScanner's job; this loop only asks what each node is.
+        foreach (var scan in SolutionScanner.EnumerateTrees(loaded, resolver, cancellationToken: cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var model = scan.SemanticModel();
 
-            var projectName = resolver.GetProjectName(projectId);
-
-            foreach (var tree in compilation.SyntaxTrees)
+            var walkedNodes = 0;
+            foreach (var node in scan.Root.DescendantNodes())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                // One machine-written file can hold hundreds of thousands of nodes, so a token
+                // checked only per tree leaves the caller unable to cancel partway through one.
+                if ((++walkedNodes & 0x3FF) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                if (ExceptionAnalyzer.TryGetThrowSite(node, model) is not { } site)
                     continue;
 
-                if (!string.IsNullOrEmpty(tree.FilePath) && !walkedPaths.Add(tree.FilePath))
+                var matches = includeDerived
+                    ? ExceptionQueries.IsOrDerivesFrom(site.ExceptionType, target)
+                    : string.Equals(
+                        ExceptionQueries.Fqn(site.ExceptionType),
+                        ExceptionQueries.Fqn(target),
+                        StringComparison.Ordinal);
+
+                if (!matches)
                     continue;
 
-                cancellationToken.ThrowIfCancellationRequested();
+                var position = site.Node.GetLocation().GetLineSpan();
+                var file = position.Path;
+                var line = position.StartLinePosition.Line + 1;
+                var column = position.StartLinePosition.Character + 1;
 
-                var model = compilation.GetSemanticModel(tree);
+                if (!seen.Add((file, line, column)))
+                    continue;
 
-                foreach (var node in tree.GetRoot(cancellationToken).DescendantNodes())
-                {
-                    if (ExceptionAnalyzer.TryGetThrowSite(node, model) is not { } site)
-                        continue;
-
-                    var matches = includeDerived
-                        ? ExceptionQueries.IsOrDerivesFrom(site.ExceptionType, target)
-                        : string.Equals(
-                            ExceptionQueries.Fqn(site.ExceptionType),
-                            ExceptionQueries.Fqn(target),
-                            StringComparison.Ordinal);
-
-                    if (!matches)
-                        continue;
-
-                    var position = site.Node.GetLocation().GetLineSpan();
-                    var file = position.Path;
-                    var line = position.StartLinePosition.Line + 1;
-                    var column = position.StartLinePosition.Character + 1;
-
-                    if (!seen.Add((file, line, column)))
-                        continue;
-
-                    results.Add(new ThrowSiteInfo(
-                        ExceptionType: ExceptionQueries.Fqn(site.ExceptionType),
-                        Method: ExceptionQueries.DescribeContainingMember(site.Node, model),
-                        File: file,
-                        Line: line,
-                        Column: column,
-                        Snippet: ExceptionQueries.StatementSnippet(site.Node),
-                        IsRethrow: site.IsRethrow,
-                        Project: projectName));
-                }
+                results.Add(new ThrowSiteInfo(
+                    ExceptionType: ExceptionQueries.Fqn(site.ExceptionType),
+                    Method: ExceptionQueries.DescribeContainingMember(site.Node, model),
+                    File: file,
+                    Line: line,
+                    Column: column,
+                    Snippet: ExceptionQueries.StatementSnippet(site.Node),
+                    IsRethrow: site.IsRethrow,
+                    Project: scan.ProjectName));
             }
         }
 

@@ -865,6 +865,69 @@ public class CheckArchitectureLogicTests
         Assert.Equal("Demo.Infrastructure", violation.SourceScope);
     }
 
+    // The other half of source-side filtering: a tree declaring only namespaces no rule names is
+    // dropped BEFORE a semantic model is built, which is what keeps cost proportional to the rules
+    // rather than to solution size. Observable here as "its references are never evaluated" — the
+    // Bystander below writes a genuine cross-namespace reference that the rule's From excludes.
+    [Fact]
+    public void TreeDeclaringOnlyUnmatchedNamespaces_IsSkipped()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Bystander.cs", """
+                namespace Demo.Unrelated;
+                public class Bystander { public Demo.Domain.Order? Load() => null; }
+                """) }));
+
+        Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+    }
+
+    // ...and the same filter asserted where it actually lives: in the COUNT. The test above passes
+    // whether or not the filter exists — an unmatched tree yields no violation either way, it just
+    // costs a semantic model to find that out. Removing the filter therefore breaks nothing
+    // visible while turning this tool from O(rules) into O(solution). Four trees here, one of them
+    // declaring a namespace any rule's From can match: exactly one model may be built.
+    [Fact]
+    public void OnlyTreesMatchingARuleSource_GetASemanticModel()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """),
+            ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? Load() => null; }
+                """),
+            ("Report.cs", """
+                namespace Demo.Reporting;
+                public class Report { public Demo.Domain.Order? Source; }
+                """),
+            ("Util.cs", """
+                namespace Demo.Util;
+                public class Util { public Demo.Domain.Order? Cached; }
+                """));
+
+        var created = 0;
+        var violations = CheckArchitectureLogic.ExecuteCore(
+            loaded, resolver,
+            [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")],
+            "namespace", 5,
+            modelFactory: (compilation, tree) =>
+            {
+                created++;
+                return compilation.GetSemanticModel(tree);
+            });
+
+        // The control: the one tree that IS bound still produces its violation, so a count of 1
+        // cannot come from the scan having quietly done nothing.
+        Assert.Equal("Demo.Infrastructure", Assert.Single(violations).SourceScope);
+        Assert.Equal(1, created);
+    }
+
     // The global namespace is a real source scope, reachable via `*`.
     [Fact]
     public void GlobalNamespaceSource_IsAnalysedUnderMatchAll()
