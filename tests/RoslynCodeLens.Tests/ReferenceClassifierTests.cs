@@ -39,7 +39,7 @@ public class ReferenceClassifierTests
 
     /// <summary>The single non-declaration occurrence — declarations are ambient noise in these fixtures.</summary>
     private static string OneKind(string source, string target)
-        => Assert.Single(KindsOf(source, target).Where(k => !string.Equals(k, "declaration", StringComparison.Ordinal)));
+        => Assert.Single(KindsOf(source, target), k => !string.Equals(k, "declaration", StringComparison.Ordinal));
 
     private const string Foo = "class Foo { } ";
 

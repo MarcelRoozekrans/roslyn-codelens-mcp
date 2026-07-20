@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -27,7 +28,9 @@ public static class FindReferencesLogic
         LoadedSolution loaded, SymbolResolver resolver, IReadOnlyList<ISymbol> targets)
     {
         var results = new List<SymbolReference>();
-        var seen = new HashSet<(string, int)>();
+        var seen = new HashSet<(string File, int Line, int Column)>();
+        // Semantic models are expensive; one per document serves every reference in it.
+        var models = new Dictionary<DocumentId, SemanticModel>();
 
         foreach (var target in targets)
         {
@@ -52,11 +55,21 @@ public static class FindReferencesLogic
                     var line = lineSpan.StartLinePosition.Line + 1;
                     var column = lineSpan.StartLinePosition.Character + 1;
 
-                    if (!seen.Add((file, line)))
+                    if (!seen.Add((file, line, column)))
                         continue;
 
-                    var node = sourceTree.GetRoot().FindNode(location.Location.SourceSpan);
-                    var kind = ClassifyReferenceNode(node);
+                    // getInnermostNodeForTie: a base-type entry such as `class Bar : Foo` has the
+                    // same span as its type name, and the default outermost pick would hand the
+                    // classifier a node with no SimpleName to read.
+                    var node = sourceTree.GetRoot()
+                        .FindNode(location.Location.SourceSpan, getInnermostNodeForTie: true);
+                    if (!models.TryGetValue(location.Document.Id, out var model))
+                    {
+                        model = location.Document.GetSemanticModelAsync().GetAwaiter().GetResult()!;
+                        models[location.Document.Id] = model;
+                    }
+
+                    var kind = ReferenceClassifier.Classify(node, referencedSymbol.Definition, model);
                     var snippet = GetContainingStatement(node);
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
@@ -67,34 +80,6 @@ public static class FindReferencesLogic
         }
 
         return results;
-    }
-
-    private static string ClassifyReferenceNode(SyntaxNode node)
-    {
-        var identifier = node as IdentifierNameSyntax
-            ?? node.FirstAncestorOrSelf<IdentifierNameSyntax>();
-        if (identifier != null)
-            return ClassifyReference(identifier);
-
-        if (node is GenericNameSyntax || node.FirstAncestorOrSelf<GenericNameSyntax>() != null)
-            return "type_argument";
-
-        return "usage";
-    }
-
-    private static string ClassifyReference(IdentifierNameSyntax identifier)
-    {
-        var parent = identifier.Parent;
-        return parent switch
-        {
-            AssignmentExpressionSyntax assignment when assignment.Left == identifier => "assignment",
-            ArgumentSyntax => "argument",
-            TypeConstraintSyntax => "type_constraint",
-            BaseTypeSyntax => "base_type",
-            ObjectCreationExpressionSyntax => "instantiation",
-            TypeArgumentListSyntax => "type_argument",
-            _ => "usage"
-        };
     }
 
     private static string GetContainingStatement(SyntaxNode node)
