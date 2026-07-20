@@ -90,11 +90,18 @@ internal static class ExceptionQueries
     /// throw or catch lives in. A throw inside a lambda or local function reports the member that
     /// declares it, since that is the location a reader navigates to.
     /// </summary>
+    /// <remarks>
+    /// A namespace declaration is a <see cref="MemberDeclarationSyntax"/> too, and it does declare
+    /// a symbol, so without the skip below a node that sits in no type at all would be described as
+    /// its namespace — naming a scope rather than a member, which is never what the caller wants.
+    /// Exception sites are always inside a member so this is a no-op for them; <c>check_architecture</c>
+    /// walks every name node and does hit the case.
+    /// </remarks>
     public static string DescribeContainingMember(SyntaxNode node, SemanticModel model)
     {
         for (var current = node; current != null; current = current.Parent)
         {
-            if (current is not MemberDeclarationSyntax member)
+            if (current is not MemberDeclarationSyntax member || member is BaseNamespaceDeclarationSyntax)
                 continue;
 
             var symbol = model.GetDeclaredSymbol(member)

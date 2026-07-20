@@ -46,11 +46,11 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 ### Medium value
 
-- ✅ **`change_signature`** — *shipped* (PR #312). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
+- ✅ **`change_signature`** — *shipped* (PR #313). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
 - **`get_extension_methods`** — which extension methods (including C# 14 extension blocks) apply to a given type. Not answerable with current tools.
 - **`get_instantiation_options`** — "how do I construct this type": accessible constructors, factory methods, DI registration. Pairs well with `generate_test_skeleton`.
 - **Cognitive complexity + nesting depth in `get_complexity_metrics`** — we only report cyclomatic; cognitive complexity is a better refactoring-priority signal. Enhancement to the existing tool.
-- **`check_architecture`** — enforce user-defined namespace/project dependency rules over the type graph (e.g. "Domain must not reference Infrastructure"). `find_circular_dependencies` only catches cycles; layering violations go undetected.
+- ✅ **`check_architecture`** — *shipped* (PR #314). Enforces user-supplied `forbid`/`allowOnly` rules over the semantic type graph (not `using` directives), grouped per violated boundary. Design: [docs/plans/2026-07-20-check-architecture-design.md](plans/2026-07-20-check-architecture-design.md).
 - **`find_similar_code`** — folded into the existing `find_duplicated_code` entry in §2 above.
 
 ---
@@ -69,7 +69,8 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 | Tool | Theme | PR |
 |---|---|---|
-| `change_signature` | Refactoring | #312 |
+| `check_architecture` | Code quality | #314 |
+| `change_signature` | Refactoring | #313 |
 | `get_exception_flow` | Analysis | #309 |
 | `find_throw_sites` | Analysis | #309 |
 | `find_catch_blocks` | Analysis | #309 |
@@ -97,6 +98,9 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 ## Deferred from shipped features
 
 Items considered during design of shipped features and consciously punted on. Re-promote to the main backlog above if a use case emerges.
+
+### From `check_architecture` (shipped 2026-07-20, PR #314)
+- **Extract the shared solution-wide semantic scan walker** — `find_throw_sites`, `find_catch_blocks` and `check_architecture` now each hand-roll the same shape: enumerate compilations, skip generated trees, dedupe repeated trees by path, build a semantic model, walk nodes. They already differ in the details (only `check_architecture` dedupes scope-aware, falls back to a content hash for pathless trees, and checks cancellation inside the node loop), which is precisely the cost: every fix to the shape has to be made three times and in practice lands in one. A shared walker taking a per-tool node visitor would make each fix land once. Deferred from PR #314 as too large to land alongside the review fixes.
 
 ### From `get_method_source` (shipped 2026-07-19, PR #305)
 - **`KindOf` consolidation** — roughly five tools carry their own local symbol-kind mapper (`method`/`property`/`field`/...); extract one shared helper so kind strings can't drift between tools.
