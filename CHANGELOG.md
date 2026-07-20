@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.7.0...v2.8.0) (2026-07-20)
+
+
+### Features
+
+* classify find_references results by reference kind ([#307](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/307)) ([07600dd](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/07600dd2316de081aae6bc6e830836680121cd8b))
+
 ## [2.7.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.6.0...v2.7.0) (2026-07-19)
 
 
