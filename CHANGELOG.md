@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.10.0...v2.11.0) (2026-07-20)
+
+
+### Features
+
+* check_architecture — enforce layering rules over the semantic type graph ([#314](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/314)) ([147d87e](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/147d87e6bf1175c7b145f90e9ece52339a10f3e1))
+
 ## [2.10.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.9.0...v2.10.0) (2026-07-20)
 
 
