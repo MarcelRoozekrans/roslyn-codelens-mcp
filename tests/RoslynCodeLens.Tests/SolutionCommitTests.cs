@@ -5,11 +5,11 @@ using RoslynCodeLens;
 namespace RoslynCodeLens.Tests;
 
 /// <summary>
-/// The post-write commit that publishes an applied code action to the in-memory snapshot, so a
-/// query issued immediately afterwards sees the new text instead of waiting out the file
-/// watcher's debounce (the stale-read gap closed for rename_symbol in #300).
+/// The post-write commit shared by every writing tool (apply_code_action, rename_symbol): it
+/// publishes written text to the in-memory snapshot so a query issued immediately afterwards
+/// sees it instead of waiting out the file watcher debounce (the #300 stale-read gap).
 /// </summary>
-public class CodeActionCommitTests
+public class SolutionCommitTests
 {
     private static SolutionWriteResult Written(params string[] contents)
     {
@@ -26,7 +26,7 @@ public class CodeActionCommitTests
         var write = Written("class A { }", "class B { }");
         IReadOnlyList<(DocumentId Id, SourceText Text)>? received = null;
 
-        var warning = await CodeActionRunner.CommitAsync(
+        var warning = await SolutionChangeWriter.CommitAsync(
             (docs, _) => { received = docs; return Task.CompletedTask; },
             write, CancellationToken.None);
 
@@ -36,7 +36,7 @@ public class CodeActionCommitTests
 
     [Fact]
     public async Task NoHook_IsANoOp()
-        => Assert.Null(await CodeActionRunner.CommitAsync(null, Written("class A { }"), CancellationToken.None));
+        => Assert.Null(await SolutionChangeWriter.CommitAsync(null, Written("class A { }"), CancellationToken.None));
 
     [Fact]
     public async Task NothingWritten_SkipsTheHook()
@@ -44,7 +44,7 @@ public class CodeActionCommitTests
         var called = false;
         var empty = new SolutionWriteResult(Written: true, StaleFiles: [], Documents: []);
 
-        var warning = await CodeActionRunner.CommitAsync(
+        var warning = await SolutionChangeWriter.CommitAsync(
             (_, _) => { called = true; return Task.CompletedTask; }, empty, CancellationToken.None);
 
         Assert.False(called);
@@ -58,7 +58,7 @@ public class CodeActionCommitTests
     [Fact]
     public async Task CommitFailure_DegradesToAWarning()
     {
-        var warning = await CodeActionRunner.CommitAsync(
+        var warning = await SolutionChangeWriter.CommitAsync(
             (_, _) => throw new InvalidOperationException("snapshot busy"),
             Written("class A { }"), CancellationToken.None);
 
@@ -67,15 +67,24 @@ public class CodeActionCommitTests
         Assert.Contains("rebuild_solution", warning, StringComparison.Ordinal);
     }
 
-    /// <summary>Cancellation is a real abort, not a warning — it must surface to the caller.</summary>
+    /// <summary>
+    /// Cancellation here must NOT surface as a cancelled operation: the files are already written
+    /// and that cannot be undone, so reporting "cancelled" would tell the caller nothing happened
+    /// and invite a retry over edits that already landed. It degrades to a warning like any other
+    /// commit failure.
+    /// </summary>
     [Fact]
-    public async Task Cancellation_Propagates()
+    public async Task CancellationAfterTheWrite_DegradesToAWarning()
     {
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CodeActionRunner.CommitAsync(
+        var warning = await SolutionChangeWriter.CommitAsync(
             (_, ct) => { ct.ThrowIfCancellationRequested(); return Task.CompletedTask; },
-            Written("class A { }"), cts.Token));
+            Written("class A { }"), cts.Token);
+
+        Assert.NotNull(warning);
+        Assert.Contains("cancelled", warning, StringComparison.Ordinal);
+        Assert.Contains("written", warning, StringComparison.Ordinal);
     }
 }

@@ -71,38 +71,13 @@ public static class CodeActionRunner
                     $"{string.Join(", ", write.StaleFiles)}. Run rebuild_solution and retry.");
             }
 
-            var warning = await CommitAsync(commitToMemory, write, ct).ConfigureAwait(false);
+            var warning = await SolutionChangeWriter.CommitAsync(commitToMemory, write, ct).ConfigureAwait(false);
             return new CodeActionResult(true, matchedAction.Title, edits, ErrorMessage: null, Warning: warning);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new CodeActionResult(false, actionTitle, [],
                 $"Failed to apply action: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Pushes the freshly written texts into the in-memory snapshot so a query issued right after
-    /// the apply sees them, rather than waiting out the file watcher's debounce. A commit failure
-    /// must not fail the apply — the files ARE written; the watcher rebuild (or an explicit
-    /// rebuild_solution) converges shortly — so it degrades to a warning.
-    /// </summary>
-    internal static async Task<string?> CommitAsync(
-        CommitWrittenDocuments? commitToMemory, SolutionWriteResult write, CancellationToken ct)
-    {
-        if (commitToMemory == null || write.Documents.Count == 0)
-            return null;
-
-        try
-        {
-            await commitToMemory(write.Documents, ct).ConfigureAwait(false);
-            return null;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return "Changes were written, but refreshing the in-memory snapshot failed " +
-                $"({ex.Message}); queries may briefly see stale text until the file watcher " +
-                "catches up, or run rebuild_solution.";
         }
     }
 
