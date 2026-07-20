@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.8.0...v2.9.0) (2026-07-20)
+
+
+### Features
+
+* exception-flow trio — escape analysis, throw sites, catch blocks ([#309](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/309)) ([8ebaefe](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/8ebaefe5b2632ebfc0404e75bf98f52a9ca96f38))
+
 ## [2.8.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.7.0...v2.8.0) (2026-07-20)
 
 
