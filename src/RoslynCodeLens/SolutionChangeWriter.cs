@@ -18,11 +18,62 @@ public sealed record SolutionWriteResult(
     IReadOnlyList<(DocumentId Id, SourceText Text)> Documents);
 
 /// <summary>
+/// Optional post-write hook: receives exactly the (documentId, newText) pairs that were written
+/// to disk so the caller can commit them to the in-memory snapshot immediately
+/// (see <see cref="SolutionManager.CommitDocumentTextsAsync"/>) instead of waiting out the file
+/// watcher's debounce. Null when no manager is available (unit tests). Lives beside the writer
+/// because every tool that writes shares this contract.
+/// </summary>
+public delegate Task CommitWrittenDocuments(
+    IReadOnlyList<(DocumentId Id, SourceText Text)> documents, CancellationToken ct);
+
+/// <summary>
 /// Shared write path for tools that produce a changed Solution (apply_code_action,
 /// rename_symbol): diff extraction for previews and document writes for apply mode.
 /// </summary>
 public static class SolutionChangeWriter
 {
+    /// <summary>
+    /// Pushes freshly written texts into the in-memory snapshot so a query issued right after a
+    /// write sees them, rather than waiting out the file watcher's debounce.
+    /// <para>
+    /// Nothing here may fail the operation that called it. By the time this runs the files are
+    /// already written and that is irreversible, so every outcome — including cancellation —
+    /// degrades to a returned warning. Letting an <see cref="OperationCanceledException"/> escape
+    /// would report "cancelled" for work that already changed the user's files, inviting a retry
+    /// over edits that landed.
+    /// </para>
+    /// <para>
+    /// Documents the snapshot doesn't know about (a code action that ADDED a file) are skipped by
+    /// <see cref="SolutionManager.CommitDocumentTextsAsync"/>; those surface once the watcher
+    /// rebuild picks the new file up, which the returned warning notes.
+    /// </para>
+    /// </summary>
+    public static async Task<string?> CommitAsync(
+        CommitWrittenDocuments? commitToMemory, SolutionWriteResult write, CancellationToken ct)
+    {
+        if (commitToMemory == null || write.Documents.Count == 0)
+            return null;
+
+        try
+        {
+            await commitToMemory(write.Documents, ct).ConfigureAwait(false);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            return "changes were written, but the in-memory snapshot refresh was cancelled; " +
+                "queries may briefly see stale text until the file watcher catches up, " +
+                "or run rebuild_solution.";
+        }
+        catch (Exception ex)
+        {
+            return "changes were written, but refreshing the in-memory snapshot failed " +
+                $"({ex.Message}); queries may briefly see stale text until the file watcher " +
+                "catches up, or run rebuild_solution.";
+        }
+    }
+
     public static async Task<List<TextEdit>> ExtractTextEditsAsync(
         Solution changedSolution, Solution originalSolution, CancellationToken ct)
     {

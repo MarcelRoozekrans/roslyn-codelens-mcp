@@ -32,7 +32,7 @@ public class RenameSymbolLogicTests
         LoadedSolution loaded, SymbolResolver resolver, string symbol, string newName,
         bool renameOverloads = true, bool renameInStrings = false, bool renameInComments = true,
         bool preview = true, bool force = false,
-        RenameSymbolLogic.CommitWrittenDocuments? commit = null)
+        CommitWrittenDocuments? commit = null)
         => RenameSymbolLogic.ExecuteAsync(
             loaded, resolver, symbol, newName,
             renameOverloads, renameInStrings, renameInComments, preview, force,

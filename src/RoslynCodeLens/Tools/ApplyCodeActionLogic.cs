@@ -8,7 +8,8 @@ public static class ApplyCodeActionLogic
     public static async Task<CodeActionResult> ExecuteAsync(
         LoadedSolution loaded, string filePath, int line, int column,
         int? endLine, int? endColumn,
-        string actionTitle, bool preview, CancellationToken ct)
+        string actionTitle, bool preview,
+        CommitWrittenDocuments? commitToMemory, CancellationToken ct)
     {
         var normalizedPath = Path.GetFullPath(filePath);
         Project? targetProject = null;
@@ -51,6 +52,6 @@ public static class ApplyCodeActionLogic
         return await CodeActionRunner.ApplyActionAsync(
             targetProject, targetDocument, compilation,
             line, column, endLine, endColumn,
-            actionTitle, preview, ct).ConfigureAwait(false);
+            actionTitle, preview, commitToMemory, ct).ConfigureAwait(false);
     }
 }

@@ -35,7 +35,8 @@ public static class CodeActionRunner
     public static async Task<CodeActionResult> ApplyActionAsync(
         Project project, Document document, Compilation compilation,
         int line, int column, int? endLine, int? endColumn,
-        string actionTitle, bool preview, CancellationToken ct)
+        string actionTitle, bool preview,
+        CommitWrittenDocuments? commitToMemory, CancellationToken ct)
     {
         try
         {
@@ -59,18 +60,19 @@ public static class CodeActionRunner
 
             var edits = await SolutionChangeWriter.ExtractTextEditsAsync(applyOp.ChangedSolution, project.Solution, ct).ConfigureAwait(false);
 
-            if (!preview)
+            if (preview)
+                return new CodeActionResult(true, matchedAction.Title, edits);
+
+            var write = await SolutionChangeWriter.WriteChangesToDiskAsync(applyOp.ChangedSolution, project.Solution, ct).ConfigureAwait(false);
+            if (!write.Written)
             {
-                var write = await SolutionChangeWriter.WriteChangesToDiskAsync(applyOp.ChangedSolution, project.Solution, ct).ConfigureAwait(false);
-                if (!write.Written)
-                {
-                    return new CodeActionResult(false, matchedAction.Title, edits,
-                        $"Refused to write: {write.StaleFiles.Count} file(s) changed on disk after the solution snapshot was loaded: " +
-                        $"{string.Join(", ", write.StaleFiles)}. Run rebuild_solution and retry.");
-                }
+                return new CodeActionResult(false, matchedAction.Title, edits,
+                    $"Refused to write: {write.StaleFiles.Count} file(s) changed on disk after the solution snapshot was loaded: " +
+                    $"{string.Join(", ", write.StaleFiles)}. Run rebuild_solution and retry.");
             }
 
-            return new CodeActionResult(true, matchedAction.Title, edits);
+            var warning = await SolutionChangeWriter.CommitAsync(commitToMemory, write, ct).ConfigureAwait(false);
+            return new CodeActionResult(true, matchedAction.Title, edits, ErrorMessage: null, Warning: warning);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

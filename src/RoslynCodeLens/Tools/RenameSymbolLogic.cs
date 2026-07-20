@@ -9,15 +9,6 @@ namespace RoslynCodeLens.Tools;
 
 public static class RenameSymbolLogic
 {
-    /// <summary>
-    /// Optional post-write hook: receives exactly the (documentId, newText) pairs that were
-    /// written to disk so the caller can commit them to the in-memory solution snapshot
-    /// (see <see cref="SolutionManager.CommitDocumentTextsAsync"/>). Null when no manager is
-    /// available (unit tests) — the file watcher then picks the change up after its debounce.
-    /// </summary>
-    public delegate Task CommitWrittenDocuments(
-        IReadOnlyList<(DocumentId Id, SourceText Text)> documents, CancellationToken ct);
-
     public static async Task<RenameSymbolResult> ExecuteAsync(
         LoadedSolution loaded, SymbolResolver resolver,
         string symbol, string newName,
@@ -100,23 +91,13 @@ public static class RenameSymbolLogic
         }
 
         var message = $"Renamed {oldName} to {newName} in {filesChanged} file(s).";
-        if (commitToMemory != null && write.Documents.Count > 0)
-        {
-            // Post-write commit (finding 5): make the in-memory snapshot reflect the new text
-            // immediately instead of waiting out the file watcher's debounce window. A commit
-            // failure must not fail the rename — the files ARE renamed on disk; the watcher
-            // rebuild (or an explicit rebuild_solution) will converge shortly.
-            try
-            {
-                await commitToMemory(write.Documents, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                message += " Warning: files were written, but refreshing the in-memory snapshot failed " +
-                    $"({ex.Message}); queries may briefly see stale text until the file watcher catches up, " +
-                    "or run rebuild_solution.";
-            }
-        }
+        // Post-write commit: make the in-memory snapshot reflect the new text immediately instead
+        // of waiting out the file watcher's debounce window. Shared with apply_code_action, and
+        // like it, no outcome here — cancellation included — may fail the rename: the files are
+        // already renamed on disk, so reporting failure would misdescribe what happened.
+        var commitWarning = await SolutionChangeWriter.CommitAsync(commitToMemory, write, ct).ConfigureAwait(false);
+        if (commitWarning != null)
+            message += " Warning: " + commitWarning;
 
         return new RenameSymbolResult(true, oldName, newName, Applied: true,
             edits, filesChanged, conflicts, message);
