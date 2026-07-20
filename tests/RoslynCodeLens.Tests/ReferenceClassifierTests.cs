@@ -62,6 +62,22 @@ public class ReferenceClassifierTests
         => Assert.Equal(["readwrite", "readwrite"],
             KindsOf("class C { int _x; void W() { _x++; --_x; } }", "_x"));
 
+    /// <summary>
+    /// Assigning through an indexer mutates the referenced object's contents, not the
+    /// reference: `_map` is never reassigned, so it reads. Keeps the receiver consistent
+    /// with member access (`a.B = 5` reads `a`) and with the same mutation spelled
+    /// `_map.Add(...)`, which is plainly a read of `_map` plus an invocation.
+    /// </summary>
+    [Fact]
+    public void ElementAccessAssignment_ReadsTheReceiver()
+        => Assert.Equal(["read"], KindsOf(
+            "using System.Collections.Generic; " +
+            "class C { Dictionary<int,int> _map = new(); void W() { _map[1] = 2; } }", "_map"));
+
+    [Fact]
+    public void ArrayElementAssignment_ReadsTheArray()
+        => Assert.Equal(["read"], KindsOf("class C { int[] _a; void W() { _a[0] = 1; } }", "_a"));
+
     [Fact]
     public void OutArgument_IsWrite()
         => Assert.Equal(["write"],

@@ -93,9 +93,12 @@ public static class ReferenceClassifier
                 case MemberBindingExpressionSyntax mb when mb.Name == expr:
                     expr = mb;
                     break;
-                case ElementAccessExpressionSyntax ea when ea.Expression == expr:
-                    expr = ea;
-                    break;
+                // Deliberately NOT climbing an element access from its receiver: in
+                // `_dict[key] = value` the field `_dict` is read, not written — the reference
+                // still points at the same object, only its contents change. Climbing would
+                // report `write` for a field that is never assigned, and would be inconsistent
+                // both with member access above (`a.B = 5` reads `a`) and with the equivalent
+                // mutation spelled `_dict.Add(key, value)`.
                 case ParenthesizedExpressionSyntax pe:
                     expr = pe;
                     break;
