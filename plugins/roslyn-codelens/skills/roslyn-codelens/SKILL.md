@@ -246,6 +246,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - `find_large_classes` — oversized types.
 - `find_god_objects` — Types crossing all 3 size thresholds (lines/members/fields) AND a coupling threshold (incoming or outgoing namespace count). Sharper than raw size: a large but isolated class isn't flagged; a 200-line class with 15 callers across many namespaces is.
 - `find_circular_dependencies` — project/namespace cycles.
+- `check_architecture` — enforce layering rules you supply inline. `forbid` (`Domain.*` must not depend on `Infrastructure.*`) catches the violation you know about; `allowOnly` (`Api.*` may depend only on `Application.*`, `Domain.*`) catches the ones you haven't thought of. Edges come from resolved symbols, not `using` directives, so a fully qualified reference with no `using` is still caught and an unused `using` is not reported. **Two semantics you need to read an empty result correctly:** `allowOnly` evaluates only solution-internal targets (framework namespaces are ignored — otherwise every file would violate every rule; use `forbid` to restrict one), and self-references are never violations. Results group per violated edge with a full `referenceCount` and the first `maxSitesPerViolation` sites, so one stray cross-boundary reference is one item, not hundreds.
 - `get_project_health` — Composite audit: complexity, large classes, naming, unused, reflection, async violations, disposable misuse — counts + top-N hotspots per dimension, per project. Use when you'd otherwise call 7 separate audit tools.
 
 ### Source Generators
@@ -361,6 +362,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `find_large_classes` | "Find classes that need splitting" |
 | `find_god_objects` | "Which classes are doing too much?" |
 | `find_circular_dependencies` | "Any circular dependencies?" |
+| `check_architecture` | "Is anything violating our layering?" / "Does Domain reference Infrastructure?" |
 | `get_project_health` | "How is this project doing?" / "Top hotspots across all dimensions" |
 | `get_source_generators` | "What source generators are active?" |
 | `get_generated_code` | "Show generated code" |
@@ -432,6 +434,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `find_naming_violations` | No — source only | | |
 | `find_large_classes` | No — source only | | |
 | `find_circular_dependencies` | No — source only | | |
+| `check_architecture` | Source scan; `forbid` may target metadata namespaces | `allowOnly` ignores metadata targets by design | |
 | `get_source_generators` | No — source only | | |
 | `get_generated_code` | No — source only | | |
 | `get_di_registrations` | No — source only | | |

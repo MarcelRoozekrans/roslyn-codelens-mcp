@@ -46,11 +46,11 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 ### Medium value
 
-- ✅ **`change_signature`** — *shipped* (PR #312). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
+- ✅ **`change_signature`** — *shipped* (PR #313). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
 - **`get_extension_methods`** — which extension methods (including C# 14 extension blocks) apply to a given type. Not answerable with current tools.
 - **`get_instantiation_options`** — "how do I construct this type": accessible constructors, factory methods, DI registration. Pairs well with `generate_test_skeleton`.
 - **Cognitive complexity + nesting depth in `get_complexity_metrics`** — we only report cyclomatic; cognitive complexity is a better refactoring-priority signal. Enhancement to the existing tool.
-- **`check_architecture`** — enforce user-defined namespace/project dependency rules over the type graph (e.g. "Domain must not reference Infrastructure"). `find_circular_dependencies` only catches cycles; layering violations go undetected.
+- ✅ **`check_architecture`** — *shipped* (PR #314). Enforces user-supplied `forbid`/`allowOnly` rules over the semantic type graph (not `using` directives), grouped per violated boundary. Design: [docs/plans/2026-07-20-check-architecture-design.md](plans/2026-07-20-check-architecture-design.md).
 - **`find_similar_code`** — folded into the existing `find_duplicated_code` entry in §2 above.
 
 ---
@@ -69,7 +69,8 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 | Tool | Theme | PR |
 |---|---|---|
-| `change_signature` | Refactoring | #312 |
+| `check_architecture` | Code quality | #314 |
+| `change_signature` | Refactoring | #313 |
 | `get_exception_flow` | Analysis | #309 |
 | `find_throw_sites` | Analysis | #309 |
 | `find_catch_blocks` | Analysis | #309 |

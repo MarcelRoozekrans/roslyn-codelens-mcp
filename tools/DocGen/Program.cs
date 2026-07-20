@@ -44,6 +44,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["find_naming_violations"]     = "code-quality",
     ["find_large_classes"]         = "code-quality",
     ["find_circular_dependencies"] = "code-quality",
+    ["check_architecture"]         = "code-quality",
     ["find_reflection_usage"]      = "code-quality",
     ["get_di_registrations"]       = "di-dependencies",
     ["get_nuget_dependencies"]     = "di-dependencies",

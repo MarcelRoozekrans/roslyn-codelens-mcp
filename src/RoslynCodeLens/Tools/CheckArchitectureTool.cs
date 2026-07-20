@@ -90,8 +90,11 @@ public static class CheckArchitectureTool
 
     internal static object BuildSummary(IReadOnlyList<ArchitectureViolation> items, int rulesEvaluated)
     {
+        // Keyed by kind + from + to, not by `from` alone: two rules can share a source pattern
+        // (a `forbid` and an `allowOnly` over the same layer is a normal thing to write), and
+        // collapsing them into one bucket would silently merge their counts.
         var byRule = items
-            .GroupBy(v => v.FromPattern, StringComparer.Ordinal)
+            .GroupBy(v => $"{v.RuleKind} {v.FromPattern} -> {v.ToPattern}", StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Sum(v => v.ReferenceCount), StringComparer.Ordinal);
 
         return new
