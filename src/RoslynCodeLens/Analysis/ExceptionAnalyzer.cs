@@ -31,36 +31,42 @@ public static class ExceptionAnalyzer
         // yielded. That is exactly what is wanted here — a nested lambda is seen but not entered.
         foreach (var node in body.DescendantNodes(descendIntoChildren: DescendIntoBody))
         {
-            switch (node)
-            {
-                case ThrowStatementSyntax { Expression: null } rethrow:
-                {
-                    var type = EnclosingCatchType(rethrow, model);
-                    if (type != null)
-                        sites.Add(new ThrowSite(type, rethrow, IsRethrow: true));
-                    break;
-                }
-
-                case ThrowStatementSyntax { Expression: { } thrown } statement:
-                    AddSite(statement, thrown);
-                    break;
-
-                case ThrowExpressionSyntax throwExpression:
-                    AddSite(throwExpression, throwExpression.Expression);
-                    break;
-            }
+            if (TryGetThrowSite(node, model) is { } site)
+                sites.Add(site);
         }
 
         return sites;
-
-        void AddSite(SyntaxNode node, ExpressionSyntax expression)
-        {
-            // The static type of the operand: `throw new T()`, `throw ex` and `throw Make()`
-            // all land here. A dynamically thrown runtime type is out of reach of static analysis.
-            if (model.GetTypeInfo(expression).Type is INamedTypeSymbol type)
-                sites.Add(new ThrowSite(type, node, IsRethrow: false));
-        }
     }
+
+    /// <summary>
+    /// The throw site this single node represents, or null when it is not a throw at all.
+    /// Split out from <see cref="CollectThrowSites"/> so callers that need a different traversal
+    /// — the solution-wide scan behind <c>find_throw_sites</c>, which deliberately DOES look
+    /// inside lambdas — classify a throw exactly the same way.
+    /// </summary>
+    public static ThrowSite? TryGetThrowSite(SyntaxNode node, SemanticModel model)
+        => node switch
+        {
+            ThrowStatementSyntax { Expression: null } rethrow
+                => EnclosingCatchType(rethrow, model) is { } type
+                    ? new ThrowSite(type, rethrow, IsRethrow: true)
+                    : null,
+            ThrowStatementSyntax { Expression: { } thrown } statement
+                => Thrown(statement, thrown, model),
+            ThrowExpressionSyntax expression
+                => Thrown(expression, expression.Expression, model),
+            _ => null,
+        };
+
+    /// <summary>
+    /// The static type of a throw operand: <c>throw new T()</c>, <c>throw ex</c> and
+    /// <c>throw Make()</c> all land here. A dynamically thrown runtime type is out of reach of
+    /// static analysis.
+    /// </summary>
+    private static ThrowSite? Thrown(SyntaxNode node, ExpressionSyntax expression, SemanticModel model)
+        => model.GetTypeInfo(expression).Type is INamedTypeSymbol type
+            ? new ThrowSite(type, node, IsRethrow: false)
+            : null;
 
     /// <summary>
     /// Whether a walk of one method body should enter this node's children. Shared so callers
