@@ -106,6 +106,7 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Where is this exception thrown?" / "Who raises `TimeoutException`?" | `find_throw_sites` |
 | "Who catches this?" / "Is anything swallowing exceptions?" / "Find empty catch blocks" | `find_catch_blocks` |
 | "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
+| "Add/remove/reorder a parameter" / "Let me update all the call sites by hand" | `change_signature` |
 | "Where did this exception come from?" / user pastes a stack trace / "What method is `<M>d__12.MoveNext`?" | `resolve_stack_trace` |
 | "Let me `Read` the file to see this method's body" / "Show me the source of these 5 methods" | `get_method_source` |
 | "Where is this field written / who mutates it?" / "Is this ever assigned outside the ctor?" | `find_references` with `kinds: ["write","readwrite"]` |
@@ -214,6 +215,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - `get_code_actions` — all refactorings/fixes at a position (with optional range).
 - `apply_code_action` — execute a refactoring by title. Preview mode by default. Applying refuses to overwrite files that changed on disk since the snapshot (run `rebuild_solution` and retry), and on success the in-memory snapshot updates immediately, so follow-up queries see the new text without waiting for the file watcher. Actions that create a *new* file (extract interface, move type to file) write it, but the new file only enters the snapshot once the watcher picks it up — the result's `warning` says so when it applies.
 - `rename_symbol` — solution-wide safe rename of a type or member (Roslyn Renamer; NOT available via `apply_code_action`). Preview by default; new-compiler-error conflicts reported; apply refuses unless `force=true` on: conflicts, a degraded solution load, or files changed on disk since the snapshot (freshness refusal — run `rebuild_solution` and retry; `force` does not bypass freshness). After apply the in-memory snapshot updates immediately — follow-up queries see the new name without waiting for a rebuild. Generic types accept the arity-free qualified form (`Data.Repository` finds `Repository<T>`).
+- `change_signature` — add, remove, and reorder a method's parameters, rewriting every call site (Roslyn's change-signature engine; also NOT reachable via `apply_code_action`). `operations` apply in order: `remove` by parameter name, `reorder` with a full permutation of the surviving names, and `add` with a **required** `callSiteValue` naming exactly what each existing call site passes — the tool never guesses that. Give an added parameter a `defaultValue` instead and existing call sites are left untouched. Named arguments, optional parameters, `params` arrays and the extension-method `this` are all handled. `cascadedTo` lists the overrides and interface implementations rewritten alongside it, so check it in preview before applying. Same gates as `rename_symbol`: preview by default, conflict / degraded-load / freshness refusals, `force` to override, immediate snapshot update on apply.
 - `resolve_stack_trace` — map a pasted .NET stack trace to file/line/symbol; demangles async/iterator state machines, lambdas, and local functions; handles log-prefixed lines, inner-exception chains, and Demystifier-style traces. Source frames get the declaration site (exact location when the trace carries `in file:line`); external frames resolve with `origin="metadata"` when the assembly is referenced by the solution — frames outside that closure come back `origin="unresolved"`. Frame-like lines that fail all grammars aren't dropped: they surface as `Kind="unknown"` items at their original position, and `summary.skippedFrameLike` counts them. Items stay in trace order.
 - `analyze_data_flow` — variable lifecycle over a statement range (declared/read/written/captured/flows-in/out).
 - `analyze_control_flow` — reachability, returns, unreachable paths.
@@ -346,6 +348,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `get_code_actions` | "What refactorings are available here?" |
 | `apply_code_action` | "Apply this refactoring" / "Extract method" |
 | `rename_symbol` | "Rename this symbol everywhere" / "Change this name across the solution" |
+| `change_signature` | "Add/remove/reorder a parameter and fix all the callers" |
 | `resolve_stack_trace` | "Where did this exception come from?" / "Resolve this stack trace" |
 | `find_unused_symbols` | "Any dead code?" |
 | `get_complexity_metrics` | "Which methods are too complex?" |
@@ -416,6 +419,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `get_code_actions` | No — source only | | |
 | `apply_code_action` | No — source only | | |
 | `rename_symbol` | No — source only | Locals/parameters and file renames unsupported | |
+| `change_signature` | No — source only; a metadata-defined method is refused | Reflection / `dynamic` call sites are not rewritten | |
 | `resolve_stack_trace` | Yes — external frames resolve when the assembly is referenced by the solution | Metadata frames carry no file/line; frames outside the solution's reference closure come back `origin="unresolved"` | `peek_il` to inspect external method bodies |
 | `analyze_data_flow` | No — source only | | |
 | `analyze_control_flow` | No — source only | | |

@@ -151,10 +151,11 @@ public static class ChangeSignatureBridge
         //          callSiteValue, isRequired: DefaultValue == null, defaultValue, typeBinds: type != null)
         // 4. change = SignatureChange(original, updatedConfig)
         // 5. context = ChangeSignatureAnalysisSucceededContext(semanticDoc, positionForTypeBinding, method, original)
-        //    positionForTypeBinding: the DECLARATION's span start, not 0. Position 0 binds added
-        //    parameter type names at file scope — before any using directives or the enclosing
-        //    namespace — so `add` with e.g. CancellationToken would fail to bind and silently
-        //    degrade to typeBinds:false. Task 3's Add test is what proves this; don't take it on faith.
+        //    positionForTypeBinding: the DECLARATION's span start, mirroring the IDE flow.
+        //    (Originally justified as necessary for added type names to bind — that was tested
+        //    during Task 3 by flipping it to 0, and every Add test still passed. What actually
+        //    makes CancellationToken render is resolving a real ITypeSymbol and passing
+        //    typeBinds:true; the Simplifier reduces it against the target document.)
         // 6. options = ChangeSignatureOptionsResult(change, previewChanges: false)
         // 7. service = CSharpChangeSignatureService instance (Activator.CreateInstance, or the
         //    workspace language service if direct construction misbehaves — try direct first)

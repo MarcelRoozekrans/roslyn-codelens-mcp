@@ -115,8 +115,16 @@ public static class ChangeSignatureBridge
     }
 
     /// <summary>
-    /// Where Roslyn speculatively binds the type names of added parameters. The declaration's own
-    /// position resolves `using`s and the enclosing namespace; 0 would bind at file scope.
+    /// Where Roslyn speculatively binds the type names of added parameters — the position the IDE
+    /// flow supplies, so this mirrors it.
+    /// <para>
+    /// It is NOT what makes a type like <c>CancellationToken</c> render correctly: that works
+    /// because the caller resolves a real <c>ITypeSymbol</c> and the bridge passes
+    /// <c>typeBinds: true</c>, after which Roslyn renders from the symbol and the Simplifier
+    /// reduces it against the target document. Verified by flipping this to 0 — every added-
+    /// parameter test still passed. The declaration position matters only if a type ever arrives
+    /// unresolved, which is why it is kept.
+    /// </para>
     /// </summary>
     private static int PositionForTypeBinding(Document document, IMethodSymbol method)
     {

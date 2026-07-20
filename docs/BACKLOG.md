@@ -46,7 +46,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 ### Medium value
 
-- **`change_signature`** — add/remove/reorder parameters with all call sites updated. Like rename, not reachable via code actions.
+- ✅ **`change_signature`** — *shipped* (PR #312). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
 - **`get_extension_methods`** — which extension methods (including C# 14 extension blocks) apply to a given type. Not answerable with current tools.
 - **`get_instantiation_options`** — "how do I construct this type": accessible constructors, factory methods, DI registration. Pairs well with `generate_test_skeleton`.
 - **Cognitive complexity + nesting depth in `get_complexity_metrics`** — we only report cyclomatic; cognitive complexity is a better refactoring-priority signal. Enhancement to the existing tool.
@@ -69,6 +69,7 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 | Tool | Theme | PR |
 |---|---|---|
+| `change_signature` | Refactoring | #312 |
 | `get_exception_flow` | Analysis | #309 |
 | `find_throw_sites` | Analysis | #309 |
 | `find_catch_blocks` | Analysis | #309 |

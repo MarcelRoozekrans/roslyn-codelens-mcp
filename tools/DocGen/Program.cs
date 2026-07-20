@@ -38,6 +38,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["get_code_actions"]           = "diagnostics",
     ["apply_code_action"]          = "diagnostics",
     ["rename_symbol"]              = "diagnostics",
+    ["change_signature"]           = "diagnostics",
     ["find_unused_symbols"]        = "code-quality",
     ["get_complexity_metrics"]     = "code-quality",
     ["find_naming_violations"]     = "code-quality",
