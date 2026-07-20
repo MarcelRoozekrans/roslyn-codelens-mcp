@@ -182,6 +182,35 @@ public class CheckArchitectureLogicTests
         Assert.Equal(1, violation.ReferenceCount);
     }
 
+    // 8d — `var` is a SimpleNameSyntax whose symbol is the INFERRED type, so counting it turns
+    // one written reference into two. A human reading this method counts two dependencies on
+    // Order: the `new Order()` and the `o.Id` member access.
+    [Fact]
+    public void Var_IsNotCountedAsAReference()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo
+                {
+                    public int Load()
+                    {
+                        var o = new Demo.Domain.Order();
+                        return o.Id;
+                    }
+                }
+                """) }));
+
+        var violation = Assert.Single(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+
+        Assert.Equal(2, violation.ReferenceCount);
+        Assert.Equal(2, violation.Sites.Count);
+    }
+
     // 9 — grouping: 5 human-visible references, sites capped at 2.
     [Fact]
     public void Grouping_CountsAllReferencesButLimitsSites()

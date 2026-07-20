@@ -297,9 +297,22 @@ public static class CheckArchitectureLogic
     /// this one reports 5.</para>
     /// <para>Locals, parameters, range variables, labels and discards are skipped: a reference to a
     /// local is not a dependency on the type that happens to contain it.</para>
+    /// <para><b><c>var</c> is skipped.</b> It is an <c>IdentifierNameSyntax</c> whose
+    /// <c>GetSymbolInfo</c> returns the <i>inferred</i> type, so counting it reports a dependency
+    /// the author never wrote and makes the count depend on whether the declaration was written
+    /// explicitly. The intended count is <b>references a human reading the code would point at</b>:
+    /// <c>var o = new Demo.Domain.Order(); return o.Id;</c> is two dependencies on <c>Order</c> —
+    /// the construction and the member access — exactly what
+    /// <c>Demo.Domain.Order o = new(); return o.Id;</c> yields. The check is syntactic, so a user
+    /// type literally named <c>var</c> and referenced unqualified would also be skipped; that is
+    /// accepted, since such a type cannot be written as a plain identifier without shadowing the
+    /// contextual keyword anyway.</para>
     /// </remarks>
     private static ITypeSymbol? ResolveTargetType(SimpleNameSyntax name, SemanticModel model)
     {
+        if (name is IdentifierNameSyntax { IsVar: true })
+            return null;
+
         var symbol = model.GetSymbolInfo(name).Symbol;
         var target = TypeOf(symbol);
         if (target is null)
