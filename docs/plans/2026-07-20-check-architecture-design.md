@@ -62,6 +62,8 @@ Empty `rules` → `InvalidArgument`. Unknown `kind`, `allowOnly` without a non-e
 
 Static analysis: reflection- and `dynamic`-mediated dependencies are invisible, as are dependencies expressed only in configuration or DI registration by string. A type referenced only inside a lambda or local function still counts — it is a real dependency of the containing document. `scope: "project"` compares project names, so two projects sharing a name in different solution folders are indistinguishable.
 
+Under `scope: "project"` the *target* scope falls back to the containing assembly name when the owning project can't be identified — the same load-dependence that the internal/external check above deliberately avoids. In practice an assembly name matches its project name, so a rule keeps matching; but a project deliberately renamed away from its assembly could be missed by a `forbid` written against the project name if its reference resolves as metadata. Namespace scope, the default, is unaffected.
+
 ## Testing
 
 Every negative test carries a positive control on the same fixture — a rule that DOES fire — so a walk that silently found nothing cannot pass as clean architecture. Verified by mutation: stubbing `Execute` to return an empty list fails every test that asserts on its output.
