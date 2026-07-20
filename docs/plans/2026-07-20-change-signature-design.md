@@ -9,10 +9,16 @@ Origin: SharpLensMcp gap analysis (docs/BACKLOG.md §5, medium tier). Add, remov
 A probe against Microsoft.CodeAnalysis 5.6 established the constraints that shape this design:
 
 - **Every `ChangeSignature` type in Roslyn is internal** — `Microsoft.CodeAnalysis.Features` exports **zero** public `ChangeSignature` types, in direct contrast to `Renamer`, which is public in `Workspaces`. There is no supported public API.
-- **`AbstractChangeSignatureService.ChangeSignature(SemanticDocument, ISymbol, SyntaxNode, SyntaxNode, SignatureChange, LineFormattingOptions, CancellationToken)` is a *public method on an internal type*** — reachable by reflection, and it takes a `SignatureChange` directly.
-- **That entry point bypasses the UI.** `IChangeSignatureOptionsService` exists but is only consumed by the interactive `ChangeSignatureWithContextAsync` path (the IDE dialog). Driving `ChangeSignature(...)` needs no options service.
+- **The public-looking `AbstractChangeSignatureService.ChangeSignature(…)` returns a `SyntaxNode`, not a `Solution`** — it rewrites only the *declaration*. Driving it would change the signature and leave every call site broken. **This is the trap in this design, and the probe is the only reason it isn't in the implementation.**
+- **The solution-wide entry point is `ChangeSignatureWithContextAsync(ChangeSignatureAnalyzedContext, ChangeSignatureOptionsResult, CancellationToken)` → `Task<ChangeSignatureResult>`** (internal, reflectable). `ChangeSignatureResult` exposes `Succeeded`, `UpdatedSolution`, `ChangeSignatureFailureKind`, and `ConfirmationMessage` — Roslyn reports its own refusals, so we surface those rather than inventing our own.
+- **The context can be constructed directly**: `ChangeSignatureAnalysisSucceededContext(SemanticDocument document, int positionForTypeBinding, ISymbol symbol, ParameterConfiguration parameterConfiguration)`. Building it from our already-resolved symbol avoids `GetChangeSignatureContextAsync`'s cursor-position lookup entirely — much more robust for a name-addressed tool.
+- **No UI dependency.** `IChangeSignatureOptionsService` is consumed only by the IDE dialog flow; supplying `ChangeSignatureOptionsResult(SignatureChange updatedSignature, bool previewChanges)` ourselves bypasses it.
 - **`ParameterConfiguration(ExistingParameter thisParameter, ImmutableArray<…> parametersWithoutDefaultValues, ImmutableArray<…> remainingEditableParameters, ExistingParameter paramsParameter, int selectedIndex)`** models the extension-method `this` parameter, the `params` array, and the default-value split as first-class slots.
+- **`AddedParameter(ITypeSymbol type, string typeName, string name, CallSiteKind callSiteKind, string callSiteValue, bool isRequired, string defaultValue, bool typeBinds)`** — matches the caller-supplies-the-value decision exactly; `ExistingParameter(IParameterSymbol)` wraps survivors.
 - `SignatureChange(ParameterConfiguration original, ParameterConfiguration updated)`.
+- `CSharpChangeSignatureService` has a parameterless constructor and is `[ExportLanguageService]`/`[Shared]`, so it can be obtained from workspace language services or instantiated directly.
+
+**One unknown left for implementation:** constructing the `SemanticDocument` the context requires (internal type, expected to have a static async factory). Resolve it by probe before writing the bridge, not by guessing.
 
 ## Decisions (brainstorming outcomes)
 
@@ -46,7 +52,7 @@ Operations apply in order against the original parameter list. `reorder` takes a
 
 ## Architecture
 
-`Analysis/ChangeSignatureBridge.cs` isolates **every** reflection call behind one typed surface: resolve the internal types and members once (cached in a `Lazy`), build the original and updated `ParameterConfiguration` preserving Roslyn's `this`/`params`/default-value slots, construct `SignatureChange`, invoke `ChangeSignature(...)`, and return a plain `Solution`. No reflection leaks into the logic or tool layers.
+`Analysis/ChangeSignatureBridge.cs` isolates **every** reflection call behind one typed surface. Resolve the internal types and members once (cached in a `Lazy`), then per request: wrap survivors in `ExistingParameter` and new parameters in `AddedParameter`, build the original and updated `ParameterConfiguration` preserving Roslyn's `this`/`params`/default-value slots, construct `SignatureChange` and `ChangeSignatureOptionsResult`, build a `ChangeSignatureAnalysisSucceededContext` from the resolved symbol, invoke `ChangeSignatureWithContextAsync`, and return a typed record carrying `Succeeded`, `UpdatedSolution`, and Roslyn's own failure kind/message. No reflection leaks into the logic or tool layers.
 
 **Failure mode is loud, never silent.** If any probe fails — a Roslyn upgrade renaming a type or changing a signature — the bridge throws `McpToolException(Internal, …)` naming the missing member *before anything is written*. A tool that rewrites call sites must never degrade gracefully into partial work.
 
@@ -56,6 +62,7 @@ Operations apply in order against the original parameter list. `reorder` takes a
 
 1. Degraded load → refuse apply unless `force`; warn in preview.
 2. Bridge probe → `Internal` error if the API moved.
+2b. Roslyn's own verdict → if `ChangeSignatureResult.Succeeded` is false, surface its `ChangeSignatureFailureKind`/`ConfirmationMessage` and write nothing.
 3. Diagnostics delta (compiler errors, count-based per `(Id, FilePath)` as established in #300) → `Conflicts`; apply refuses unless `force`.
 4. `SolutionChangeWriter.WriteChangesToDiskAsync` → freshness refusal, atomic writes with rollback, encoding preservation.
 5. `SolutionChangeWriter.CommitAsync` → immediate snapshot update; no outcome may fail the operation.
