@@ -120,4 +120,32 @@ public class FindThrowSitesLogicTests
         Assert.True(site.Line > 0);
         Assert.True(site.Column > 0);
     }
+
+    [Fact]
+    public void GeneratedTrees_AreSkipped()
+    {
+        // Every sibling solution-wide scan (find_disposable_misuse, find_async_violations, ...)
+        // skips generated trees; a throw a source generator emitted is not a site a developer
+        // can act on.
+        const string Generated = """
+            using System;
+
+            namespace Demo;
+
+            public class GeneratedThrower
+            {
+                public void Boom() { throw new NotSupportedException(); }
+            }
+            """;
+
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Thrower.cs", Source), ("Generated.g.cs", Generated));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var sites = FindThrowSitesLogic.Execute(
+            loaded, resolver, metadata, "System.NotSupportedException", includeDerived: false);
+
+        // The only NotSupportedException in the non-generated source is inside InLambda.
+        Assert.DoesNotContain(sites, s => s.File.EndsWith(".g.cs", StringComparison.Ordinal));
+    }
 }

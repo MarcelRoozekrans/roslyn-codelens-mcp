@@ -30,16 +30,26 @@ public static class FindCatchBlocksLogic
         var results = new List<CatchBlockInfo>();
         // A linked file belongs to several compilations; the same clause would repeat otherwise.
         var seen = new HashSet<(string File, int Line, int Column)>();
+        // A multi-targeted project compiles the same file once per target framework. Skipping
+        // repeats here — before the walk and the binding, not after — means the work is done once
+        // instead of N times, and it also makes `Project` attribution deterministic: the first
+        // compilation to reach a file is the one that gets to name it, consistently.
+        var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var projectName = resolver.GetProjectName(projectId);
-            var localTarget = ExceptionQueries.Localize(target, compilation);
 
             foreach (var tree in compilation.SyntaxTrees)
             {
+                if (GeneratedCodeDetector.IsGenerated(tree))
+                    continue;
+
+                if (!string.IsNullOrEmpty(tree.FilePath) && !walkedPaths.Add(tree.FilePath))
+                    continue;
+
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var model = compilation.GetSemanticModel(tree);
@@ -48,7 +58,7 @@ public static class FindCatchBlocksLogic
                              .DescendantNodes().OfType<CatchClauseSyntax>())
                 {
                     var caught = DeclaredType(clause, model);
-                    if (!Matches(clause, caught, localTarget, model, includeBaseClauses))
+                    if (!Matches(clause, caught, target, model, includeBaseClauses))
                         continue;
 
                     var position = clause.GetLocation().GetLineSpan();

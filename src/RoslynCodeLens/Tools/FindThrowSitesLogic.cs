@@ -33,16 +33,26 @@ public static class FindThrowSitesLogic
         // A linked file belongs to several projects and therefore several compilations; the same
         // physical throw would otherwise be reported once per compilation.
         var seen = new HashSet<(string File, int Line, int Column)>();
+        // A multi-targeted project compiles the same file once per target framework. Skipping
+        // repeats here — before the walk and the binding, not after — means the work is done once
+        // instead of N times, and it also makes `Project` attribution deterministic: the first
+        // compilation to reach a file is the one that gets to name it, consistently.
+        var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var projectName = resolver.GetProjectName(projectId);
-            var localTarget = ExceptionQueries.Localize(target, compilation);
 
             foreach (var tree in compilation.SyntaxTrees)
             {
+                if (GeneratedCodeDetector.IsGenerated(tree))
+                    continue;
+
+                if (!string.IsNullOrEmpty(tree.FilePath) && !walkedPaths.Add(tree.FilePath))
+                    continue;
+
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var model = compilation.GetSemanticModel(tree);
@@ -53,10 +63,10 @@ public static class FindThrowSitesLogic
                         continue;
 
                     var matches = includeDerived
-                        ? ExceptionQueries.IsOrDerivesFrom(site.ExceptionType, localTarget)
+                        ? ExceptionQueries.IsOrDerivesFrom(site.ExceptionType, target)
                         : string.Equals(
                             ExceptionQueries.Fqn(site.ExceptionType),
-                            ExceptionQueries.Fqn(localTarget),
+                            ExceptionQueries.Fqn(target),
                             StringComparison.Ordinal);
 
                     if (!matches)

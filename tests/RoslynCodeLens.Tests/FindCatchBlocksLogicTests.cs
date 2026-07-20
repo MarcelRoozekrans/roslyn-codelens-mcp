@@ -118,4 +118,31 @@ public class FindCatchBlocksLogicTests
         var error = Assert.Throws<McpToolException>(() => Run("Demo.NoSuchException"));
         Assert.Equal(ToolErrorCode.SymbolNotFound, error.Code);
     }
+
+    [Fact]
+    public void GeneratedTrees_AreSkipped()
+    {
+        // Same rule as every sibling solution-wide scan: a handler a generator emitted is not a
+        // handler a developer wrote or can change.
+        const string Generated = """
+            using System;
+            using System.IO;
+
+            namespace Demo;
+
+            public class GeneratedCatcher
+            {
+                public void Handle() { try { } catch (IOException) { } }
+            }
+            """;
+
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Catcher.cs", Source), ("Generated.g.cs", Generated));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var blocks = FindCatchBlocksLogic.Execute(
+            loaded, resolver, metadata, "System.IO.IOException", includeBaseClauses: false);
+
+        Assert.DoesNotContain(blocks, b => b.File.EndsWith(".g.cs", StringComparison.Ordinal));
+    }
 }
