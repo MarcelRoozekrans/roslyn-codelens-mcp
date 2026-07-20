@@ -33,19 +33,29 @@ public static class SolutionScanner
     /// are touched. Null means every project.
     /// </param>
     /// <param name="scopeDiscriminator">
-    /// An extra dimension on the dedupe key. "Walk once" means different things per caller: a linked
-    /// file has one namespace across compilations but a DIFFERENT project per compilation, so a
-    /// caller working in project terms must see it once per project or it silently loses every
-    /// project after the first. Null — the common case — dedupes on tree identity alone.
+    /// An extra dimension on the dedupe key, computed from the project name and the tree alone —
+    /// deliberately NOT from a <see cref="ScanTree"/>, because the key is decided before a
+    /// <see cref="ScanTree"/> exists (see the dedupe-before-parse note below). "Walk once" means
+    /// different things per caller: a linked file has one namespace across compilations but a
+    /// DIFFERENT project per compilation, so a caller working in project terms must see it once per
+    /// project or it silently loses every project after the first. Null — the common case — dedupes
+    /// on tree identity alone.
+    /// </param>
+    /// <param name="rootFactory">
+    /// Test observability seam ONLY; production callers leave it null and get
+    /// <see cref="SyntaxTree.GetRoot"/>. It exists so a test can COUNT how many roots a scan
+    /// realises, which is how "duplicates are never parsed" is pinned.
     /// </param>
     public static IEnumerable<ScanTree> EnumerateTrees(
         LoadedSolution loaded,
         SymbolResolver resolver,
         Func<string, bool>? projectFilter = null,
-        Func<ScanTree, string>? scopeDiscriminator = null,
+        Func<string, SyntaxTree, string>? scopeDiscriminator = null,
+        Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
         CancellationToken cancellationToken = default)
     {
         var walked = new HashSet<(string Scope, string Identity)>();
+        rootFactory ??= static (tree, ct) => tree.GetRoot(ct);
 
         // Compilations live in a ConcurrentDictionary, whose enumeration order is an implementation
         // detail. Since dedupe is first-one-wins, that order DECIDES which project a linked or
@@ -68,19 +78,22 @@ public static class SolutionScanner
 
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var scan = new ScanTree(
+                // Dedupe BEFORE parsing. Every input the key needs — project name and tree identity
+                // — is available without a root, and realising a root is the expensive part: a
+                // project multi-targeted across four frameworks presents the same file in four
+                // compilations, and deciding the duplicate after building a ScanTree would parse it
+                // four times to throw three away.
+                var scope = scopeDiscriminator?.Invoke(projectName, tree) ?? string.Empty;
+                if (!walked.Add((scope, TreeIdentity(tree, cancellationToken))))
+                    continue;
+
+                yield return new ScanTree(
                     projectId,
                     projectName,
                     compilation,
                     tree,
-                    tree.GetRoot(cancellationToken),
+                    rootFactory(tree, cancellationToken),
                     () => compilation.GetSemanticModel(tree));
-
-                var scope = scopeDiscriminator?.Invoke(scan) ?? string.Empty;
-                if (!walked.Add((scope, TreeIdentity(tree, cancellationToken))))
-                    continue;
-
-                yield return scan;
             }
         }
     }

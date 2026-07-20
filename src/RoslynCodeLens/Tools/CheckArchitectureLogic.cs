@@ -73,7 +73,7 @@ public static class CheckArchitectureLogic
             projectFilter: byNamespace
                 ? null
                 : projectName => rules.Any(r => ScopePattern.Matches(r.From, projectName)),
-            scopeDiscriminator: byNamespace ? null : scan => scan.ProjectName,
+            scopeDiscriminator: byNamespace ? null : (projectName, _) => projectName,
             cancellationToken: cancellationToken);
 
         foreach (var scan in scans)

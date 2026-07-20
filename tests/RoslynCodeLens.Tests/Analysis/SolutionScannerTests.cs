@@ -61,7 +61,7 @@ public class SolutionScannerTests
             ("ProjB", [("Shared.cs", Linked)]));
 
         var scans = SolutionScanner
-            .EnumerateTrees(loaded, resolver, scopeDiscriminator: s => s.ProjectName)
+            .EnumerateTrees(loaded, resolver, scopeDiscriminator: (projectName, _) => projectName)
             .ToList();
 
         Assert.Equal(["ProjA", "ProjB"], scans.Select(s => s.ProjectName).ToArray());
@@ -153,6 +153,30 @@ public class SolutionScannerTests
 
         Assert.NotSame(first, second);
         Assert.Same(scan.Tree, first.SyntaxTree);
+    }
+
+    [Fact]
+    public void DuplicateTree_IsNeverParsed()
+    {
+        // The same file present in two compilations — a linked file, or one project multi-targeted
+        // across frameworks. Deduping only AFTER building the ScanTree would realise a root per
+        // compilation and discard all but the first: four TFMs, four parses, three thrown away.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("ProjA", [("Shared.cs", Linked)]),
+            ("ProjB", [("Shared.cs", Linked)]));
+
+        var rooted = 0;
+        var scans = SolutionScanner.EnumerateTrees(
+            loaded, resolver,
+            rootFactory: (tree, ct) =>
+            {
+                rooted++;
+                return tree.GetRoot(ct);
+            })
+            .ToList();
+
+        Assert.Single(scans);
+        Assert.Equal(1, rooted);
     }
 
     /// <summary>
