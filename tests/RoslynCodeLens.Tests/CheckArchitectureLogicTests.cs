@@ -865,6 +865,26 @@ public class CheckArchitectureLogicTests
         Assert.Equal("Demo.Infrastructure", violation.SourceScope);
     }
 
+    // The other half of source-side filtering: a tree declaring only namespaces no rule names is
+    // dropped BEFORE a semantic model is built, which is what keeps cost proportional to the rules
+    // rather than to solution size. Observable here as "its references are never evaluated" — the
+    // Bystander below writes a genuine cross-namespace reference that the rule's From excludes.
+    [Fact]
+    public void TreeDeclaringOnlyUnmatchedNamespaces_IsSkipped()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Bystander.cs", """
+                namespace Demo.Unrelated;
+                public class Bystander { public Demo.Domain.Order? Load() => null; }
+                """) }));
+
+        Assert.Empty(Run(workspace, [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")]));
+    }
+
     // The global namespace is a real source scope, reachable via `*`.
     [Fact]
     public void GlobalNamespaceSource_IsAnalysedUnderMatchAll()
