@@ -18,6 +18,16 @@ public sealed record SolutionWriteResult(
     IReadOnlyList<(DocumentId Id, SourceText Text)> Documents);
 
 /// <summary>
+/// Optional post-write hook: receives exactly the (documentId, newText) pairs that were written
+/// to disk so the caller can commit them to the in-memory snapshot immediately
+/// (see <see cref="SolutionManager.CommitDocumentTextsAsync"/>) instead of waiting out the file
+/// watcher's debounce. Null when no manager is available (unit tests). Lives beside the writer
+/// because every tool that writes shares this contract.
+/// </summary>
+public delegate Task CommitWrittenDocuments(
+    IReadOnlyList<(DocumentId Id, SourceText Text)> documents, CancellationToken ct);
+
+/// <summary>
 /// Shared write path for tools that produce a changed Solution (apply_code_action,
 /// rename_symbol): diff extraction for previews and document writes for apply mode.
 /// </summary>

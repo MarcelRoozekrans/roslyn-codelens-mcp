@@ -36,7 +36,7 @@ public class ApplyCodeActionLogicTests
             result = await ApplyCodeActionLogic.ExecuteAsync(
                 _loaded, greeterPath, line: 8, column: 48,
                 endLine: 8, endColumn: 66,
-                actionTitle: action.Title, preview: true, CancellationToken.None);
+                actionTitle: action.Title, preview: true, commitToMemory: null, ct: CancellationToken.None);
 
             if (result.Success) break;
         }
@@ -55,7 +55,7 @@ public class ApplyCodeActionLogicTests
         var result = await ApplyCodeActionLogic.ExecuteAsync(
             _loaded, greeterPath, line: 8, column: 5,
             endLine: null, endColumn: null,
-            actionTitle: "NonExistentAction_12345", preview: true, CancellationToken.None);
+            actionTitle: "NonExistentAction_12345", preview: true, commitToMemory: null, ct: CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -67,7 +67,7 @@ public class ApplyCodeActionLogicTests
         var result = await ApplyCodeActionLogic.ExecuteAsync(
             _loaded, "nonexistent.cs", line: 1, column: 1,
             endLine: null, endColumn: null,
-            actionTitle: "anything", preview: true, CancellationToken.None);
+            actionTitle: "anything", preview: true, commitToMemory: null, ct: CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Contains("not found", result.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
@@ -86,6 +86,36 @@ public class ApplyCodeActionLogicTests
             await ApplyCodeActionLogic.ExecuteAsync(
                 _loaded, greeterPath, line: 8, column: 5,
                 endLine: null, endColumn: null,
-                actionTitle: "anything", preview: true, cts.Token));
+                actionTitle: "anything", preview: true, commitToMemory: null, ct: cts.Token));
+    }
+
+    /// <summary>
+    /// Preview must not touch the in-memory snapshot any more than it touches disk — the commit
+    /// hook exists to publish writes, and preview performs none.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_Preview_DoesNotCommit()
+    {
+        var project = _loaded.Solution.Projects.First(p => string.Equals(p.Name, "TestLib", StringComparison.Ordinal));
+        var greeterPath = project.Documents.First(d => string.Equals(d.Name, "Greeter.cs", StringComparison.Ordinal)).FilePath!;
+
+        var committed = false;
+        var actions = await GetCodeActionsLogic.ExecuteAsync(
+            _loaded, greeterPath, line: 8, column: 48,
+            endLine: 8, endColumn: 66, CancellationToken.None);
+
+        foreach (var action in actions)
+        {
+            var result = await ApplyCodeActionLogic.ExecuteAsync(
+                _loaded, greeterPath, line: 8, column: 48,
+                endLine: 8, endColumn: 66,
+                actionTitle: action.Title, preview: true,
+                commitToMemory: (_, _) => { committed = true; return Task.CompletedTask; },
+                ct: CancellationToken.None);
+
+            if (result.Success) break;
+        }
+
+        Assert.False(committed);
     }
 }

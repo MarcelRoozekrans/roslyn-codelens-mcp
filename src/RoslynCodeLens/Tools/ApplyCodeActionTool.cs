@@ -26,6 +26,9 @@ public static class ApplyCodeActionTool
         manager.EnsureLoaded();
         return await ApplyCodeActionLogic.ExecuteAsync(
             manager.GetLoadedSolution(), filePath, line, column,
-            endLine, endColumn, actionTitle, preview, ct).ConfigureAwait(false);
+            endLine, endColumn, actionTitle, preview,
+            // After a successful apply, push the written texts into the in-memory snapshot so
+            // follow-up queries see them immediately (no watcher-debounce stale window).
+            manager.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
     }
 }

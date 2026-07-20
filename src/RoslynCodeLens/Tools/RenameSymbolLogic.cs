@@ -9,15 +9,6 @@ namespace RoslynCodeLens.Tools;
 
 public static class RenameSymbolLogic
 {
-    /// <summary>
-    /// Optional post-write hook: receives exactly the (documentId, newText) pairs that were
-    /// written to disk so the caller can commit them to the in-memory solution snapshot
-    /// (see <see cref="SolutionManager.CommitDocumentTextsAsync"/>). Null when no manager is
-    /// available (unit tests) — the file watcher then picks the change up after its debounce.
-    /// </summary>
-    public delegate Task CommitWrittenDocuments(
-        IReadOnlyList<(DocumentId Id, SourceText Text)> documents, CancellationToken ct);
-
     public static async Task<RenameSymbolResult> ExecuteAsync(
         LoadedSolution loaded, SymbolResolver resolver,
         string symbol, string newName,

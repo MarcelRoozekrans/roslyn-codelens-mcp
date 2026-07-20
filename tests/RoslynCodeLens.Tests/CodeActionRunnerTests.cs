@@ -56,7 +56,7 @@ public class CodeActionRunnerTests : IAsyncLifetime
             result = await CodeActionRunner.ApplyActionAsync(
                 project, doc, compilation, line: 8, column: 48,
                 endLine: 8, endColumn: 66,
-                actionTitle: action.Title, preview: true, CancellationToken.None);
+                actionTitle: action.Title, preview: true, commitToMemory: null, ct: CancellationToken.None);
 
             if (result.Success)
                 break;
