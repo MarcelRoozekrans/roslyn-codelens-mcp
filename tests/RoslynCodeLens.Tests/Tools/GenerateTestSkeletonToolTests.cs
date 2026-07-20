@@ -222,3 +222,70 @@ public class GenerateTestSkeletonToolTests
         Assert.Empty(tree.GetDiagnostics());
     }
 }
+
+/// <summary>
+/// Throw-stub emission runs on ExceptionAnalyzer.CollectThrowSites. These cover the behaviours
+/// the migration off the tool's own throw-walk brought with it, on an in-memory workspace so the
+/// exact sources are visible next to the assertions.
+/// </summary>
+public class GenerateTestSkeletonThrowStubTests
+{
+    private static GenerateTestSkeletonResult Run(string source, string symbol)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Guard.cs", source));
+        return GenerateTestSkeletonLogic.Execute(loaded, resolver, symbol, framework: "xunit");
+    }
+
+    [Fact]
+    public void ThrowInsideLambda_DoesNotProduceAStub()
+    {
+        // A throw inside a lambda escapes when the lambda runs — at whatever invokes the
+        // delegate — not at Check's boundary, so Assert.Throws<NotSupportedException> around a
+        // call to Check would be a test that cannot pass. The tool's old private throw-walk
+        // descended into lambdas and emitted exactly that; the shared ExceptionAnalyzer does not.
+        var result = Run(
+            """
+            using System;
+
+            namespace Demo;
+
+            public class Guard
+            {
+                public void Check(string s)
+                {
+                    Action a = () => throw new NotSupportedException();
+                    if (s is null) throw new ArgumentNullException(nameof(s));
+                    a();
+                }
+            }
+            """,
+            "Demo.Guard.Check");
+
+        Assert.Contains("Assert.Throws<ArgumentNullException>", result.Code, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotSupportedException", result.Code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThrowOfAVariable_ProducesAStub()
+    {
+        // The old walk only recognised `throw new T(...)`, so `throw ex;` produced nothing.
+        var result = Run(
+            """
+            using System;
+
+            namespace Demo;
+
+            public class Guard
+            {
+                public void Check()
+                {
+                    var error = new InvalidOperationException("boom");
+                    throw error;
+                }
+            }
+            """,
+            "Demo.Guard.Check");
+
+        Assert.Contains("Assert.Throws<InvalidOperationException>", result.Code, StringComparison.Ordinal);
+    }
+}

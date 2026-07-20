@@ -271,6 +271,13 @@ public static class GenerateTestSkeletonLogic
         }
     }
 
+    /// <summary>
+    /// Exception type names the method itself can raise, first-seen order, deduplicated.
+    /// Delegates to the shared <see cref="ExceptionAnalyzer"/>, which — unlike the private walk
+    /// this replaced — recognises <c>throw expr;</c> and bare rethrows, and does NOT descend into
+    /// lambdas or local functions, whose throws escape when those bodies run rather than at this
+    /// method's boundary.
+    /// </summary>
     private static IReadOnlyList<string> CollectThrownExceptionTypes(IMethodSymbol method, Compilation compilation)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -278,26 +285,13 @@ public static class GenerateTestSkeletonLogic
 
         foreach (var syntaxRef in method.DeclaringSyntaxReferences)
         {
-            var declNode = syntaxRef.GetSyntax();
-            if (declNode.SyntaxTree is null) continue;
+            var declaration = syntaxRef.GetSyntax();
+            var model = compilation.GetSemanticModel(declaration.SyntaxTree);
 
-            var sm = compilation.GetSemanticModel(declNode.SyntaxTree);
-
-            foreach (var n in declNode.DescendantNodes())
+            foreach (var site in ExceptionAnalyzer.CollectThrowSites(declaration, model))
             {
-            ObjectCreationExpressionSyntax? ctor = n switch
-            {
-                ThrowStatementSyntax t => t.Expression as ObjectCreationExpressionSyntax,
-                ThrowExpressionSyntax t => t.Expression as ObjectCreationExpressionSyntax,
-                _ => null,
-            };
-            if (ctor is null) continue;
-
-            if (sm.GetTypeInfo(ctor).Type is not INamedTypeSymbol typeSymbol) continue;
-
-            var name = typeSymbol.Name;
-            if (seen.Add(name))
-                ordered.Add(name);
+                if (seen.Add(site.ExceptionType.Name))
+                    ordered.Add(site.ExceptionType.Name);
             }
         }
 
