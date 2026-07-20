@@ -272,12 +272,27 @@ public static class GenerateTestSkeletonLogic
     }
 
     /// <summary>
-    /// Exception type names the method itself can raise, first-seen order, deduplicated.
+    /// Exception type names the method itself can raise and that are worth ASSERTING on, in
+    /// first-seen order, deduplicated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// Delegates to the shared <see cref="ExceptionAnalyzer"/>, which — unlike the private walk
     /// this replaced — recognises <c>throw expr;</c> and bare rethrows, and does NOT descend into
     /// lambdas or local functions, whose throws escape when those bodies run rather than at this
     /// method's boundary.
-    /// </summary>
+    /// </para>
+    /// <para>
+    /// Two of those sites are then filtered out, because a stub emitted for them is guaranteed to
+    /// fail. <c>Assert.Throws&lt;T&gt;</c> (and its NUnit/MSTest equivalents) is an EXACT type
+    /// match, not an assignability check. A bare <c>throw;</c> resolves to the enclosing clause's
+    /// declared type — commonly <c>System.Exception</c> — but what actually surfaces at run time
+    /// is whatever concrete exception the try block raised, so the assertion fails for every real
+    /// input. A literal <c>throw new Exception(...)</c> has the same problem in reverse: it is the
+    /// root of the hierarchy and says nothing useful even when it passes. Both belong in a
+    /// generated skeleton only as a red test, so neither is emitted.
+    /// </para>
+    /// </remarks>
     private static IReadOnlyList<string> CollectThrownExceptionTypes(IMethodSymbol method, Compilation compilation)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -290,6 +305,17 @@ public static class GenerateTestSkeletonLogic
 
             foreach (var site in ExceptionAnalyzer.CollectThrowSites(declaration, model))
             {
+                if (site.IsRethrow)
+                    continue;
+
+                if (string.Equals(
+                        ExceptionQueries.Fqn(site.ExceptionType),
+                        "System.Exception",
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 if (seen.Add(site.ExceptionType.Name))
                     ordered.Add(site.ExceptionType.Name);
             }
