@@ -43,10 +43,13 @@ For each source document (generated code skipped, matching the sibling scan tool
 
 For surviving documents, walk the syntax nodes that can bind to a type, resolve each through the semantic model, and derive the target scope from the resolved symbol's containing namespace (or its project/assembly for `scope: "project"`). Each `(rule, sourceScope, targetScope)` triple accumulates a count and its first sites.
 
-Two node kinds are deliberately **not** counted, because counting them reports dependencies nobody wrote:
+**The counting standard is: references a human reading the code would point at.** Three node kinds are deliberately **not** counted, because counting them reports dependencies nobody wrote:
 
 * **`using` directives.** A using is not a dependency, it is a name-resolution convenience — the code beneath it is the dependency. Counting it also attributes a file-level using to the *global* namespace and double-counts an in-namespace using or alias. Skipping them is what makes the promise "an unused `using` is not reported" true.
-* **`var`.** It is a `SimpleNameSyntax` whose `GetSymbolInfo` returns the *inferred* type. The intended count is references a human reading the code would point at, so `var o = new Demo.Domain.Order(); return o.Id;` is **two** dependencies on `Order` — exactly what the explicitly-typed form yields.
+* **`var`.** It is a `SimpleNameSyntax` whose `GetSymbolInfo` returns the *inferred* type, so `var o = new Demo.Domain.Order(); return o.Id;` is **two** dependencies on `Order` — exactly what the explicitly-typed form yields.
+* **Initializer member names.** A member resolves to its `ContainingType`, so `new Demo.Domain.Order { Id = 1, Name = "x" }` would count `Order` three times — once for the type the reader actually wrote, once per assigned member. When the assigned member's containing type *is* the type the initializer initializes, the member is dropped; the count is **one**. This covers `new T { … }`, `new() { … }`, `x with { … }` and the nested `P = { … }` form. Assignment through a local (`other.Id = 1`) is *not* an initializer and still counts — it is a separately written reference. Consequence, accepted for the same reason as `var`: in `new Box { Inner = { Id = 1 } }` the type of `Inner` is never written, so it is not counted.
+
+**Deduping the walk is scope-aware.** A linked or multi-targeted file appears in several compilations and must be walked once — but "once" means something different per scope. Under `namespace` scope its source scope is identical in every compilation, so the key is the file path: walking it twice would double-count one written reference. Under `project` scope its source scope *differs* per compilation, so the key is `(project name, path)`: a path-only key would credit the file to whichever project was enumerated first and silently drop every violation the other project's copy produces. Multi-targeting still collapses, since its several compilations share one project name. A tree with no file path falls back to a hash of its own text, so it dedupes too rather than being counted once per compilation.
 
 ## Result
 

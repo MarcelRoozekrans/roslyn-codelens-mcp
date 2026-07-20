@@ -99,6 +99,9 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 Items considered during design of shipped features and consciously punted on. Re-promote to the main backlog above if a use case emerges.
 
+### From `check_architecture` (shipped 2026-07-20, PR #314)
+- **Extract the shared solution-wide semantic scan walker** — `find_throw_sites`, `find_catch_blocks` and `check_architecture` now each hand-roll the same shape: enumerate compilations, skip generated trees, dedupe repeated trees by path, build a semantic model, walk nodes. They already differ in the details (only `check_architecture` dedupes scope-aware, falls back to a content hash for pathless trees, and checks cancellation inside the node loop), which is precisely the cost: every fix to the shape has to be made three times and in practice lands in one. A shared walker taking a per-tool node visitor would make each fix land once. Deferred from PR #314 as too large to land alongside the review fixes.
+
 ### From `get_method_source` (shipped 2026-07-19, PR #305)
 - **`KindOf` consolidation** — roughly five tools carry their own local symbol-kind mapper (`method`/`property`/`field`/...); extract one shared helper so kind strings can't drift between tools.
 - **Constructor resolution in `SymbolResolver`** — the `Type.Type` / `.ctor` request handling lives in `GetMethodSourceLogic`; move it into `SymbolResolver` so every tool resolves constructors the same way.
