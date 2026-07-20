@@ -135,23 +135,33 @@ public class SolutionScannerTests
     }
 
     [Fact]
-    public void SemanticModel_IsCreatedOnlyWhenAsked()
+    public void SemanticModel_IsCreatedOnlyWhenAsked_AndOnlyOnce()
     {
         var (loaded, resolver) = RenameTestWorkspace.Create(
             ("A.cs", "namespace A; public class Aa { }"));
 
-        var scan = Assert.Single(SolutionScanner.EnumerateTrees(loaded, resolver));
+        var created = 0;
+        var scan = Assert.Single(SolutionScanner.EnumerateTrees(
+            loaded, resolver,
+            modelFactory: (compilation, tree) =>
+            {
+                created++;
+                return compilation.GetSemanticModel(tree);
+            }));
 
-        // The record must carry a FACTORY, not a model: callers filter trees on syntactic grounds
+        // Enumeration itself must bind nothing: callers filter trees on syntactic grounds
         // (check_architecture drops a tree after reading its declared namespaces) and binding one
         // that is about to be discarded is the most expensive thing such a scan can do.
-        //
-        // Enumeration therefore cannot have produced a model — proven by each invocation producing
-        // a fresh one. A pre-created model handed out by the record would be the same instance.
-        var first = scan.SemanticModel();
-        var second = scan.SemanticModel();
+        Assert.Equal(0, created);
 
-        Assert.NotSame(first, second);
+        var first = scan.SemanticModel();
+        Assert.Equal(1, created);
+
+        // ...and asking twice must not pay twice. A caller reaching for the model in two places in
+        // its loop body wants one model, so the accessor memoises.
+        var second = scan.SemanticModel();
+        Assert.Equal(1, created);
+        Assert.Same(first, second);
         Assert.Same(scan.Tree, first.SyntaxTree);
     }
 

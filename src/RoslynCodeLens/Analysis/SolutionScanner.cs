@@ -9,6 +9,12 @@ namespace RoslynCodeLens.Analysis;
 /// Deliberately a factory, not a model. Callers filter trees on purely syntactic grounds — declared
 /// namespaces, say — and binding a tree that is about to be discarded is the single most expensive
 /// thing such a scan can do. Creating the model on demand keeps that filtering worth having.
+/// <para>
+/// The factory is MEMOISED: the first call builds the model, every later call on the same
+/// <see cref="ScanTree"/> hands back that same instance. A caller that reaches for the model in two
+/// places in its loop body wants one model, not two — and building a second would quietly cost as
+/// much as the filtering saves.
+/// </para>
 /// </param>
 public sealed record ScanTree(
     ProjectId ProjectId,
@@ -41,6 +47,12 @@ public static class SolutionScanner
     /// project or it silently loses every project after the first. Null — the common case — dedupes
     /// on tree identity alone.
     /// </param>
+    /// <param name="modelFactory">
+    /// Test observability seam ONLY; production callers leave it null and get
+    /// <see cref="Compilation.GetSemanticModel"/>. It exists so a test can COUNT how many semantic
+    /// models a scan creates — the lazy-model design's whole payoff is a count, and a count is not
+    /// otherwise observable from outside.
+    /// </param>
     /// <param name="rootFactory">
     /// Test observability seam ONLY; production callers leave it null and get
     /// <see cref="SyntaxTree.GetRoot"/>. It exists so a test can COUNT how many roots a scan
@@ -51,10 +63,12 @@ public static class SolutionScanner
         SymbolResolver resolver,
         Func<string, bool>? projectFilter = null,
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
+        Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
         Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
         CancellationToken cancellationToken = default)
     {
         var walked = new HashSet<(string Scope, string Identity)>();
+        modelFactory ??= static (compilation, tree) => compilation.GetSemanticModel(tree);
         rootFactory ??= static (tree, ct) => tree.GetRoot(ct);
 
         // Compilations live in a ConcurrentDictionary, whose enumeration order is an implementation
@@ -87,13 +101,18 @@ public static class SolutionScanner
                 if (!walked.Add((scope, TreeIdentity(tree, cancellationToken))))
                     continue;
 
+                var compilationForModel = compilation;
+                var treeForModel = tree;
+                var model = new Lazy<SemanticModel>(
+                    () => modelFactory(compilationForModel, treeForModel));
+
                 yield return new ScanTree(
                     projectId,
                     projectName,
                     compilation,
                     tree,
                     rootFactory(tree, cancellationToken),
-                    () => compilation.GetSemanticModel(tree));
+                    () => model.Value);
             }
         }
     }
