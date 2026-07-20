@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -27,7 +28,10 @@ public static class FindReferencesLogic
         LoadedSolution loaded, SymbolResolver resolver, IReadOnlyList<ISymbol> targets)
     {
         var results = new List<SymbolReference>();
-        var seen = new HashSet<(string, int)>();
+        var seen = new HashSet<(string File, int Line, int Column)>();
+        // Semantic models are expensive, and only the rare COM-interop argument needs one.
+        // Built on demand (see GetModel) and reused per document for the rest of the scan.
+        var models = new Dictionary<DocumentId, SemanticModel>();
 
         foreach (var target in targets)
         {
@@ -50,17 +54,28 @@ public static class FindReferencesLogic
                     var lineSpan = location.Location.GetLineSpan();
                     var file = lineSpan.Path;
                     var line = lineSpan.StartLinePosition.Line + 1;
+                    var column = lineSpan.StartLinePosition.Character + 1;
 
-                    if (!seen.Add((file, line)))
+                    if (!seen.Add((file, line, column)))
                         continue;
 
-                    var node = sourceTree.GetRoot().FindNode(location.Location.SourceSpan);
-                    var kind = ClassifyReferenceNode(node);
+                    // getInnermostNodeForTie: a base-type entry such as `class Bar : Foo` has the
+                    // same span as its type name, and the default outermost pick would hand the
+                    // classifier a node with no SimpleName to read.
+                    var node = sourceTree.GetRoot()
+                        .FindNode(location.Location.SourceSpan, getInnermostNodeForTie: true);
+
+                    // Resolved lazily: only the rare argument that omits an explicit `out`/`ref`
+                    // (COM interop) needs a model, so a solution-wide scan no longer builds and
+                    // pins one for every document it touches.
+                    var document = location.Document;
+                    var kind = ReferenceClassifier.Classify(
+                        node, referencedSymbol.Definition, () => GetModel(models, document));
                     var snippet = GetContainingStatement(node);
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
                     results.Add(new SymbolReference(
-                        kind, file, line, snippet, projectName, resolver.IsGenerated(file)));
+                        kind, file, line, column, snippet, projectName, resolver.IsGenerated(file)));
                 }
             }
         }
@@ -68,32 +83,15 @@ public static class FindReferencesLogic
         return results;
     }
 
-    private static string ClassifyReferenceNode(SyntaxNode node)
+    private static SemanticModel? GetModel(Dictionary<DocumentId, SemanticModel> cache, Document document)
     {
-        var identifier = node as IdentifierNameSyntax
-            ?? node.FirstAncestorOrSelf<IdentifierNameSyntax>();
-        if (identifier != null)
-            return ClassifyReference(identifier);
+        if (cache.TryGetValue(document.Id, out var cached))
+            return cached;
 
-        if (node is GenericNameSyntax || node.FirstAncestorOrSelf<GenericNameSyntax>() != null)
-            return "type_argument";
-
-        return "usage";
-    }
-
-    private static string ClassifyReference(IdentifierNameSyntax identifier)
-    {
-        var parent = identifier.Parent;
-        return parent switch
-        {
-            AssignmentExpressionSyntax assignment when assignment.Left == identifier => "assignment",
-            ArgumentSyntax => "argument",
-            TypeConstraintSyntax => "type_constraint",
-            BaseTypeSyntax => "base_type",
-            ObjectCreationExpressionSyntax => "instantiation",
-            TypeArgumentListSyntax => "type_argument",
-            _ => "usage"
-        };
+        var model = document.GetSemanticModelAsync().GetAwaiter().GetResult();
+        if (model != null)
+            cache[document.Id] = model;
+        return model;
     }
 
     private static string GetContainingStatement(SyntaxNode node)

@@ -24,7 +24,8 @@ When `truncated` is `true`, `items` are the **top N by the tool's natural sort o
 Tools that include a `summary` aggregate:
 
 - `get_diagnostics` — `{ error, warning, info, hidden }` counts
-- `find_references`, `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
+- `find_references` — `{ byProject: { name: count }, byKind: { kind: count } }`
+- `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
 - `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
 - `find_unused_symbols` — `{ byKind: {...}, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
 - `find_naming_violations` — `{ byRule: {...} }`
@@ -104,6 +105,8 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Rename this class/method everywhere" / "Let me edit N files to change this name" | `rename_symbol` |
 | "Where did this exception come from?" / user pastes a stack trace / "What method is `<M>d__12.MoveNext`?" | `resolve_stack_trace` |
 | "Let me `Read` the file to see this method's body" / "Show me the source of these 5 methods" | `get_method_source` |
+| "Where is this field written / who mutates it?" / "Is this ever assigned outside the ctor?" | `find_references` with `kinds: ["write","readwrite"]` |
+| "Where is this type cast / pattern-matched?" / "Find `is`/`as` sites" | `find_references` with `kinds: ["type_check","cast"]` |
 
 **All of these mean: the MCP tool is the correct tool. Use it.**
 
@@ -173,7 +176,9 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 ### Navigating Code (**instead of Grep/Glob**)
 - `go_to_definition` — jump to the definition.
 - `search_symbols` — fuzzy symbol lookup.
-- `find_references` — every reference across the solution.
+- `find_references` — every reference across the solution, each tagged with a `referenceKind` and reported per occurrence (multiple references on one line each get their own item, distinguished by `column`). Pass `kinds` to filter server-side.
+
+**Reference kinds** — `read`, `write` (assignment target, `out` argument), `readwrite` (compound assignment, `++`/`--`, `ref` argument), `invocation`, `method_group` (method used as a delegate, not called), `object_creation`, `cast` (`(T)x`, `x as T`), `type_check` (`x is T`, `is T v`, `case T v:`), `typeof`, `base_type`, `type_constraint`, `type_argument`, `declaration` (variable/parameter/return/field type positions), `attribute`, `nameof`, `xml_doc` (`<see cref=...>`); `usage` is a rare fallback. Note a receiver reads: in `_map[k] = v` the field `_map` is `read` (its contents change, the field isn't reassigned) — same as `_map.Add(k, v)`.
 
 ### Finding Dependencies and Usage
 - `find_callers` — every call site for a method.
@@ -308,7 +313,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `find_implementations` | "What implements this interface?" / "What extends this class?" |
 | `find_callers` | "Who calls this method?" / "What depends on this?" |
 | `find_event_subscribers` | "Who subscribes to this event?" |
-| `find_references` | "Where is this symbol used?" / "Show all references" |
+| `find_references` | "Where is this symbol used?" / "Show all references" / "Who writes to it?" (`kinds` filter) |
 | `find_tests_for_symbol` | "What tests cover this method?" / "Which tests will break if I change X?" |
 | `get_test_summary` | "What does this test suite cover?" |
 | `find_uncovered_symbols` | "What should I write tests for?" / "Where's our testing debt?" |
@@ -354,7 +359,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `list_running_tasks` | "What background work is in flight?" |
 | `analyze_data_flow` | "What variables are read/written here?" |
 | `analyze_control_flow` | "Is this code reachable?" |
-| `analyze_change_impact` | "What breaks if I change this?" |
+| `analyze_change_impact` | "What breaks if I change this?" (its `directReferenceCount` counts reference *occurrences*, so a line referencing the symbol twice counts twice) |
 | `get_type_overview` | "Give me everything about this type in one call" |
 | `analyze_method` | "Show signature, callers, and outgoing calls" |
 | `get_method_source` | "Show me this method's body" / "Give me the source of these members" |

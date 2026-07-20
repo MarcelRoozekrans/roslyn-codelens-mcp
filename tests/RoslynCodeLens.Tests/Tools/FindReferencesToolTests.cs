@@ -73,9 +73,9 @@ public class FindReferencesToolTests
     {
         var input = new List<SymbolReference>
         {
-            new("Read", "b.cs", 1, "x", "P"),
-            new("Read", "a.cs", 9, "x", "P"),
-            new("Read", "a.cs", 2, "x", "P"),
+            new("read", "b.cs", 1, 1, "x", "P"),
+            new("read", "a.cs", 9, 1, "x", "P"),
+            new("read", "a.cs", 2, 1, "x", "P"),
         };
 
         var sorted = FindReferencesTool.Sort(input);
@@ -86,14 +86,102 @@ public class FindReferencesToolTests
             r => { Assert.Equal("b.cs", r.File); Assert.Equal(1, r.Line); });
     }
 
+    private static List<SymbolReference> SampleRefs() =>
+    [
+        new("write", "a.cs", 1, 5, "x", "P"),
+        new("read", "a.cs", 1, 10, "x", "P"),
+        new("readwrite", "a.cs", 2, 5, "x", "P"),
+        new("invocation", "b.cs", 3, 5, "x", "P"),
+    ];
+
+    [Fact]
+    public void KindsFilter_NarrowsResults()
+    {
+        var result = FindReferencesTool.BuildResult(SampleRefs(), ["write", "readwrite"], limit: 500);
+
+        Assert.Equal(["write", "readwrite"], result.Items.Select(r => r.ReferenceKind));
+        Assert.Equal(2, result.TotalCount);
+    }
+
+    [Fact]
+    public void KindsFilter_AppliesBeforeLimit()
+    {
+        var result = FindReferencesTool.BuildResult(SampleRefs(), ["write", "readwrite"], limit: 1);
+
+        Assert.Single(result.Items);
+        Assert.True(result.Truncated);
+        Assert.Equal(2, result.TotalCount);
+    }
+
+    /// <summary>Callers drift on casing; rejecting "Write" over a capital letter buys nothing.</summary>
+    [Fact]
+    public void KindsFilter_IsCaseInsensitive()
+    {
+        FindReferencesTool.ValidateKinds(["Write", "READWRITE"]);
+        var result = FindReferencesTool.BuildResult(SampleRefs(), ["Write", "READWRITE"], limit: 500);
+
+        Assert.Equal(["write", "readwrite"], result.Items.Select(r => r.ReferenceKind));
+        Assert.Equal(2, result.TotalCount);
+    }
+
+    [Fact]
+    public void NoKindsFilter_ReturnsEverything()
+    {
+        var result = FindReferencesTool.BuildResult(SampleRefs(), kinds: null, limit: 500);
+
+        Assert.Equal(4, result.TotalCount);
+    }
+
+    [Fact]
+    public void UnknownKind_Throws()
+    {
+        var ex = Assert.Throws<McpToolException>(() => FindReferencesTool.ValidateKinds(["write", "bogus"]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
+        var details = System.Text.Json.JsonSerializer.Serialize(ex.Details);
+        Assert.Contains("readwrite", details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidKinds_DoNotThrow()
+        => FindReferencesTool.ValidateKinds([.. RoslynCodeLens.Analysis.ReferenceClassifier.AllKinds]);
+
+    [Fact]
+    public void ByKind_SummaryMatchesItems()
+    {
+        var result = FindReferencesTool.BuildResult(SampleRefs(), kinds: null, limit: 500);
+        var json = System.Text.Json.JsonSerializer.Serialize(result.Summary);
+
+        Assert.Contains("byKind", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"write\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"read\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"readwrite\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"invocation\":1", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sort_OrdersByFileThenLineThenColumn()
+    {
+        var input = new List<SymbolReference>
+        {
+            new("read", "a.cs", 1, 10, "x", "P"),
+            new("write", "a.cs", 1, 5, "x", "P"),
+        };
+
+        var sorted = FindReferencesTool.Sort(input);
+
+        Assert.Equal([5, 10], sorted.Select(r => r.Column));
+    }
+
     [Fact]
     public void BuildSummary_GroupsByProject()
     {
         var input = new List<SymbolReference>
         {
-            new("Read", "a.cs", 1, "x", "Foo"),
-            new("Read", "a.cs", 2, "x", "Foo"),
-            new("Read", "b.cs", 1, "x", "Bar"),
+            new("read", "a.cs", 1, 1, "x", "Foo"),
+            new("read", "a.cs", 2, 1, "x", "Foo"),
+            new("read", "b.cs", 1, 1, "x", "Bar"),
         };
 
         var summary = FindReferencesTool.BuildSummary(input);
