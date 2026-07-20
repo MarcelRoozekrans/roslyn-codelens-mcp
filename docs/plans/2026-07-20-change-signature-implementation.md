@@ -18,7 +18,7 @@ All probed against Microsoft.CodeAnalysis 5.6. `AbstractChangeSignatureService` 
 
 | Member | Signature |
 |---|---|
-| `SemanticDocument.CreateAsync` | `static Task<SemanticDocument>(Document, CancellationToken)` — **public type in Workspaces** |
+| `SemanticDocument.CreateAsync` | `static Task<SemanticDocument>(Document, CancellationToken)` — in Workspaces. **The type is `internal`** (an earlier note here said public; it is not), so bind with `BindingFlags.NonPublic`. |
 | `ParameterConfiguration.Create` | `static ParameterConfiguration(ImmutableArray<Parameter>, bool isExtensionMethod, int selectedIndex)` — derives the `this`/`params`/default split itself; **prefer this over the 5-arg ctor** |
 | `ExistingParameter` | `ctor(IParameterSymbol)` |
 | `AddedParameter` | `ctor(ITypeSymbol type, string typeName, string name, CallSiteKind, string callSiteValue, bool isRequired, string defaultValue, bool typeBinds)` |
@@ -150,7 +150,11 @@ public static class ChangeSignatureBridge
         //          DefaultValue == null ? CallSiteKind.Value : CallSiteKind.Omitted,
         //          callSiteValue, isRequired: DefaultValue == null, defaultValue, typeBinds: type != null)
         // 4. change = SignatureChange(original, updatedConfig)
-        // 5. context = ChangeSignatureAnalysisSucceededContext(semanticDoc, 0, method, original)
+        // 5. context = ChangeSignatureAnalysisSucceededContext(semanticDoc, positionForTypeBinding, method, original)
+        //    positionForTypeBinding: the DECLARATION's span start, not 0. Position 0 binds added
+        //    parameter type names at file scope — before any using directives or the enclosing
+        //    namespace — so `add` with e.g. CancellationToken would fail to bind and silently
+        //    degrade to typeBinds:false. Task 3's Add test is what proves this; don't take it on faith.
         // 6. options = ChangeSignatureOptionsResult(change, previewChanges: false)
         // 7. service = CSharpChangeSignatureService instance (Activator.CreateInstance, or the
         //    workspace language service if direct construction misbehaves — try direct first)
