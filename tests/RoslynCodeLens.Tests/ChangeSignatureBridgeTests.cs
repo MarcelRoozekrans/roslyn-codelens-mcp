@@ -18,6 +18,36 @@ public class ChangeSignatureBridgeTests
         Assert.Empty(missing);
     }
 
+    /// <summary>
+    /// Probe() returning empty only proves the members it LOOKED FOR resolved, so the probe's
+    /// coverage is asserted separately. Three things the original probe never checked are pinned
+    /// here: the service's parameterless constructor (used via Activator, so its absence would
+    /// only ever surface at a user's apply) and the two awaited return types — a signature change
+    /// that returned a different Task<T> would break at the GetTaskResult cast instead.
+    /// </summary>
+    [Fact]
+    public void Probe_CoversTheServiceConstructorAndBothAwaitedReturnTypes()
+    {
+        var probed = ChangeSignatureBridge.ProbedMembers();
+
+        Assert.Contains(probed, name => name.Contains("CSharpChangeSignatureService..ctor()", StringComparison.Ordinal));
+        Assert.Contains(probed, name =>
+            name.Contains("SemanticDocument.CreateAsync", StringComparison.Ordinal)
+            && name.Contains("Task<SemanticDocument>", StringComparison.Ordinal));
+        Assert.Contains(probed, name =>
+            name.Contains("ChangeSignatureWithContextAsync", StringComparison.Ordinal)
+            && name.Contains("Task<ChangeSignatureResult>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ProbedMembers_IsASupersetOfWhateverIsMissing()
+    {
+        var probed = ChangeSignatureBridge.ProbedMembers();
+
+        Assert.NotEmpty(probed);
+        Assert.All(ChangeSignatureBridge.Probe(), missing => Assert.Contains(missing, probed));
+    }
+
     [Fact]
     public async Task Reorder_RewritesDeclarationAndCallSite()
     {

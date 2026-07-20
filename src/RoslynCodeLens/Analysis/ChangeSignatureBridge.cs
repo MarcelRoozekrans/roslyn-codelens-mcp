@@ -33,6 +33,14 @@ public static class ChangeSignatureBridge
     /// </summary>
     public static IReadOnlyList<string> Probe() => Cached.Value.Missing;
 
+    /// <summary>
+    /// Every member the probe checked, whether or not it resolved — <see cref="Probe"/> returning
+    /// empty is only meaningful against this list, since an unchecked member is indistinguishable
+    /// from a healthy one. Exposed so a test can assert the probe's coverage rather than just its
+    /// verdict.
+    /// </summary>
+    public static IReadOnlyList<string> ProbedMembers() => Cached.Value.Checked;
+
     public static async Task<BridgeResult> ChangeSignatureAsync(
         Document document,
         IMethodSymbol method,
@@ -267,6 +275,9 @@ public static class ChangeSignatureBridge
     {
         public List<string> Missing { get; } = [];
 
+        /// <summary>Every member name the probe looked for, resolved or not.</summary>
+        public List<string> Checked { get; } = [];
+
         public Type? ParameterType { get; private set; }
         public Type? CallSiteKindType { get; private set; }
         public Type? CSharpServiceType { get; private set; }
@@ -381,6 +392,8 @@ public static class ChangeSignatureBridge
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static,
                     [typeof(Document), typeof(CancellationToken)],
                     "SemanticDocument.CreateAsync(Document, CancellationToken)");
+                m.CheckTaskReturnType(
+                    m.SemanticDocumentCreateAsync, semanticDocument, "SemanticDocument.CreateAsync");
             }
 
             if (abstractService is not null && analyzedContext is not null && optionsResult is not null)
@@ -393,7 +406,13 @@ public static class ChangeSignatureBridge
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
                     [analyzedContext, optionsResult, typeof(CancellationToken)],
                     "AbstractChangeSignatureService.ChangeSignatureWithContextAsync(ChangeSignatureAnalyzedContext, ChangeSignatureOptionsResult, CancellationToken)");
+                m.CheckTaskReturnType(
+                    m.ChangeSignatureWithContextAsync, changeSignatureResult,
+                    "AbstractChangeSignatureService.ChangeSignatureWithContextAsync");
             }
+
+            // Built via Activator, so nothing above would have caught its removal.
+            m.CheckParameterlessCtor(m.CSharpServiceType, "CSharpChangeSignatureService..ctor()");
 
             if (changeSignatureResult is not null)
             {
@@ -410,6 +429,7 @@ public static class ChangeSignatureBridge
         private static MethodInfo? ResolveImmutableArrayCreate(Members m, Type parameterType)
         {
             const string Name = "ImmutableArray.Create<Parameter>(Parameter[])";
+            m.Checked.Add(Name);
             var open = typeof(ImmutableArray).GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .FirstOrDefault(candidate =>
                     string.Equals(candidate.Name, "Create", StringComparison.Ordinal)
@@ -426,8 +446,65 @@ public static class ChangeSignatureBridge
             return open.MakeGenericMethod(parameterType);
         }
 
+        /// <summary>
+        /// Records a member the probe examined and, when it did not resolve, that it is missing.
+        /// Every lookup funnels through here so Checked can never drift from Missing.
+        /// </summary>
+        private T? Record<T>(string display, T? resolved) where T : class
+        {
+            Checked.Add(display);
+            if (resolved is null)
+                Missing.Add(display);
+
+            return resolved;
+        }
+
+        /// <summary>
+        /// Asserts a resolved method returns exactly <c>Task&lt;expected&gt;</c>. Resolving the
+        /// method by name and parameter types is not enough: the bridge awaits the Task and reads
+        /// its Result, so a changed return type would fail at that cast during a user's apply
+        /// rather than at the probe.
+        /// </summary>
+        private void CheckTaskReturnType(MethodInfo? method, Type? expected, string display)
+        {
+            var name = $"{display} → Task<{expected?.Name ?? "?"}>";
+            Checked.Add(name);
+
+            if (method is null || expected is null)
+            {
+                Missing.Add(name);
+                return;
+            }
+
+            var returnType = method.ReturnType;
+            var matches = returnType.IsGenericType
+                && returnType.GetGenericTypeDefinition() == typeof(Task<>)
+                && returnType.GetGenericArguments()[0] == expected;
+
+            if (!matches)
+                Missing.Add(name);
+        }
+
+        /// <summary>
+        /// The service is built with Activator.CreateInstance(nonPublic: true), which resolves
+        /// nothing ahead of time — without this the missing constructor would only show up as a
+        /// thrown exception mid-apply.
+        /// </summary>
+        private void CheckParameterlessCtor(Type? type, string display)
+        {
+            Checked.Add(display);
+
+            if (type?.GetConstructor(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    binder: null, Type.EmptyTypes, modifiers: null) is null)
+            {
+                Missing.Add(display);
+            }
+        }
+
         private Assembly? LoadAssembly(string name)
         {
+            Checked.Add($"assembly {name}");
             try
             {
                 return Assembly.Load(name);
@@ -440,58 +517,29 @@ public static class ChangeSignatureBridge
         }
 
         private Type? FindType(Assembly assembly, string fullName)
-        {
-            var type = assembly.GetType(fullName, throwOnError: false);
-            if (type is null)
-            {
-                Missing.Add(fullName);
-            }
-
-            return type;
-        }
+            => Record(fullName, assembly.GetType(fullName, throwOnError: false));
 
         private ConstructorInfo? FindCtor(Type type, Type[] parameterTypes, string display)
-        {
-            var ctor = type.GetConstructor(
+            => Record(display, type.GetConstructor(
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-                binder: null, parameterTypes, modifiers: null);
-            if (ctor is null)
-            {
-                Missing.Add(display);
-            }
-
-            return ctor;
-        }
+                binder: null, parameterTypes, modifiers: null));
 
         private MethodInfo? FindMethod(
             Type type, string name, BindingFlags flags, Type[] parameterTypes, string display)
-        {
-            var method = type.GetMethod(name, flags, binder: null, parameterTypes, modifiers: null);
-            if (method is null)
-            {
-                Missing.Add(display);
-            }
-
-            return method;
-        }
+            => Record(display, type.GetMethod(name, flags, binder: null, parameterTypes, modifiers: null));
 
         private PropertyInfo? FindProperty(Type type, string name)
-        {
-            var property = type.GetProperty(
-                name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            if (property is null)
-            {
-                Missing.Add($"ChangeSignatureResult.{name}");
-            }
-
-            return property;
-        }
+            => Record($"ChangeSignatureResult.{name}", type.GetProperty(
+                name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance));
 
         private int EnumValue(Type enumType, string name)
         {
+            var display = $"CallSiteKind.{name}";
+            Checked.Add(display);
+
             if (!Enum.IsDefined(enumType, name))
             {
-                Missing.Add($"CallSiteKind.{name}");
+                Missing.Add(display);
                 return 0;
             }
 
