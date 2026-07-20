@@ -369,12 +369,47 @@ public class RenameSymbolLogicTests
             new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
             CancellationToken.None);
 
-        var scanSet = RenameSymbolLogic.ComputeScanSet(loaded.Solution, renamed);
+        var scanSet = SolutionChangeSafety.ComputeScanSet(loaded.Solution, renamed);
         var libA = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibA", StringComparison.Ordinal)).Id;
         var libB = loaded.Solution.Projects.Single(p => string.Equals(p.Name, "LibB", StringComparison.Ordinal)).Id;
 
         Assert.Contains(libA, scanSet);   // textually changed by the rename
         Assert.Contains(libB, scanSet);   // untouched, but a direct dependent of LibA
+        Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
+    }
+
+    /// <summary>
+    /// A break propagates as far as the reference graph does, so the scan set must too: with
+    /// LibA &lt;- LibB &lt;- LibC, LibC sees LibA's types through LibB and can break without LibB's
+    /// text changing. Scanning only DIRECT dependents left LibC unexamined and the conflict
+    /// unreported.
+    /// </summary>
+    [Fact]
+    public async Task ComputeScanSet_IncludesTransitiveDependents()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.CreateChain(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Mid.cs", "namespace Mid; public class Mid { }")]),
+            ("LibC", [("Far.cs", "namespace Far; public class Far { }")]));
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Widget");
+        var renamed = await Microsoft.CodeAnalysis.Rename.Renamer.RenameSymbolAsync(
+            loaded.Solution, target,
+            new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
+            CancellationToken.None);
+
+        var byName = loaded.Solution.Projects.ToDictionary(p => p.Name, p => p.Id, StringComparer.Ordinal);
+
+        // Precondition: LibC really is transitive-only, otherwise this proves nothing.
+        var direct = loaded.Solution.GetProjectDependencyGraph()
+            .GetProjectsThatDirectlyDependOnThisProject(byName["LibA"]);
+        Assert.DoesNotContain(byName["LibC"], direct);
+
+        var scanSet = SolutionChangeSafety.ComputeScanSet(loaded.Solution, renamed);
+
+        Assert.Contains(byName["LibA"], scanSet);
+        Assert.Contains(byName["LibB"], scanSet);
+        Assert.Contains(byName["LibC"], scanSet);
         Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
     }
 
@@ -418,10 +453,10 @@ public class RenameSymbolLogicTests
         // level with a synthetic suppressed diagnostic (Diagnostic.Create supports
         // isSuppressed directly).
         var suppressed = MakeError("CS9999", "File.cs", 3, suppressed: true);
-        Assert.Empty(RenameSymbolLogic.DiffNewErrors(before: [], after: [suppressed]));
+        Assert.Empty(SolutionChangeSafety.DiffNewErrors(before: [], after: [suppressed]));
 
         var unsuppressed = MakeError("CS9999", "File.cs", 3);
-        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before: [], after: [unsuppressed]));
+        var conflict = Assert.Single(SolutionChangeSafety.DiffNewErrors(before: [], after: [unsuppressed]));
         Assert.Equal("CS9999", conflict.Id);
         Assert.Equal(3, conflict.Line);
     }
@@ -432,7 +467,7 @@ public class RenameSymbolLogicTests
         var before = new[] { MakeError("CS0101", "Types.cs", 3) };
         var after = new[] { MakeError("CS0101", "Types.cs", 3), MakeError("CS0101", "Types.cs", 7) };
 
-        var conflict = Assert.Single(RenameSymbolLogic.DiffNewErrors(before, after));
+        var conflict = Assert.Single(SolutionChangeSafety.DiffNewErrors(before, after));
         Assert.Equal(7, conflict.Line);
     }
 
@@ -508,6 +543,41 @@ public class RenameSymbolLogicTests
             Assert.False(result.Success);
             Assert.False(result.Applied);
             Assert.Contains(path, result.Message, StringComparison.Ordinal);
+            Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
+            Assert.Equal(drifted, await File.ReadAllTextAsync(path));
+            Assert.Equal(0, commitCalls);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The invariant rename shares with change_signature: force overrides RISK judgements
+    /// (conflicts, a degraded load), never the freshness check. The text that would be written was
+    /// computed from a snapshot that no longer describes the file, so caller intent cannot make
+    /// writing it safe.
+    /// </summary>
+    [Fact]
+    public async Task Apply_DiskChangedSinceSnapshot_ForceStillRefusesAndWritesNothing()
+    {
+        var dir = Directory.CreateTempSubdirectory("rename-force-stale-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Widget.cs");
+            await File.WriteAllTextAsync(path, BasicSource);
+            var (loaded, resolver) = RenameTestWorkspace.Create((path, BasicSource));
+
+            var drifted = BasicSource + "\n// concurrent edit\n";
+            await File.WriteAllTextAsync(path, drifted);
+
+            var commitCalls = 0;
+            var result = await RunAsync(loaded, resolver, "Widget", "Sprocket", preview: false, force: true,
+                commit: (_, _) => { commitCalls++; return Task.CompletedTask; });
+
+            Assert.False(result.Success);
+            Assert.False(result.Applied);
             Assert.Contains("rebuild_solution", result.Message, StringComparison.Ordinal);
             Assert.Equal(drifted, await File.ReadAllTextAsync(path));
             Assert.Equal(0, commitCalls);

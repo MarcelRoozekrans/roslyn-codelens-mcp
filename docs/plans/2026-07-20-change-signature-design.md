@@ -1,0 +1,108 @@
+# `change_signature` — Design
+
+Date: 2026-07-20
+Status: Approved
+Origin: SharpLensMcp gap analysis (docs/BACKLOG.md §5, medium tier). Add, remove, and reorder a method's parameters with every call site updated. Like `rename_symbol`, it is not reachable through `apply_code_action`. Tool count 63 → 64.
+
+## Empirical findings (verified, not assumed)
+
+A probe against Microsoft.CodeAnalysis 5.6 established the constraints that shape this design:
+
+- **Every `ChangeSignature` type in Roslyn is internal** — `Microsoft.CodeAnalysis.Features` exports **zero** public `ChangeSignature` types, in direct contrast to `Renamer`, which is public in `Workspaces`. There is no supported public API.
+- **The public-looking `AbstractChangeSignatureService.ChangeSignature(…)` returns a `SyntaxNode`, not a `Solution`** — it rewrites only the *declaration*. Driving it would change the signature and leave every call site broken. **This is the trap in this design, and the probe is the only reason it isn't in the implementation.**
+- **The solution-wide entry point is `ChangeSignatureWithContextAsync(ChangeSignatureAnalyzedContext, ChangeSignatureOptionsResult, CancellationToken)` → `Task<ChangeSignatureResult>`** (internal, reflectable). `ChangeSignatureResult` exposes `Succeeded`, `UpdatedSolution`, `ChangeSignatureFailureKind`, and `ConfirmationMessage` — Roslyn reports its own refusals, so we surface those rather than inventing our own.
+- **The context can be constructed directly**: `ChangeSignatureAnalysisSucceededContext(SemanticDocument document, int positionForTypeBinding, ISymbol symbol, ParameterConfiguration parameterConfiguration)`. Building it from our already-resolved symbol avoids `GetChangeSignatureContextAsync`'s cursor-position lookup entirely — much more robust for a name-addressed tool.
+- **No UI dependency.** `IChangeSignatureOptionsService` is consumed only by the IDE dialog flow; supplying `ChangeSignatureOptionsResult(SignatureChange updatedSignature, bool previewChanges)` ourselves bypasses it.
+- **`ParameterConfiguration(ExistingParameter thisParameter, ImmutableArray<…> parametersWithoutDefaultValues, ImmutableArray<…> remainingEditableParameters, ExistingParameter paramsParameter, int selectedIndex)`** models the extension-method `this` parameter, the `params` array, and the default-value split as first-class slots.
+- **`AddedParameter(ITypeSymbol type, string typeName, string name, CallSiteKind callSiteKind, string callSiteValue, bool isRequired, string defaultValue, bool typeBinds)`** — matches the caller-supplies-the-value decision exactly; `ExistingParameter(IParameterSymbol)` wraps survivors.
+- `SignatureChange(ParameterConfiguration original, ParameterConfiguration updated)`.
+- `CSharpChangeSignatureService` has a parameterless constructor and is `[ExportLanguageService]`/`[Shared]`, so it can be obtained from workspace language services or instantiated directly.
+
+**One unknown left for implementation:** constructing the `SemanticDocument` the context requires (internal type, expected to have a static async factory). Resolve it by probe before writing the bridge, not by guessing.
+
+## Decisions (brainstorming outcomes)
+
+| Question | Decision |
+|---|---|
+| Engine | **Reflection into Roslyn's internal service.** It already handles cascading to overrides and interface implementations, named and optional arguments, `params` arrays, extension-method `this`, and XML `<param>` docs. Hand-rolling that matrix is where a write tool ships silent corruption — every review this session found 2–4 real bugs in far simpler read-only analysis. |
+| Operations | **remove + reorder + add.** |
+| Added-parameter values | **Caller supplies `callSiteValue`, required.** No inference: the tool never guesses semantics at a call site. An optional `defaultValue` makes the parameter optional, letting existing call sites omit it — the genuinely safe form. |
+| Safety | `rename_symbol`'s model — preview default, diagnostics-delta conflicts with `force`, degraded-load refusal, shared write path — **plus a `cascadedTo` report** naming every override/implementation Roslyn also rewrote, so the blast radius is visible before applying. |
+
+## Tool contract
+
+```
+change_signature(
+  method: string,
+  operations: [
+    { kind: "remove",  parameter: "logger" },
+    { kind: "reorder", order: ["id", "name", "token"] },
+    { kind: "add", name: "token", type: "System.Threading.CancellationToken",
+      callSiteValue: "CancellationToken.None", defaultValue: "default" }
+  ],
+  preview: bool = true,
+  force: bool = false)
+```
+
+Operations apply in order against the original parameter list. `reorder` takes a full permutation of the parameters surviving at that point (partial orders are rejected rather than guessed at). `add` appends unless the following `reorder` places it.
+
+## Result — `ChangeSignatureResult`
+
+`{ Success, Method (resolved display), OldSignature, NewSignature, Applied, Edits[], FilesChanged, CascadedTo[] (display strings of overrides/implementations also rewritten), Conflicts[] (RenameConflict shape), Message }`.
+
+## Architecture
+
+`Analysis/ChangeSignatureBridge.cs` isolates **every** reflection call behind one typed surface. Resolve the internal types and members once (cached in a `Lazy`), then per request: wrap survivors in `ExistingParameter` and new parameters in `AddedParameter`, build the original and updated `ParameterConfiguration` preserving Roslyn's `this`/`params`/default-value slots, construct `SignatureChange` and `ChangeSignatureOptionsResult`, build a `ChangeSignatureAnalysisSucceededContext` from the resolved symbol, invoke `ChangeSignatureWithContextAsync`, and return a typed record carrying `Succeeded`, `UpdatedSolution`, and Roslyn's own failure kind/message. No reflection leaks into the logic or tool layers.
+
+**Failure mode is loud, never silent.** If any probe fails — a Roslyn upgrade renaming a type or changing a signature — the bridge throws `McpToolException(Internal, …)` naming the missing member *before anything is written*. A tool that rewrites call sites must never degrade gracefully into partial work.
+
+`ChangeSignatureLogic` resolves the method (`SymbolResolver` → overload group ⇒ `AmbiguousMatch`), validates the operation list against the actual parameters, calls the bridge, computes conflicts and the cascade set, and returns edits. `ChangeSignatureTool` is the thin MCP wrapper passing `manager.CommitDocumentTextsAsync`.
+
+## Safety pipeline (reusing shipped infrastructure)
+
+1. Degraded load → refuse apply unless `force`; warn in preview.
+2. Bridge probe → `Internal` error if the API moved.
+2b. Roslyn's own verdict → if `ChangeSignatureResult.Succeeded` is false, surface its `ChangeSignatureFailureKind`/`ConfirmationMessage` and write nothing.
+3. Diagnostics delta (compiler errors, count-based per `(Id, FilePath)` as established in #300) → `Conflicts`; apply refuses unless `force`.
+4. `SolutionChangeWriter.WriteChangesToDiskAsync` → freshness refusal, atomic writes with rollback, encoding preservation.
+5. `SolutionChangeWriter.CommitAsync` → immediate snapshot update; no outcome may fail the operation.
+
+## Errors
+
+`SymbolNotFound` (method or parameter), `AmbiguousMatch` (overloads — the caller must qualify), `InvalidArgument` (empty operations, unknown `kind`, `reorder` that isn't a permutation, `add` without `callSiteValue`, removing a parameter that doesn't exist), `Internal` (bridge probe failure).
+
+## Known limits
+
+Static rewriting only: reflection-based and `dynamic` call sites are not updated, and neither are call sites in projects that failed to load. Partial methods and cross-project overrides follow Roslyn's own cascade rules. Delegates whose shape no longer matches are surfaced through the conflict check rather than rewritten.
+
+## Testing
+
+Matrix on `RenameTestWorkspace`: each operation alone and combined; named arguments at call sites; optional parameters; `params` arrays; extension-method `this`; the override and interface-implementation cascade (asserting `CascadedTo`); XML `<param>` doc updates; `add` with and without `defaultValue` (call sites updated vs left omitting); conflict detection when a removed parameter is still referenced in the body; every error case above; preview leaves disk untouched; apply writes and commits. Plus a **bridge-probe test** that fails loudly if the internal API moves — the early-warning system for a Roslyn upgrade. Fixture integration on TestSolution (preview only, so fixture files stay pristine).
+
+## Docs
+
+SKILL.md: Red Flags row ("add/remove/reorder a parameter" / "let me edit N call sites"), tool bullet next to `rename_symbol`, Quick Reference row, metadata-support row (source only). CLAUDE.md 63 → **64**. `tools/DocGen/Program.cs` categoryMap → `diagnostics` (alongside `rename_symbol`). README bullet. BACKLOG: mark shipped + Recently-shipped row.
+
+## Corrections found during pre-merge review
+
+Three assumptions in the sections above were verified against the running Roslyn build and did
+not hold. The implementation now guards each one:
+
+- **`ParameterConfiguration.Create` does not "preserve" the `this` and `params` slots — it
+  re-derives them by POSITION.** Index 0 of the updated list becomes the extension-method
+  receiver, and only the final element can be `params`. A reorder or remove is therefore capable
+  of rebinding `this` to a different parameter, or of stranding a `params` array mid-list (CS0231).
+  Both are refused before the bridge is reached.
+- **An unresolved added-parameter type is not written literally.**
+  `CSharpChangeSignatureService.CreateNewParameterSyntax` calls
+  `addedParameter.Type.GenerateTypeSyntax()` unconditionally; the `typeBinds` flag does not gate
+  that path, so a null `ITypeSymbol` NullReferenceExceptions inside Roslyn. An unresolvable — or
+  ambiguous — `type` is now an `InvalidArgument` refusal.
+- **`CascadedTo` must be computed from the ROOT of the hierarchy, not from the target.** Roslyn
+  cascades across the whole override/implementation set, so a target that is itself a derived
+  override or an interface implementation under-reported its blast radius when the walk only went
+  downward.
+
+`InvalidArgument` accordingly also covers: an added name that is not a valid C# identifier or
+collides with an existing parameter, a `type` that does not resolve or is ambiguous, displacing or
+removing an extension receiver, and leaving a surviving `params` array anywhere but last.
