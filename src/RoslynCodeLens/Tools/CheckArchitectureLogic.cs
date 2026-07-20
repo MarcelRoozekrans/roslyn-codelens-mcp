@@ -43,6 +43,24 @@ public static class CheckArchitectureLogic
         string scope = NamespaceScope,
         int maxSitesPerViolation = 5,
         CancellationToken cancellationToken = default)
+        => ExecuteCore(loaded, resolver, rules, scope, maxSitesPerViolation, null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="Execute"/>, with a seam for tests to COUNT semantic models.
+    /// </summary>
+    /// <param name="modelFactory">
+    /// Test observability seam ONLY; <see cref="Execute"/> passes null. The pre-model scope filter
+    /// below is this tool's central performance claim, and the only evidence that it is still doing
+    /// anything is how many models a scan builds — a number nothing else exposes.
+    /// </param>
+    internal static IReadOnlyList<ArchitectureViolation> ExecuteCore(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        IReadOnlyList<ArchitectureRule> rules,
+        string scope,
+        int maxSitesPerViolation,
+        Func<Compilation, SyntaxTree, SemanticModel>? modelFactory,
+        CancellationToken cancellationToken = default)
     {
         Validate(rules, scope, maxSitesPerViolation);
 
@@ -74,6 +92,7 @@ public static class CheckArchitectureLogic
                 ? null
                 : projectName => rules.Any(r => ScopePattern.Matches(r.From, projectName)),
             scopeDiscriminator: byNamespace ? null : (projectName, _) => projectName,
+            modelFactory: modelFactory,
             cancellationToken: cancellationToken);
 
         foreach (var scan in scans)
