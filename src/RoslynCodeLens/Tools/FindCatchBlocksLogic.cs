@@ -30,57 +30,44 @@ public static class FindCatchBlocksLogic
         var results = new List<CatchBlockInfo>();
         // A linked file belongs to several compilations; the same clause would repeat otherwise.
         var seen = new HashSet<(string File, int Line, int Column)>();
-        // A multi-targeted project compiles the same file once per target framework. Skipping
-        // repeats here — before the walk and the binding, not after — means the work is done once
-        // instead of N times, and it also makes `Project` attribution deterministic: the first
-        // compilation to reach a file is the one that gets to name it, consistently.
-        var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, generated ones skipped, project attribution
+        // deterministic — is SolutionScanner's job; this loop only asks what each clause is.
+        foreach (var scan in SolutionScanner.EnumerateTrees(loaded, resolver, cancellationToken: cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var model = scan.SemanticModel();
 
-            var projectName = resolver.GetProjectName(projectId);
-
-            foreach (var tree in compilation.SyntaxTrees)
+            var walkedNodes = 0;
+            foreach (var clause in scan.Root.DescendantNodes().OfType<CatchClauseSyntax>())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                // One machine-written file can hold hundreds of thousands of nodes, so a token
+                // checked only per tree leaves the caller unable to cancel partway through one.
+                if ((++walkedNodes & 0x3FF) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                var caught = DeclaredType(clause, model);
+                if (!Matches(clause, caught, target, model, includeBaseClauses))
                     continue;
 
-                if (!string.IsNullOrEmpty(tree.FilePath) && !walkedPaths.Add(tree.FilePath))
+                var position = clause.GetLocation().GetLineSpan();
+                var file = position.Path;
+                var line = position.StartLinePosition.Line + 1;
+                var column = position.StartLinePosition.Character + 1;
+
+                if (!seen.Add((file, line, column)))
                     continue;
 
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var model = compilation.GetSemanticModel(tree);
-
-                foreach (var clause in tree.GetRoot(cancellationToken)
-                             .DescendantNodes().OfType<CatchClauseSyntax>())
-                {
-                    var caught = DeclaredType(clause, model);
-                    if (!Matches(clause, caught, target, model, includeBaseClauses))
-                        continue;
-
-                    var position = clause.GetLocation().GetLineSpan();
-                    var file = position.Path;
-                    var line = position.StartLinePosition.Line + 1;
-                    var column = position.StartLinePosition.Character + 1;
-
-                    if (!seen.Add((file, line, column)))
-                        continue;
-
-                    results.Add(new CatchBlockInfo(
-                        CaughtType: caught is null ? null : ExceptionQueries.Fqn(caught),
-                        Method: ExceptionQueries.DescribeContainingMember(clause, model),
-                        File: file,
-                        Line: line,
-                        Column: column,
-                        HasFilter: clause.Filter != null,
-                        Rethrows: Rethrows(clause),
-                        IsEmpty: clause.Block.Statements.Count == 0,
-                        Snippet: ExceptionQueries.CatchSnippet(clause),
-                        Project: projectName));
-                }
+                results.Add(new CatchBlockInfo(
+                    CaughtType: caught is null ? null : ExceptionQueries.Fqn(caught),
+                    Method: ExceptionQueries.DescribeContainingMember(clause, model),
+                    File: file,
+                    Line: line,
+                    Column: column,
+                    HasFilter: clause.Filter != null,
+                    Rethrows: Rethrows(clause),
+                    IsEmpty: clause.Block.Statements.Count == 0,
+                    Snippet: ExceptionQueries.CatchSnippet(clause),
+                    Project: scan.ProjectName));
             }
         }
 
