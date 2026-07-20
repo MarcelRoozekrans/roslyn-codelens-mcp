@@ -73,7 +73,7 @@ public static class CheckArchitectureTool
         var raw = CheckArchitectureLogic.Execute(
             context.Loaded, context.Resolver, parsed, scope, maxSitesPerViolation);
 
-        return BuildResult(raw, parsed.Count, limit ?? DefaultLimit);
+        return BuildResult(raw, parsed, limit ?? DefaultLimit);
     }
 
     internal static IReadOnlyList<ArchitectureRule> ToModel(ArchitectureRuleInput[]? rules)
@@ -88,23 +88,29 @@ public static class CheckArchitectureTool
     /// rather than the page the caller happened to receive.
     /// </summary>
     internal static ToolListResult<ArchitectureViolation> BuildResult(
-        IReadOnlyList<ArchitectureViolation> raw, int rulesEvaluated, int limit)
-        => ToolListResult.Create(raw, limit, BuildSummary(raw, rulesEvaluated));
+        IReadOnlyList<ArchitectureViolation> raw, IReadOnlyList<ArchitectureRule> rules, int limit)
+        => ToolListResult.Create(raw, limit, BuildSummary(raw, rules));
 
-    internal static object BuildSummary(IReadOnlyList<ArchitectureViolation> items, int rulesEvaluated)
+    internal static object BuildSummary(
+        IReadOnlyList<ArchitectureViolation> items, IReadOnlyList<ArchitectureRule> rules)
     {
-        // Keyed by kind + from + to, not by `from` alone: two rules can share a source pattern
-        // (a `forbid` and an `allowOnly` over the same layer is a normal thing to write), and
-        // collapsing them into one bucket would silently merge their counts.
+        // Keyed by the RULE AS WRITTEN, so one rule is always one bucket. Keying on the matched
+        // `to` pattern instead split a `forbid` with several `to` patterns across several
+        // buckets while `rulesEvaluated` reported one — a summary that contradicted itself.
+        // The index is part of the key because two rules can be textually identical, and the
+        // kind/from/to text is there because an index alone tells the reader nothing.
         var byRule = items
-            .GroupBy(v => $"{v.RuleKind} {v.FromPattern} -> {v.ToPattern}", StringComparer.Ordinal)
+            .GroupBy(v => RuleKey(v.RuleIndex, rules[v.RuleIndex]), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Sum(v => v.ReferenceCount), StringComparer.Ordinal);
 
         return new
         {
             byRule,
             totalReferences = items.Sum(v => v.ReferenceCount),
-            rulesEvaluated,
+            rulesEvaluated = rules.Count,
         };
     }
+
+    private static string RuleKey(int index, ArchitectureRule rule)
+        => $"[{index}] {rule.Kind} {rule.From} -> {string.Join(", ", rule.To)}";
 }

@@ -165,6 +165,7 @@ public static class CheckArchitectureLogic
             .ThenBy(g => g.Key.Source, StringComparer.Ordinal)
             .ThenBy(g => g.Key.Target, StringComparer.Ordinal)
             .Select(g => new ArchitectureViolation(
+                RuleIndex: g.Key.RuleIndex,
                 RuleKind: rules[g.Key.RuleIndex].Kind,
                 RuleDescription: rules[g.Key.RuleIndex].Description,
                 FromPattern: rules[g.Key.RuleIndex].From,

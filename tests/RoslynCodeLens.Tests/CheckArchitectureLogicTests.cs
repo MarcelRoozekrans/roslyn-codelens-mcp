@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using RoslynCodeLens.Models;
@@ -482,6 +483,74 @@ public class CheckArchitectureLogicTests
             [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")], scope: "assembly"));
 
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+    }
+
+    // Summary buckets are per RULE AS WRITTEN. Keying on the matched `to` pattern split one
+    // forbid with several `to` patterns across several buckets while `rulesEvaluated` said 1 —
+    // the summary contradicted itself.
+    [Fact]
+    public void Summary_OneWrittenRuleIsOneBucket()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Types.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """), ("More.cs", """
+                namespace Demo.Shared;
+                public class Helper { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo
+                {
+                    public Demo.Domain.Order? A;
+                    public Demo.Shared.Helper? B;
+                }
+                """) }));
+
+        var rules = new[]
+        {
+            new ArchitectureRule("forbid", "Demo.Infrastructure.*", ["Demo.Domain.*", "Demo.Shared.*"]),
+        };
+
+        var raw = Run(workspace, rules);
+        Assert.Equal(2, raw.Count);                     // two edges...
+        Assert.All(raw, v => Assert.Equal(0, v.RuleIndex));
+
+        var byRule = ByRule(CheckArchitectureTool.BuildSummary(raw, rules));
+
+        var bucket = Assert.Single(byRule);             // ...but one rule, so one bucket
+        Assert.Equal(2, bucket.Value);
+    }
+
+    [Fact]
+    public void Summary_KeepsTwoRulesSharingAFromPatternApart()
+    {
+        var workspace = RenameTestWorkspace.Create(
+            ("Domain", new[] { ("Order.cs", """
+                namespace Demo.Domain;
+                public class Order { public int Id; }
+                """) }),
+            ("Infra", new[] { ("Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order? A; }
+                """) }));
+
+        var rules = new[]
+        {
+            new ArchitectureRule("forbid", "Demo.Infrastructure.*", ["Demo.Domain.*"]),
+            new ArchitectureRule("allowOnly", "Demo.Infrastructure.*", ["Demo.Shared.*"]),
+        };
+
+        Assert.Equal(2, ByRule(CheckArchitectureTool.BuildSummary(Run(workspace, rules), rules)).Count);
+    }
+
+    /// <summary>Reads the summary's `byRule` map off the wire shape it is actually serialized as.</summary>
+    private static IReadOnlyDictionary<string, int> ByRule(object summary)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(summary));
+        return document.RootElement.GetProperty("byRule").EnumerateObject()
+            .ToDictionary(p => p.Name, p => p.Value.GetInt32(), StringComparer.Ordinal);
     }
 
     // 14

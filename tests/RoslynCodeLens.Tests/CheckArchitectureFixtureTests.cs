@@ -54,7 +54,7 @@ public class CheckArchitectureFixtureTests
         var rules = new[] { new ArchitectureRule("forbid", "XUnitFixture", ["TestLib"]) };
         var raw = Run(rules);
 
-        var result = CheckArchitectureTool.BuildResult(raw, rules.Length, limit: 100);
+        var result = CheckArchitectureTool.BuildResult(raw, rules, limit: 100);
 
         Assert.Equal(raw.Count, result.TotalCount);
         Assert.False(result.Truncated);
