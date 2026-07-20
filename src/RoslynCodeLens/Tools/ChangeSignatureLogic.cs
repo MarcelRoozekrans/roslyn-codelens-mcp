@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.FindSymbols;
 using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
@@ -19,9 +20,7 @@ public static class ChangeSignatureLogic
         bool preview, bool force,
         CommitWrittenDocuments? commitToMemory, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(operations);
-
-        if (operations.Count == 0)
+        if (operations == null || operations.Count == 0)
         {
             throw new McpToolException(ToolErrorCode.InvalidArgument,
                 "No operations supplied — pass at least one remove/reorder/add operation.",
@@ -197,7 +196,7 @@ public static class ChangeSignatureLogic
                     current = Reorder(current, operation);
                     break;
                 case "add":
-                    current.Add(CreateAdded(loaded, resolver, document, operation));
+                    current.Add(CreateAdded(loaded, resolver, document, current, operation));
                     break;
                 default:
                     throw new McpToolException(ToolErrorCode.InvalidArgument,
@@ -206,7 +205,64 @@ public static class ChangeSignatureLogic
             }
         }
 
+        ValidateExtensionReceiver(target, current);
+        ValidateParamsIsLast(target, current);
         return current;
+    }
+
+    /// <summary>
+    /// An extension method's receiver is identified BY POSITION: Roslyn's
+    /// ParameterConfiguration.Create takes index 0 of the list as `this`. Moving another parameter
+    /// into that slot, or dropping the original receiver, would therefore rebind `this` to a
+    /// different parameter and silently change what every call site means.
+    /// </summary>
+    private static void ValidateExtensionReceiver(
+        IMethodSymbol target, List<DesiredParameter> current)
+    {
+        if (!target.IsExtensionMethod || target.Parameters.Length == 0)
+            return;
+
+        var receiver = target.Parameters[0];
+        if (current.Count > 0
+            && SymbolEqualityComparer.Default.Equals(current[0].Existing, receiver))
+        {
+            return;
+        }
+
+        var stillPresent = current.Any(
+            p => SymbolEqualityComparer.Default.Equals(p.Existing, receiver));
+        var problem = stillPresent
+            ? $"is no longer first (final order: {Describe(current)})"
+            : "was removed";
+
+        throw new McpToolException(ToolErrorCode.InvalidArgument,
+            $"'{target.Name}' is an extension method: its receiver '{receiver.Name}' (the `this` "
+                + $"parameter) {problem}. The receiver must stay first and cannot be removed — "
+                + "Roslyn binds `this` by position, so moving it would silently rebind every call site.",
+            new { receiver = receiver.Name, order = current.Select(p => p.Name).ToList() });
+    }
+
+    /// <summary>
+    /// C# recognises `params` only on the LAST parameter (and Roslyn's engine re-derives it from
+    /// the final slot), so a surviving params array anywhere else emits CS0231. Refused rather
+    /// than written: an `add` appends, and a reorder can move it, so both reach here.
+    /// </summary>
+    private static void ValidateParamsIsLast(IMethodSymbol target, List<DesiredParameter> current)
+    {
+        var paramsParameter = target.Parameters.LastOrDefault(p => p.IsParams);
+        if (paramsParameter == null)
+            return;
+
+        var index = current.FindIndex(
+            p => SymbolEqualityComparer.Default.Equals(p.Existing, paramsParameter));
+        if (index < 0 || index == current.Count - 1)
+            return;   // removed, or still last — both fine
+
+        throw new McpToolException(ToolErrorCode.InvalidArgument,
+            $"'{paramsParameter.Name}' is a params array and must remain the last parameter, but "
+                + $"the requested signature is ({Describe(current)}). Remove it, or place every "
+                + "other parameter before it.",
+            new { paramsParameter = paramsParameter.Name, order = current.Select(p => p.Name).ToList() });
     }
 
     private static void Remove(List<DesiredParameter> current, SignatureOperation operation)
@@ -272,12 +328,31 @@ public static class ChangeSignatureLogic
     }
 
     private static DesiredParameter CreateAdded(
-        LoadedSolution loaded, SymbolResolver resolver, Document document, SignatureOperation operation)
+        LoadedSolution loaded, SymbolResolver resolver, Document document,
+        List<DesiredParameter> current, SignatureOperation operation)
     {
         if (string.IsNullOrWhiteSpace(operation.Name))
         {
             throw new McpToolException(ToolErrorCode.InvalidArgument,
                 "An add operation requires 'name' — the new parameter's name.", new { kind = operation.Kind });
+        }
+
+        // Same guard rename_symbol uses: anything that isn't a lone valid identifier ("1st",
+        // "x, int y", a keyword) would otherwise be written verbatim into the parameter list.
+        if (!SyntaxFacts.IsValidIdentifier(operation.Name))
+        {
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"'{operation.Name}' is not a valid C# identifier.", new { name = operation.Name });
+        }
+
+        // C# identifiers are case-sensitive, so the collision check is ordinal. Without it the
+        // duplicate name silently aliases the original in reorder's name→parameter lookup.
+        if (current.Any(p => string.Equals(p.Name, operation.Name, StringComparison.Ordinal)))
+        {
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"A parameter named '{operation.Name}' already exists ({Describe(current)}) — "
+                    + "parameter names must be unique.",
+                new { name = operation.Name, existing = current.Select(p => p.Name).ToList() });
         }
 
         if (string.IsNullOrWhiteSpace(operation.Type))

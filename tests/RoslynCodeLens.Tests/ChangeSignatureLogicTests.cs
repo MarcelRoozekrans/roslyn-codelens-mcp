@@ -263,6 +263,142 @@ public class ChangeSignatureLogicTests
         Assert.Contains("3.Twice(\"x\", 2)", after, StringComparison.Ordinal);
     }
 
+    private const string ExtensionSource = """
+        namespace SigDemo;
+        public static class Ext
+        {
+            public static int Twice(this int value, int factor, string label) => value;
+            public static int Use() => 3.Twice(2, "x");
+        }
+        """;
+
+    /// <summary>
+    /// The receiver is index 0 by position, not by identity: Roslyn's ParameterConfiguration
+    /// re-derives `this` from whatever lands first. A reorder that promotes another parameter
+    /// would silently rebind the receiver, so it is refused.
+    /// </summary>
+    [Fact]
+    public async Task ExtensionMethod_ReorderDisplacingReceiver_ThrowsInvalidArgument()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Ext.cs", ExtensionSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Ext.Twice",
+                [new SignatureOperation("reorder", Order: ["factor", "value", "label"])]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("value", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("extension", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExtensionMethod_RemovingReceiver_ThrowsInvalidArgument()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Ext.cs", ExtensionSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Ext.Twice",
+                [new SignatureOperation("remove", Parameter: "value")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("extension", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Add_DuplicateParameterName_ThrowsInvalidArgument()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("add", Name: "a", Type: "System.Int32", CallSiteValue: "0")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("'a'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Add_NameDifferingOnlyByCase_IsAllowed()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));
+
+        // C# identifiers are case-sensitive, so `A` alongside `a` is legal.
+        var result = await RunAsync(loaded, resolver, "Svc.Add",
+            [new SignatureOperation("add", Name: "A", Type: "System.Int32", CallSiteValue: "0")]);
+
+        Assert.True(result.Success, result.Message);
+    }
+
+    private const string ParamsSource = """
+        namespace SigDemo;
+        public class Svc
+        {
+            public int Sum(int a, params int[] rest) => a;
+            public int Use() => Sum(1, 2, 3);
+        }
+        """;
+
+    /// <summary>
+    /// Roslyn recognises `params` only on the LAST parameter, so an add that lands after it
+    /// would emit CS0231. Refused rather than silently reordered.
+    /// </summary>
+    [Fact]
+    public async Task ParamsMethod_Add_ThrowsInvalidArgument()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", ParamsSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Sum",
+                [new SignatureOperation("add", Name: "seed", Type: "System.Int32", CallSiteValue: "0")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("params", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("rest", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ParamsMethod_ReorderMovingParamsOffTheEnd_ThrowsInvalidArgument()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", ParamsSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Sum",
+                [new SignatureOperation("reorder", Order: ["rest", "a"])]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("params", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ParamsMethod_RemovingTheParamsArray_IsAllowed()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", ParamsSource));
+
+        var result = await RunAsync(loaded, resolver, "Svc.Sum",
+            [new SignatureOperation("remove", Parameter: "rest")]);
+
+        Assert.True(result.Success, result.Message);
+    }
+
+    [Theory]
+    [InlineData("1st")]
+    [InlineData("x, int y")]
+    [InlineData("a b")]
+    // NOTE: a reserved keyword ("class") is NOT rejected — SyntaxFacts.IsValidIdentifier checks
+    // lexical form only, and this deliberately uses the same guard as rename_symbol. Such a name
+    // produces parse errors that surface as Conflicts, so it cannot land silently.
+    public async Task Add_InvalidIdentifier_ThrowsInvalidArgument(string name)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Add",
+                [new SignatureOperation("add", Name: name, Type: "System.Int32", CallSiteValue: "0")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("identifier", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---------------------------------------------------------------- conflicts
 
     private const string BodyUsesParamSource = """
@@ -283,7 +419,10 @@ public class ChangeSignatureLogicTests
             [new SignatureOperation("remove", Parameter: "b")]);
 
         Assert.True(result.Success, result.Message);
-        Assert.NotEmpty(result.Conflicts);
+        // The body still says `b.Length` after `b` is gone: CS0103 (name does not exist).
+        var conflict = Assert.Single(result.Conflicts);
+        Assert.Equal("CS0103", conflict.Id);
+        Assert.Contains("b", conflict.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -371,6 +510,18 @@ public class ChangeSignatureLogicTests
             () => RunAsync(loaded, resolver, "Svc.Add", []));
 
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+    }
+
+    [Fact]
+    public async Task NullOperations_ThrowsInvalidArgumentLikeAnEmptyArray()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Add", null!));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("No operations supplied", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

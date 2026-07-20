@@ -18,7 +18,12 @@ public static class ChangeSignatureTool
                  "REQUIRES `callSiteValue` — the expression every existing call site will pass, " +
                  "since the tool never guesses call-site semantics — with an optional " +
                  "`defaultValue` that instead makes the parameter optional and leaves existing " +
-                 "calls untouched. Defaults to preview mode (returns edits without writing files); " +
+                 "calls untouched. Rejected as unsafe: an added name that is not a valid C# "
+                 + "identifier or collides with an existing parameter; moving or removing an "
+                 + "extension method's `this` parameter (it must stay first); and any signature "
+                 + "that would leave a surviving `params` array anywhere but last — add the "
+                 + "parameter and reorder it before the `params` array, or remove that array. "
+                 + "Defaults to preview mode (returns edits without writing files); " +
                  "set `preview=false` to apply. New compiler errors the change would introduce are " +
                  "reported as Conflicts, and apply mode refuses to write them unless `force=true`. " +
                  "Source-defined methods only; overloaded names must be disambiguated.")]
