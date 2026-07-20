@@ -50,6 +50,7 @@ public static class FindReferencesLogic
                     var lineSpan = location.Location.GetLineSpan();
                     var file = lineSpan.Path;
                     var line = lineSpan.StartLinePosition.Line + 1;
+                    var column = lineSpan.StartLinePosition.Character + 1;
 
                     if (!seen.Add((file, line)))
                         continue;
@@ -60,7 +61,7 @@ public static class FindReferencesLogic
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
                     results.Add(new SymbolReference(
-                        kind, file, line, snippet, projectName, resolver.IsGenerated(file)));
+                        kind, file, line, column, snippet, projectName, resolver.IsGenerated(file)));
                 }
             }
         }

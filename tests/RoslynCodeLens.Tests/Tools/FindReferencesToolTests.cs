@@ -73,9 +73,9 @@ public class FindReferencesToolTests
     {
         var input = new List<SymbolReference>
         {
-            new("Read", "b.cs", 1, "x", "P"),
-            new("Read", "a.cs", 9, "x", "P"),
-            new("Read", "a.cs", 2, "x", "P"),
+            new("read", "b.cs", 1, 1, "x", "P"),
+            new("read", "a.cs", 9, 1, "x", "P"),
+            new("read", "a.cs", 2, 1, "x", "P"),
         };
 
         var sorted = FindReferencesTool.Sort(input);
@@ -91,9 +91,9 @@ public class FindReferencesToolTests
     {
         var input = new List<SymbolReference>
         {
-            new("Read", "a.cs", 1, "x", "Foo"),
-            new("Read", "a.cs", 2, "x", "Foo"),
-            new("Read", "b.cs", 1, "x", "Bar"),
+            new("read", "a.cs", 1, 1, "x", "Foo"),
+            new("read", "a.cs", 2, 1, "x", "Foo"),
+            new("read", "b.cs", 1, 1, "x", "Bar"),
         };
 
         var summary = FindReferencesTool.BuildSummary(input);
