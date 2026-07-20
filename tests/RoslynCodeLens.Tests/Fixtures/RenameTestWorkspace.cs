@@ -30,6 +30,22 @@ internal static class RenameTestWorkspace
             .ToArray());
 
     /// <summary>
+    /// Projects in a STRICT chain: each references only its immediate predecessor, so the last
+    /// project depends on the first transitively but not directly. The multi-project overload
+    /// above cannot express this — it references every earlier project — which makes it unable to
+    /// distinguish direct from transitive dependents.
+    /// </summary>
+    public static (LoadedSolution Loaded, SymbolResolver Resolver) CreateChain(
+        params (string ProjectName, (string FilePath, string Source)[] Files)[] projects)
+        => CreateCore(
+            projects
+                .Select(p => (p.ProjectName, p.Files
+                    .Select(f => (f.FilePath, SourceText.From(f.Source)))
+                    .ToArray()))
+                .ToArray(),
+            chainOnly: true);
+
+    /// <summary>
     /// Single project whose documents are read from existing files on disk, so each
     /// document's SourceText carries the detected encoding (incl. BOM presence).
     /// </summary>
@@ -45,6 +61,10 @@ internal static class RenameTestWorkspace
 
     private static (LoadedSolution Loaded, SymbolResolver Resolver) CreateCore(
         params (string ProjectName, (string FilePath, SourceText Text)[] Files)[] projects)
+        => CreateCore(projects, chainOnly: false);
+
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) CreateCore(
+        (string ProjectName, (string FilePath, SourceText Text)[] Files)[] projects, bool chainOnly)
     {
         var workspace = new AdhocWorkspace();
         var solution = workspace.CurrentSolution;
@@ -58,7 +78,9 @@ internal static class RenameTestWorkspace
                     compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
                 .WithMetadataReferences(
                     [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)])
-                .WithProjectReferences(projectIds.Select(id => new ProjectReference(id)));
+                .WithProjectReferences(
+                    (chainOnly ? projectIds.TakeLast(1) : projectIds)
+                        .Select(id => new ProjectReference(id)));
 
             solution = solution.AddProject(projectInfo);
             foreach (var (path, text) in files)

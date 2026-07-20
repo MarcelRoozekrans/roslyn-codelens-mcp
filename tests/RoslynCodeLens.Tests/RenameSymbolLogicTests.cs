@@ -378,6 +378,41 @@ public class RenameSymbolLogicTests
         Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
     }
 
+    /// <summary>
+    /// A break propagates as far as the reference graph does, so the scan set must too: with
+    /// LibA &lt;- LibB &lt;- LibC, LibC sees LibA's types through LibB and can break without LibB's
+    /// text changing. Scanning only DIRECT dependents left LibC unexamined and the conflict
+    /// unreported.
+    /// </summary>
+    [Fact]
+    public async Task ComputeScanSet_IncludesTransitiveDependents()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.CreateChain(
+            ("LibA", [("Widget.cs", "namespace Lib; public class Widget { }")]),
+            ("LibB", [("Mid.cs", "namespace Mid; public class Mid { }")]),
+            ("LibC", [("Far.cs", "namespace Far; public class Far { }")]));
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Widget");
+        var renamed = await Microsoft.CodeAnalysis.Rename.Renamer.RenameSymbolAsync(
+            loaded.Solution, target,
+            new Microsoft.CodeAnalysis.Rename.SymbolRenameOptions(), "Sprocket",
+            CancellationToken.None);
+
+        var byName = loaded.Solution.Projects.ToDictionary(p => p.Name, p => p.Id, StringComparer.Ordinal);
+
+        // Precondition: LibC really is transitive-only, otherwise this proves nothing.
+        var direct = loaded.Solution.GetProjectDependencyGraph()
+            .GetProjectsThatDirectlyDependOnThisProject(byName["LibA"]);
+        Assert.DoesNotContain(byName["LibC"], direct);
+
+        var scanSet = SolutionChangeSafety.ComputeScanSet(loaded.Solution, renamed);
+
+        Assert.Contains(byName["LibA"], scanSet);
+        Assert.Contains(byName["LibB"], scanSet);
+        Assert.Contains(byName["LibC"], scanSet);
+        Assert.Equal(scanSet.Count, scanSet.Distinct().Count());
+    }
+
     [Fact]
     public async Task DependentProjectWithPreexistingError_IsNotAConflict()
     {

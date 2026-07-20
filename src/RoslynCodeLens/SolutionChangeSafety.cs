@@ -87,9 +87,16 @@ public static class SolutionChangeSafety
     }
 
     /// <summary>
-    /// Projects to conflict-scan: those the edit textually changed, plus their
-    /// direct dependents — an edit can break a downstream project without
-    /// touching its text (source generators, name-based lookup changes).
+    /// Projects to conflict-scan: those the edit textually changed, plus every project that
+    /// depends on them TRANSITIVELY — an edit can break a downstream project without touching its
+    /// text (source generators, name-based lookup changes), and a project two hops away sees the
+    /// changed types just as directly as one hop away does. Scanning only immediate dependents
+    /// silently missed those.
+    /// <para>
+    /// Cost: each scanned project outside the cached set needs a compilation, so a change low in
+    /// a wide dependency graph can compile most of the solution. That is the price of not
+    /// under-reporting conflicts on exactly the changes most likely to break something.
+    /// </para>
     /// </summary>
     public static IReadOnlyList<ProjectId> ComputeScanSet(Solution original, Solution changed)
     {
@@ -106,7 +113,7 @@ public static class SolutionChangeSafety
         }
         foreach (var projectId in changedProjects)
         {
-            foreach (var dependent in graph.GetProjectsThatDirectlyDependOnThisProject(projectId))
+            foreach (var dependent in graph.GetProjectsThatTransitivelyDependOnThisProject(projectId))
             {
                 if (seen.Add(dependent))
                     scanSet.Add(dependent);
