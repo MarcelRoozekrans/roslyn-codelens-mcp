@@ -52,6 +52,7 @@ public static class CheckArchitectureLogic
         // reference counts honest and project attribution deterministic (see FindThrowSitesLogic).
         var walkedPaths = new HashSet<string>(StringComparer.Ordinal);
         var generatedTargets = new Dictionary<ISymbol, bool>(SymbolEqualityComparer.Default);
+        var solutionScopeNames = SolutionScopeNames(loaded.Solution);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
@@ -111,7 +112,7 @@ public static class CheckArchitectureLogic
                     // author can actually act on: solution-internal, and not pure generator
                     // output. `forbid` names its target explicitly and evaluates everything.
                     var eligibleForAllowOnly =
-                        target.Locations.Any(l => l.IsInSource)
+                        IsSolutionInternal(target, solutionScopeNames)
                         && !IsGeneratedOnly(target, generatedTargets);
 
                     for (var i = 0; i < rules.Count; i++)
@@ -365,6 +366,41 @@ public static class CheckArchitectureLogic
             _ => candidate,
         };
     }
+
+    /// <summary>
+    /// Every name an assembly produced by this solution can carry: each project's assembly name
+    /// and its project name (they differ often enough that checking only one would miss).
+    /// </summary>
+    internal static IReadOnlySet<string> SolutionScopeNames(Solution solution)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var project in solution.Projects)
+        {
+            if (!string.IsNullOrEmpty(project.AssemblyName))
+                names.Add(project.AssemblyName);
+            if (!string.IsNullOrEmpty(project.Name))
+                names.Add(project.Name);
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Whether a target belongs to the solution — the question <c>allowOnly</c> turns on.
+    /// </summary>
+    /// <remarks>
+    /// Asking the symbol whether it has a source location answers a different question: whether it
+    /// happened to LOAD as source. When a ProjectReference resolves as a metadata reference
+    /// instead — a real MSBuildWorkspace failure mode — every source location disappears and every
+    /// <c>allowOnly</c> rule over that boundary silently returns empty, which reads exactly like
+    /// clean architecture. Matching the containing assembly against the solution's own projects
+    /// keeps the answer a property of the solution rather than of the load. The source-location
+    /// check remains as a fallback, for a project whose assembly name we cannot see.
+    /// </remarks>
+    internal static bool IsSolutionInternal(ITypeSymbol target, IReadOnlySet<string> solutionScopeNames)
+        => (target.ContainingAssembly is { Name.Length: > 0 } assembly
+            && solutionScopeNames.Contains(assembly.Name))
+           || target.Locations.Any(l => l.IsInSource);
 
     /// <summary>
     /// True when every syntax tree that declares the type is generated code — nothing the author

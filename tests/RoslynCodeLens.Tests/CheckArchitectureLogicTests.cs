@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Tests.Fixtures;
 using RoslynCodeLens.Tools;
@@ -298,6 +301,101 @@ public class CheckArchitectureLogicTests
                 namespace Demo.Infrastructure;
                 public class Repo { public Demo.Domain.Order? A; }
                 """) }));
+
+    // 11d — "solution-internal" must not depend on HOW the solution loaded. When a
+    // ProjectReference resolves as a metadata reference instead (a real MSBuildWorkspace failure
+    // mode in this repo), Locations.IsInSource goes false and EVERY allowOnly rule over that
+    // boundary silently returns empty — indistinguishable from clean architecture.
+    [Fact]
+    public void AllowOnly_SeesTargetsWhoseProjectResolvedAsMetadata()
+    {
+        var workspace = MetadataResolvedReference();
+
+        var violation = Assert.Single(
+            Run(workspace, [AllowOnly("Demo.Infrastructure.*", "Demo.Shared.*")]));
+
+        Assert.Equal("Demo.Domain", violation.TargetScope);
+    }
+
+    [Fact]
+    public void IsSolutionInternal_TrueForMetadataTypeFromASolutionProject()
+    {
+        var workspace = MetadataResolvedReference();
+        var order = OrderAsSeenByInfra(workspace);
+
+        // Guard the premise: this really is a metadata symbol, not a source one.
+        Assert.DoesNotContain(order.Locations, l => l.IsInSource);
+        Assert.Equal("Domain", order.ContainingAssembly.Name, StringComparer.Ordinal);
+
+        Assert.True(CheckArchitectureLogic.IsSolutionInternal(
+            order, CheckArchitectureLogic.SolutionScopeNames(workspace.Loaded.Solution)));
+    }
+
+    [Fact]
+    public void IsSolutionInternal_FalseForAnAssemblyNoProjectProduces()
+    {
+        var workspace = MetadataResolvedReference();
+        var order = OrderAsSeenByInfra(workspace);
+
+        Assert.False(CheckArchitectureLogic.IsSolutionInternal(
+            order, new HashSet<string>(StringComparer.Ordinal) { "SomethingElse" }));
+    }
+
+    private static INamedTypeSymbol OrderAsSeenByInfra(
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace)
+    {
+        var infra = workspace.Loaded.Solution.Projects
+            .Single(p => string.Equals(p.Name, "Infra", StringComparison.Ordinal));
+        return workspace.Loaded.Compilations[infra.Id].GetTypeByMetadataName("Demo.Domain.Order")!;
+    }
+
+    /// <summary>
+    /// Two projects where Infra sees Domain's types ONLY through a compiled image, with no
+    /// ProjectReference — the shape a dropped project reference produces.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) MetadataResolvedReference()
+    {
+        const string DomainSource = """
+            namespace Demo.Domain;
+            public class Order { public int Id; }
+            """;
+
+        var corlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
+
+        var domainImage = CSharpCompilation.Create(
+            "Domain", [CSharpSyntaxTree.ParseText(DomainSource)], [corlib], options);
+        using var stream = new MemoryStream();
+        Assert.True(domainImage.Emit(stream).Success);
+        var domainMetadata = MetadataReference.CreateFromImage(stream.ToArray());
+
+        var solution = new AdhocWorkspace().CurrentSolution;
+
+        var domainId = ProjectId.CreateNewId();
+        solution = solution
+            .AddProject(ProjectInfo.Create(domainId, VersionStamp.Create(), "Domain", "Domain",
+                    LanguageNames.CSharp, compilationOptions: options)
+                .WithMetadataReferences([corlib]))
+            .AddDocument(DocumentId.CreateNewId(domainId), "Order.cs", DomainSource,
+                filePath: "Order.cs");
+
+        var infraId = ProjectId.CreateNewId();
+        solution = solution
+            .AddProject(ProjectInfo.Create(infraId, VersionStamp.Create(), "Infra", "Infra",
+                    LanguageNames.CSharp, compilationOptions: options)
+                .WithMetadataReferences([corlib, domainMetadata]))
+            .AddDocument(DocumentId.CreateNewId(infraId), "Repo.cs", """
+                namespace Demo.Infrastructure;
+                public class Repo { public Demo.Domain.Order A; }
+                """, filePath: "Repo.cs");
+
+        var compilations = new ConcurrentDictionary<ProjectId, Compilation>();
+        foreach (var project in solution.Projects)
+            compilations[project.Id] = project.GetCompilationAsync().GetAwaiter().GetResult()!;
+
+        var loaded = new LoadedSolution { Solution = solution, Compilations = compilations };
+        return (loaded, new SymbolResolver(loaded));
+    }
 
     // 12
     [Fact]
