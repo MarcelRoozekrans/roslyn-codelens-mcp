@@ -44,7 +44,7 @@ public static class CheckArchitectureLogic
         int maxSitesPerViolation = 5,
         CancellationToken cancellationToken = default)
     {
-        Validate(rules, scope);
+        Validate(rules, scope, maxSitesPerViolation);
 
         var byNamespace = string.Equals(scope, NamespaceScope, StringComparison.Ordinal);
         var groups = new Dictionary<(int RuleIndex, string Source, string Target), Accumulator>();
@@ -176,8 +176,16 @@ public static class CheckArchitectureLogic
             .ToList();
     }
 
-    private static void Validate(IReadOnlyList<ArchitectureRule> rules, string scope)
+    private static void Validate(IReadOnlyList<ArchitectureRule> rules, string scope, int maxSitesPerViolation)
     {
+        // A violation with no sites is an accusation with no location — unactionable, and never
+        // what the caller meant.
+        if (maxSitesPerViolation <= 0)
+        {
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"maxSitesPerViolation must be at least 1 (got {maxSitesPerViolation}).");
+        }
+
         if (!string.Equals(scope, NamespaceScope, StringComparison.Ordinal)
             && !string.Equals(scope, ProjectScope, StringComparison.Ordinal))
         {

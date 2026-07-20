@@ -462,6 +462,19 @@ public class CheckArchitectureLogicTests
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
     }
 
+    // A violation with no sites is unactionable: the caller gets an accusation and no location.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void NonPositiveMaxSitesPerViolation_IsInvalidArgument(int maxSites)
+    {
+        var ex = Assert.Throws<McpToolException>(() => Run(Layered(),
+            [Forbid("Demo.Infrastructure.*", "Demo.Domain.*")], maxSitesPerViolation: maxSites));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("maxSitesPerViolation", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void UnknownScope_IsInvalidArgument()
     {
