@@ -42,7 +42,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 - ✅ **`resolve_stack_trace`** — *shipped* (PR #301). Map a pasted runtime stack trace to file/line/symbol, undoing name mangling (async state machines, lambdas, local functions, generics). Design: [docs/plans/2026-07-19-resolve-stack-trace-design.md](plans/2026-07-19-resolve-stack-trace-design.md).
 - ✅ **`get_method_source`** — *shipped* (PR #305). Returns members' full declaration source by name; one tool with array input covers SharpLens's scalar + batch pair. Design: [docs/plans/2026-07-19-get-method-source-design.md](plans/2026-07-19-get-method-source-design.md).
 - ✅ **Reference-kind classification on `find_references`** — *shipped* (PR #307). Each reference is tagged (`read`/`write`/`readwrite`/`invocation`/`method_group`/`object_creation`/`cast`/`type_check`/`typeof`/`base_type`/`type_constraint`/`type_argument`/`declaration`/`attribute`/`nameof`/`xml_doc`), reported per occurrence with a `column`, filterable server-side via `kinds`, and summarised by `byKind`. Subsumes the would-be `find_pattern_usages` (`type_check`). Enhancement, so no Recently-shipped row. Design: [docs/plans/2026-07-20-reference-kinds-design.md](plans/2026-07-20-reference-kinds-design.md).
-- **Exception-flow trio: `get_exception_flow`, `find_throw_sites`, `find_catch_blocks`** — "which exceptions can escape this method, and where are they caught," with derived-type awareness. We have zero exception analysis today.
+- ✅ **Exception-flow trio: `get_exception_flow`, `find_throw_sites`, `find_catch_blocks`** — *shipped* (PR #309). Depth-bounded escape analysis with propagation paths, plus solution-wide throw/catch site queries including swallow detection. Design: [docs/plans/2026-07-20-exception-flow-design.md](plans/2026-07-20-exception-flow-design.md). **This completes every high-value item from the SharpLens comparison.**
 
 ### Medium value
 
@@ -69,6 +69,9 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 | Tool | Theme | PR |
 |---|---|---|
+| `get_exception_flow` | Analysis | #309 |
+| `find_throw_sites` | Analysis | #309 |
+| `find_catch_blocks` | Analysis | #309 |
 | `get_method_source` | Analysis | #305 |
 | `resolve_stack_trace` | Navigation | #301 |
 | `rename_symbol` | Refactoring | #298 |
