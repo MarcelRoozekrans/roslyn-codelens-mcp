@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.10.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.9.0...v2.10.0) (2026-07-20)
+
+
+### Features
+
+* change_signature — add, remove, and reorder parameters across the solution ([#313](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/313)) ([7c03252](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/7c032521a55283518a2096b38cec79265450ae6c))
+
+
+### Bug Fixes
+
+* commit apply_code_action writes to the in-memory snapshot ([#311](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/311)) ([c04de74](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/c04de749e8c9878a9321c8b86e1d331355fd8aa2))
+
 ## [2.9.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.8.0...v2.9.0) (2026-07-20)
 
 
