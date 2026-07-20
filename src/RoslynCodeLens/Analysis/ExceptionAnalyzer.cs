@@ -103,6 +103,13 @@ public static class ExceptionAnalyzer
     /// A <c>when</c> filter is deliberately ignored — it decides at runtime, so callers treat it
     /// separately rather than letting it turn a match into a non-match.
     /// </summary>
+    /// <remarks>
+    /// Matching goes through <see cref="ExceptionQueries.IsOrDerivesFrom"/>, which compares
+    /// fully-qualified display names. <c>SymbolEqualityComparer</c> is wrong here twice over: the
+    /// thrown type may have been bound in a different project's compilation, and a constructed
+    /// generic (<c>MyEx&lt;string&gt;</c>) is never equal to the unbound definition a
+    /// metadata-name lookup hands back. One comparison strategy, used everywhere.
+    /// </remarks>
     public static bool CatchesType(
         CatchClauseSyntax clause, INamedTypeSymbol exceptionType, SemanticModel model)
     {
@@ -112,20 +119,21 @@ public static class ExceptionAnalyzer
         if (model.GetSymbolInfo(typeSyntax).Symbol is not INamedTypeSymbol caught)
             return false;
 
-        for (var current = exceptionType; current != null; current = current.BaseType)
-        {
-            if (SymbolEqualityComparer.Default.Equals(current, caught))
-                return true;
-        }
-
-        return false;
+        return ExceptionQueries.IsOrDerivesFrom(exceptionType, caught);
     }
 
     /// <summary>
-    /// First catch clause protecting this node for this exception type, searching outward but
-    /// never past the enclosing method-like body.
+    /// Every catch clause that could handle this exception, innermost try first and, within one
+    /// try, in source order — the order the CLR itself considers them.
     /// </summary>
-    public static ExceptionHandler? FindHandler(
+    /// <remarks>
+    /// Deliberately an enumeration rather than a "first handler": a clause carrying a
+    /// <c>when</c> filter may decline at run time, so it does not end the search. Returning only
+    /// the first binding clause meant <c>catch (IOException) when (c) { } catch (IOException) { }</c>
+    /// reported the exception as escaping, even though the second clause always catches it.
+    /// Callers walk this sequence and stop at the first UNFILTERED candidate.
+    /// </remarks>
+    public static IEnumerable<ExceptionHandler> EnumerateHandlers(
         SyntaxNode node, INamedTypeSymbol exceptionType, SemanticModel model)
     {
         for (var current = node; current != null; current = current.Parent)
@@ -144,12 +152,10 @@ public static class ExceptionAnalyzer
                 foreach (var clause in tryStatement.Catches)
                 {
                     if (CatchesType(clause, exceptionType, model))
-                        return new ExceptionHandler(clause, clause.Filter != null);
+                        yield return new ExceptionHandler(clause, clause.Filter != null);
                 }
             }
         }
-
-        return null;
     }
 
     /// <summary>

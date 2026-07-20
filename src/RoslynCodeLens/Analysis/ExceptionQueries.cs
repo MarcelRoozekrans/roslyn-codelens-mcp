@@ -37,7 +37,7 @@ internal static class ExceptionQueries
                 new { exceptionType });
         }
 
-        if (!DerivesFromException(resolved))
+        if (!IsOrDerivesFrom(resolved, "System.Exception"))
         {
             throw new McpToolException(
                 ToolErrorCode.InvalidArgument,
@@ -48,29 +48,28 @@ internal static class ExceptionQueries
         return resolved;
     }
 
-    /// <summary>Whether <paramref name="type"/> is System.Exception or a subclass of it.</summary>
-    public static bool DerivesFromException(INamedTypeSymbol type)
-    {
-        for (var current = type; current != null; current = current.BaseType)
-        {
-            if (string.Equals(Fqn(current), "System.Exception", StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
-    }
-
     /// <summary>
-    /// Whether <paramref name="type"/> is <paramref name="target"/> or derives from it. Compares
-    /// fully-qualified names rather than symbol identity because the two symbols can come from
-    /// different compilations, where <c>SymbolEqualityComparer</c> reports a false negative.
+    /// Whether <paramref name="type"/> is <paramref name="target"/> or derives from it.
     /// </summary>
+    /// <remarks>
+    /// The one and only exception-type comparison in this feature, so the three tools cannot
+    /// disagree about what "same type" means. Fully-qualified display names, not symbol identity:
+    /// symbols are compilation-scoped, so the same type bound in two projects is not
+    /// <c>SymbolEqualityComparer</c>-equal; and generic arguments are part of the name, so
+    /// <c>MyEx&lt;string&gt;</c> matches <c>MyEx&lt;string&gt;</c> and not <c>MyEx&lt;int&gt;</c>.
+    /// </remarks>
     public static bool IsOrDerivesFrom(INamedTypeSymbol type, INamedTypeSymbol target)
+        => IsOrDerivesFrom(type, Fqn(target));
+
+    /// <summary>
+    /// Overload for the one target that has no symbol to hand: <c>System.Exception</c> during
+    /// argument validation, before any compilation has been chosen.
+    /// </summary>
+    public static bool IsOrDerivesFrom(INamedTypeSymbol type, string targetFqn)
     {
-        var targetName = Fqn(target);
         for (var current = type; current != null; current = current.BaseType)
         {
-            if (string.Equals(Fqn(current), targetName, StringComparison.Ordinal))
+            if (string.Equals(Fqn(current), targetFqn, StringComparison.Ordinal))
                 return true;
         }
 
@@ -78,25 +77,10 @@ internal static class ExceptionQueries
     }
 
     /// <summary>
-    /// The same type as seen by <paramref name="compilation"/>. Symbols are compilation-scoped, so
-    /// a type resolved once up front is not <c>SymbolEqualityComparer</c>-equal to the same type
-    /// bound in another project's compilation — which would silently break catch matching in a
-    /// multi-project solution. Falls back to the original symbol when the lookup fails (a type
-    /// declared in a project this compilation does not reference cannot be thrown there anyway).
+    /// A type's fully-qualified name including generic arguments, without the <c>global::</c>
+    /// prefix — the canonical spelling every comparison and every reported <c>exceptionType</c>
+    /// goes through.
     /// </summary>
-    public static INamedTypeSymbol Localize(INamedTypeSymbol type, Compilation compilation)
-        => compilation.GetTypeByMetadataName(MetadataName(type)) ?? type;
-
-    private static string MetadataName(INamedTypeSymbol type)
-    {
-        var name = type.MetadataName;
-        for (var container = type.ContainingType; container != null; container = container.ContainingType)
-            name = $"{container.MetadataName}+{name}";
-
-        var ns = type.ContainingNamespace;
-        return ns is null || ns.IsGlobalNamespace ? name : $"{ns.ToDisplayString()}.{name}";
-    }
-
     public static string Fqn(INamedTypeSymbol type)
         => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             .Replace("global::", string.Empty, StringComparison.Ordinal);
@@ -125,7 +109,11 @@ internal static class ExceptionQueries
         return string.Empty;
     }
 
-    /// <summary>The statement containing a node, trimmed to a readable length.</summary>
+    /// <summary>
+    /// The statement containing a node, trimmed to a readable length. Shared with
+    /// <c>FindReferencesLogic</c>, which grew a byte-identical private copy — one helper so the
+    /// snippet a user sees is formatted the same way whichever tool produced it.
+    /// </summary>
     public static string StatementSnippet(SyntaxNode node)
     {
         var statement = node.FirstAncestorOrSelf<StatementSyntax>();

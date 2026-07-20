@@ -31,6 +31,36 @@ public class GetExceptionFlowLogicTests
             public void CaughtLocally() { try { throw new ArgumentNullException(); } catch (ArgumentNullException) { } }
 
             public void Recursive() { Recursive(); throw new NotSupportedException(); }
+
+            public void FilteredThenUnfiltered()
+            {
+                try { Middle(); }
+                catch (InvalidOperationException) when (DateTime.Now.Year > 0) { }
+                catch (InvalidOperationException) { }
+            }
+
+            public void FilteredInnerUnfilteredOuter()
+            {
+                try
+                {
+                    try { Middle(); }
+                    catch (InvalidOperationException) when (DateTime.Now.Year > 0) { }
+                }
+                catch (InvalidOperationException) { }
+            }
+        }
+
+        public class MyEx<T> : Exception
+        {
+        }
+
+        public class Generic
+        {
+            public void CaughtGeneric()
+            {
+                try { throw new MyEx<string>(); }
+                catch (MyEx<string>) { }
+            }
         }
         """;
 
@@ -127,6 +157,55 @@ public class GetExceptionFlowLogicTests
     }
 
     [Fact]
+    public void FilteredClauseDoesNotShadowLaterUnfilteredClause()
+    {
+        // A `when` filter may decline at runtime, so the CLR keeps looking — and the second
+        // clause in the same try binds the same type unconditionally. Stopping the handler
+        // search at the filtered clause reported this as escaping.
+        var result = Run("Svc.FilteredThenUnfiltered");
+
+        var item = Assert.Single(result.Exceptions);
+        Assert.False(item.Escapes);
+        Assert.Equal("Demo.Svc.FilteredThenUnfiltered()", item.CaughtIn);
+        // F7: HasFilter describes the REPORTED outcome, so an unconditional catch clears it.
+        Assert.False(item.HasFilter);
+    }
+
+    [Fact]
+    public void FilteredInnerTry_FallsThroughToUnfilteredOuterTry()
+    {
+        var result = Run("Svc.FilteredInnerUnfilteredOuter");
+
+        var item = Assert.Single(result.Exceptions);
+        Assert.False(item.Escapes);
+        Assert.False(item.HasFilter);
+    }
+
+    [Fact]
+    public void ConstructedGenericException_IsCaught()
+    {
+        // GetTypeByMetadataName("Demo.MyEx`1") hands back the UNBOUND definition, which is never
+        // SymbolEqualityComparer-equal to MyEx<string> — the throw escaped its own catch.
+        var result = Run("Generic.CaughtGeneric");
+
+        var item = Assert.Single(result.Exceptions);
+        // FullyQualifiedFormat spells special types with the language keyword; what matters is
+        // that both sides of the comparison are spelled by the same formatter.
+        Assert.Equal("Demo.MyEx<string>", item.ExceptionType);
+        Assert.False(item.Escapes);
+    }
+
+    [Fact]
+    public void DepthIsAlwaysDerivedFromPath()
+    {
+        foreach (var method in new[] { "Svc.Direct", "Svc.Top", "Svc.Guarded" })
+        {
+            foreach (var item in Run(method).Exceptions)
+                Assert.Equal(item.Path.Count - 1, item.Depth);
+        }
+    }
+
+    [Fact]
     public void UnknownMethod_Throws()
     {
         var error = Assert.Throws<McpToolException>(() => Run("Svc.NoSuchMethod"));
@@ -144,6 +223,74 @@ public class GetExceptionFlowLogicTests
         var caught = JsonSerializer.Serialize(Run("Svc.CaughtLocally").Summary);
         Assert.Contains("\"escaping\":0", caught, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("\"caught\":1", caught, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>
+/// The visited-set must not let call ORDER decide what is reported. `Deep` is reachable from
+/// `Root` at depth 1 and from `A` at depth 2; with maxDepth 2 only the depth-1 arrival can reach
+/// `Deeper`'s throw. An unconditional visited-set marks `Deep` seen at whichever depth came
+/// first, so in one of the two orderings the in-budget subtree was silently dropped.
+/// </summary>
+public class GetExceptionFlowVisitDepthTests
+{
+    private const string CallsAFirst = """
+        using System;
+
+        namespace Demo;
+
+        public class Ordered
+        {
+            public void Root() { A(); Deep(); }
+
+            public void A() { Deep(); }
+
+            public void Deep() { Deeper(); }
+
+            public void Deeper() { throw new InvalidOperationException(); }
+        }
+        """;
+
+    private const string CallsDeepFirst = """
+        using System;
+
+        namespace Demo;
+
+        public class Ordered
+        {
+            public void Root() { Deep(); A(); }
+
+            public void A() { Deep(); }
+
+            public void Deep() { Deeper(); }
+
+            public void Deeper() { throw new InvalidOperationException(); }
+        }
+        """;
+
+    private static ExceptionFlowResult Run(string source)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Ordered.cs", source));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+        return GetExceptionFlowLogic.Execute(
+            loaded, resolver, metadata, "Ordered.Root",
+            maxDepth: 2, includeDocumented: false, maxNodes: 500);
+    }
+
+    [Theory]
+    [InlineData(CallsAFirst)]
+    [InlineData(CallsDeepFirst)]
+    public void InBudgetSubtree_IsReportedRegardlessOfCallOrder(string source)
+    {
+        var result = Run(source);
+
+        var item = Assert.Single(result.Exceptions);
+        Assert.Equal("System.InvalidOperationException", item.ExceptionType);
+        Assert.Equal("Demo.Ordered.Deeper()", item.RaisedIn);
+        Assert.True(item.Escapes);
+        Assert.Equal(
+            ["Demo.Ordered.Root()", "Demo.Ordered.Deep()", "Demo.Ordered.Deeper()"], item.Path);
+        Assert.Equal(2, item.Depth);
     }
 }
 
@@ -182,5 +329,38 @@ public class GetExceptionFlowFixtureTests
 
         Assert.DoesNotContain(result.Exceptions, e =>
             string.Equals(e.Origin, "documented", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DocumentedException_PathIncludesTheCallingMethod()
+    {
+        // A documented exception is raised one level down — inside the metadata callee — so the
+        // chain must be extended with the calling frame before it is resolved, exactly as a
+        // source callee's would be. Otherwise Path omits the caller and Depth reads 0.
+        var result = GetExceptionFlowLogic.Execute(
+            _fixture.Loaded, _fixture.Resolver, _fixture.Metadata,
+            "CallGraphSamples.CallsExternal", maxDepth: 3, includeDocumented: true, maxNodes: 500);
+
+        var documented = result.Exceptions.First(e =>
+            string.Equals(e.Origin, "documented", StringComparison.Ordinal));
+
+        Assert.Equal(2, documented.Path.Count);
+        Assert.Contains("CallsExternal", documented.Path[0], StringComparison.Ordinal);
+        Assert.Equal(documented.RaisedIn, documented.Path[1]);
+        Assert.Equal(1, documented.Depth);
+    }
+
+    [Fact]
+    public void MaxDepthZero_CutsDocumentedAndThrownAlike()
+    {
+        // The documented origin used to bypass the depth check entirely, so a maxDepth that
+        // stopped every source callee still let metadata callees contribute.
+        var result = GetExceptionFlowLogic.Execute(
+            _fixture.Loaded, _fixture.Resolver, _fixture.Metadata,
+            "CallGraphSamples.CallsExternal", maxDepth: 0, includeDocumented: true, maxNodes: 500);
+
+        Assert.DoesNotContain(result.Exceptions, e =>
+            string.Equals(e.Origin, "documented", StringComparison.Ordinal));
+        Assert.True(result.Truncated);
     }
 }

@@ -115,42 +115,42 @@ public class ExceptionAnalyzerTests
     }
 
     [Fact]
-    public void FindHandler_CatchesInSameMethod()
+    public void EnumerateHandlers_CatchesInSameMethod()
     {
         var (site, model) = SingleSite(
             Wrap("void M() { try { throw new System.IO.IOException(); } catch (System.IO.IOException) { } }"),
             "M");
 
-        var handler = ExceptionAnalyzer.FindHandler(site.Node, site.ExceptionType, model);
+        var handler = Assert.Single(
+            ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model));
 
-        Assert.NotNull(handler);
         Assert.False(handler.HasFilter);
     }
 
     [Fact]
-    public void FindHandler_FilteredCatch_ReportsFilter()
+    public void EnumerateHandlers_FilteredCatch_ReportsFilter()
     {
         var (site, model) = SingleSite(
             Wrap("void M() { try { throw new System.IO.IOException(); } catch (System.IO.IOException) when (true) { } }"),
             "M");
 
-        var handler = ExceptionAnalyzer.FindHandler(site.Node, site.ExceptionType, model);
+        var handler = Assert.Single(
+            ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model));
 
-        Assert.NotNull(handler);
         Assert.True(handler.HasFilter);
     }
 
     [Fact]
-    public void FindHandler_FinallyDoesNotCatch()
+    public void EnumerateHandlers_FinallyDoesNotCatch()
     {
         var (site, model) = SingleSite(
             Wrap("void M() { try { throw new System.IO.IOException(); } finally { } }"), "M");
 
-        Assert.Null(ExceptionAnalyzer.FindHandler(site.Node, site.ExceptionType, model));
+        Assert.Empty(ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model));
     }
 
     [Fact]
-    public void FindHandler_ThrowInsideCatchNotCaughtByOwnTry()
+    public void EnumerateHandlers_ThrowInsideCatchNotCaughtByOwnTry()
     {
         var (method, model) = Compile(
             Wrap("void M() { try { } catch (System.Exception) { throw new System.IO.IOException(); } }"),
@@ -158,11 +158,11 @@ public class ExceptionAnalyzerTests
         // The rethrow-free throw inside the catch body is the only non-rethrow site here.
         var site = ExceptionAnalyzer.CollectThrowSites(method, model).Single(s => !s.IsRethrow);
 
-        Assert.Null(ExceptionAnalyzer.FindHandler(site.Node, site.ExceptionType, model));
+        Assert.Empty(ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model));
     }
 
     [Fact]
-    public void FindHandler_StopsAtMethodBoundary()
+    public void EnumerateHandlers_StopsAtMethodBoundary()
     {
         const string Source = """
             class C
@@ -173,7 +173,84 @@ public class ExceptionAnalyzerTests
             """;
         var (site, model) = SingleSite(Source, "Thrower");
 
-        Assert.Null(ExceptionAnalyzer.FindHandler(site.Node, site.ExceptionType, model));
+        Assert.Empty(ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model));
+    }
+
+    [Fact]
+    public void EnumerateHandlers_YieldsEveryBindingClauseInSourceOrder()
+    {
+        var (site, model) = SingleSite(
+            Wrap("""
+                void M()
+                {
+                    try { throw new System.IO.IOException(); }
+                    catch (System.IO.IOException) when (true) { }
+                    catch (System.IO.IOException) { }
+                }
+                """),
+            "M");
+
+        var handlers = ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model)
+            .ToList();
+
+        Assert.Equal([true, false], handlers.Select(h => h.HasFilter));
+    }
+
+    [Fact]
+    public void EnumerateHandlers_WalksOutwardFromInnermostTry()
+    {
+        var (site, model) = SingleSite(
+            Wrap("""
+                void M()
+                {
+                    try
+                    {
+                        try { throw new System.IO.IOException(); }
+                        catch (System.IO.IOException) when (true) { }
+                    }
+                    catch (System.IO.IOException) { }
+                }
+                """),
+            "M");
+
+        var handlers = ExceptionAnalyzer.EnumerateHandlers(site.Node, site.ExceptionType, model)
+            .ToList();
+
+        Assert.Equal([true, false], handlers.Select(h => h.HasFilter));
+    }
+
+    [Fact]
+    public void CatchesType_MatchesConstructedGenericExceptions()
+    {
+        // GetTypeByMetadataName-style localisation hands back the UNBOUND definition, which is
+        // never SymbolEqualityComparer-equal to the constructed type — hence FQN comparison.
+        const string Source = """
+            class MyEx<T> : System.Exception { }
+
+            class C
+            {
+                void M()
+                {
+                    try { throw new MyEx<string>(); }
+                    catch (MyEx<string>) { }
+                }
+
+                void Other()
+                {
+                    try { throw new MyEx<string>(); }
+                    catch (MyEx<int>) { }
+                }
+            }
+            """;
+
+        var (matching, matchingModel) = SingleSite(Source, "M");
+        Assert.Single(
+            ExceptionAnalyzer.EnumerateHandlers(matching.Node, matching.ExceptionType, matchingModel));
+
+        var (mismatched, mismatchedModel) = SingleSite(Source, "Other");
+        Assert.Empty(
+            ExceptionAnalyzer.EnumerateHandlers(
+                mismatched.Node, mismatched.ExceptionType, mismatchedModel));
     }
 
     [Fact]

@@ -66,7 +66,13 @@ public static class GetExceptionFlowLogic
     {
         private readonly Dictionary<SyntaxTree, Compilation> _treeToCompilation = new();
         private readonly Dictionary<SyntaxTree, SemanticModel> _models = new();
-        private readonly HashSet<string> _visited = new(StringComparer.Ordinal);
+        // Method display name -> the SHALLOWEST depth it has been visited at. An unconditional
+        // visited-set makes the answer depend on call order: a method first reached at the depth
+        // cutoff is marked seen, and a later arrival one level closer to the root — which still
+        // has budget to explore its callees — is refused. Re-visiting on a strictly shallower
+        // arrival fixes that and still terminates, because depth only ever grows within a
+        // recursion and is bounded by maxDepth.
+        private readonly Dictionary<string, int> _visited = new(StringComparer.Ordinal);
         private readonly HashSet<(string Type, string RaisedIn, string File, int Line)> _seen = [];
         private readonly List<ExceptionFlowInfo> _results = [];
         private readonly int _maxDepth;
@@ -103,8 +109,11 @@ public static class GetExceptionFlowLogic
         {
             _cancellationToken.ThrowIfCancellationRequested();
 
-            if (!_visited.Add(method.ToDisplayString()))
+            var key = method.ToDisplayString();
+            if (_visited.TryGetValue(key, out var seenAt) && seenAt <= depth)
                 return;
+
+            _visited[key] = depth;
 
             if (_visitedCount >= _maxNodes)
             {
@@ -118,7 +127,7 @@ public static class GetExceptionFlowLogic
             if (declaration is null || ModelFor(declaration) is not { } model)
                 return;
 
-            var display = method.ToDisplayString();
+            var display = key;
 
             foreach (var site in ExceptionAnalyzer.CollectThrowSites(declaration, model))
                 Resolve(site.ExceptionType, site.Node, display, chain, origin: "thrown");
@@ -126,6 +135,20 @@ public static class GetExceptionFlowLogic
             foreach (var (callee, callSite) in EnumerateCallSites(declaration, model))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
+
+                // Stepping into a callee costs one level of depth whether or not it has a body to
+                // analyse, so the bound is applied before the source/metadata split — otherwise a
+                // maxDepth that stopped every source callee still let metadata callees through.
+                if (depth + 1 > _maxDepth)
+                {
+                    Truncated = true;
+                    continue;
+                }
+
+                // The callee is one frame further out than this method, so extend the chain
+                // before descending — for the documented case too, where the exception is raised
+                // INSIDE the callee and its Path/Depth must say so just like a source throw's.
+                IReadOnlyList<Frame> calleeChain = [.. chain, new Frame(display, callSite)];
 
                 if (!callee.Locations.Any(l => l.IsInSource))
                 {
@@ -137,28 +160,29 @@ public static class GetExceptionFlowLogic
                     foreach (var documented in
                              ExceptionAnalyzer.GetDocumentedExceptions(callee, model.Compilation))
                     {
-                        Resolve(documented, callSite, callee.ToDisplayString(), chain, origin: "documented");
+                        Resolve(
+                            documented, callSite, callee.ToDisplayString(), calleeChain,
+                            origin: "documented");
                     }
 
                     continue;
                 }
 
-                if (depth + 1 > _maxDepth)
-                {
-                    Truncated = true;
-                    continue;
-                }
-
-                Visit(callee, depth + 1, [.. chain, new Frame(display, callSite)]);
+                Visit(callee, depth + 1, calleeChain);
             }
         }
 
         /// <summary>
         /// Decide the fate of one raised exception: handled where it is raised, handled by some
-        /// caller's try/catch around the call site that led here, or escaping the root. A handler
-        /// with a <c>when</c> filter may decline at runtime, so it never stops the walk — it only
-        /// records that a filter is in play and the exception is still reported as escaping.
+        /// caller's try/catch around the call site that led here, or escaping the root.
         /// </summary>
+        /// <remarks>
+        /// Candidate handlers are considered in the order the CLR would consider them — innermost
+        /// try outward, source order within a try. A clause with a <c>when</c> filter may decline
+        /// at run time, so it is noted and skipped rather than accepted; the first UNFILTERED
+        /// candidate is the verdict. If none exists the exception escapes, and <c>HasFilter</c>
+        /// then reports whether anything might still have caught it.
+        /// </remarks>
         private void Resolve(
             INamedTypeSymbol exceptionType,
             SyntaxNode raisingNode,
@@ -174,40 +198,39 @@ public static class GetExceptionFlowLogic
             if (!_seen.Add((typeName, raisedIn, file, line)))
                 return;
 
-            var hasFilter = false;
+            var passedAFilteredHandler = false;
 
             foreach (var node in Outward(raisingNode, chain))
             {
                 if (ModelFor(node) is not { } model)
                     continue;
 
-                var handler = ExceptionAnalyzer.FindHandler(
-                    node, ExceptionQueries.Localize(exceptionType, model.Compilation), model);
-
-                if (handler is null)
-                    continue;
-
-                if (handler.HasFilter)
+                foreach (var handler in
+                         ExceptionAnalyzer.EnumerateHandlers(node, exceptionType, model))
                 {
-                    hasFilter = true;
-                    continue;
-                }
+                    if (handler.HasFilter)
+                    {
+                        passedAFilteredHandler = true;
+                        continue;
+                    }
 
-                var caughtAt = handler.Clause.GetLocation().GetLineSpan();
-                _results.Add(new ExceptionFlowInfo(
-                    ExceptionType: typeName,
-                    Origin: origin,
-                    RaisedIn: raisedIn,
-                    File: file,
-                    Line: line,
-                    Depth: chain.Count,
-                    Path: BuildPath(chain, raisedIn),
-                    Escapes: false,
-                    CaughtIn: ExceptionQueries.DescribeContainingMember(handler.Clause, model),
-                    CaughtFile: caughtAt.Path,
-                    CaughtLine: caughtAt.StartLinePosition.Line + 1,
-                    HasFilter: hasFilter));
-                return;
+                    var caughtAt = handler.Clause.GetLocation().GetLineSpan();
+                    _results.Add(new ExceptionFlowInfo(
+                        ExceptionType: typeName,
+                        Origin: origin,
+                        RaisedIn: raisedIn,
+                        File: file,
+                        Line: line,
+                        Path: BuildPath(chain, raisedIn),
+                        Escapes: false,
+                        CaughtIn: ExceptionQueries.DescribeContainingMember(handler.Clause, model),
+                        CaughtFile: caughtAt.Path,
+                        CaughtLine: caughtAt.StartLinePosition.Line + 1,
+                        // Caught unconditionally: whatever filtered clauses were passed on the way
+                        // do not change the outcome, so the flag must not suggest uncertainty.
+                        HasFilter: false));
+                    return;
+                }
             }
 
             _results.Add(new ExceptionFlowInfo(
@@ -216,18 +239,19 @@ public static class GetExceptionFlowLogic
                 RaisedIn: raisedIn,
                 File: file,
                 Line: line,
-                Depth: chain.Count,
                 Path: BuildPath(chain, raisedIn),
                 Escapes: true,
                 CaughtIn: null,
                 CaughtFile: null,
                 CaughtLine: null,
-                HasFilter: hasFilter));
+                HasFilter: passedAFilteredHandler));
         }
 
         /// <summary>
         /// The nodes whose enclosing try/catch statements could stop this exception, innermost
         /// first: the raising node itself, then each call site back down the chain to the root.
+        /// For a documented exception the raising node IS the last frame's call site, so that
+        /// node is yielded twice — harmless, since the first pass already decides its verdict.
         /// </summary>
         private static IEnumerable<SyntaxNode> Outward(SyntaxNode raisingNode, IReadOnlyList<Frame> chain)
         {

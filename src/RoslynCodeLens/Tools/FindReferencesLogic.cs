@@ -71,7 +71,7 @@ public static class FindReferencesLogic
                     var document = location.Document;
                     var kind = ReferenceClassifier.Classify(
                         node, referencedSymbol.Definition, () => GetModel(models, document));
-                    var snippet = GetContainingStatement(node);
+                    var snippet = ExceptionQueries.StatementSnippet(node);
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
                     results.Add(new SymbolReference(
@@ -92,12 +92,5 @@ public static class FindReferencesLogic
         if (model != null)
             cache[document.Id] = model;
         return model;
-    }
-
-    private static string GetContainingStatement(SyntaxNode node)
-    {
-        var statement = node.FirstAncestorOrSelf<StatementSyntax>();
-        var text = (statement ?? node.Parent ?? node).ToString();
-        return text.Length > 200 ? text[..200] + "..." : text;
     }
 }
