@@ -138,10 +138,8 @@ internal static class ExceptionQueries
     /// </summary>
     public static string CatchSnippet(CatchClauseSyntax clause)
     {
-        var header = clause.Block is { } block
-            ? clause.ToString()[..(block.SpanStart - clause.SpanStart)]
-            : clause.ToString();
-
+        var headerLength = clause.Block.SpanStart - clause.SpanStart;
+        var header = headerLength > 0 ? clause.ToString()[..headerLength] : clause.ToString();
         return Truncate(header.Trim());
     }
 
