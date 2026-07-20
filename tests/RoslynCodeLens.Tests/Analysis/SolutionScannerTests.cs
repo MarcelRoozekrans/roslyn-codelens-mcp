@@ -189,6 +189,69 @@ public class SolutionScannerTests
         Assert.Equal(1, rooted);
     }
 
+    [Fact]
+    public void SameNamedProjects_AreOrderedStablyAcrossLoads()
+    {
+        // ProjectId.Id is a Guid minted afresh on every workspace load, so tiebreaking on it is
+        // exactly as arbitrary as the ConcurrentDictionary order it was meant to replace — and two
+        // projects sharing a Name is the ONLY case the tiebreak decides. The .csproj path is
+        // unique within a solution and survives reloads.
+        var winners = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var i = 0; i < 20; i++)
+        {
+            // Alternate insertion order too, so a pass cannot come from the projects happening to
+            // be added in the same order every time.
+            var (loaded, resolver, csprojByProject) = SameNamedProjects(reversed: i % 2 == 1);
+
+            var scan = Assert.Single(SolutionScanner.EnumerateTrees(loaded, resolver));
+            winners.Add(csprojByProject[scan.ProjectId]);
+        }
+
+        Assert.Equal(@"C:\sln\A\Shared.csproj", Assert.Single(winners));
+    }
+
+    /// <summary>
+    /// Two projects with the SAME name and assembly name, differing only in .csproj path, sharing
+    /// one linked source file. RenameTestWorkspace cannot express this — it gives projects no
+    /// FilePath at all.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver, Dictionary<ProjectId, string> CsprojByProject)
+        SameNamedProjects(bool reversed)
+    {
+        var workspace = new AdhocWorkspace();
+        var solution = workspace.CurrentSolution;
+        var compilations = new ConcurrentDictionary<ProjectId, Compilation>();
+        var csprojByProject = new Dictionary<ProjectId, string>();
+
+        string[] csprojPaths = [@"C:\sln\A\Shared.csproj", @"C:\sln\B\Shared.csproj"];
+        foreach (var csproj in reversed ? csprojPaths.Reverse() : csprojPaths)
+        {
+            var projectId = ProjectId.CreateNewId();
+            csprojByProject[projectId] = csproj;
+
+            solution = solution
+                .AddProject(ProjectInfo.Create(
+                    projectId, VersionStamp.Create(), "Shared", "Shared", LanguageNames.CSharp,
+                    filePath: csproj,
+                    compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+                    .WithMetadataReferences(
+                        [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)]))
+                .AddDocument(
+                    DocumentId.CreateNewId(projectId), "Shared.cs",
+                    SourceText.From(Linked), filePath: @"C:\sln\Shared.cs");
+        }
+
+        foreach (var projectId in csprojByProject.Keys)
+        {
+            compilations[projectId] = solution.GetProject(projectId)!
+                .GetCompilationAsync().GetAwaiter().GetResult()!;
+        }
+
+        var loaded = new LoadedSolution { Solution = solution, Compilations = compilations };
+        return (loaded, new SymbolResolver(loaded), csprojByProject);
+    }
+
     /// <summary>
     /// One project per source, each compilation holding a tree with NO file path.
     /// RenameTestWorkspace cannot express this — a workspace document always carries a path, and

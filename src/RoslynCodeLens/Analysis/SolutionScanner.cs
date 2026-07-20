@@ -75,8 +75,16 @@ public static class SolutionScanner
         // detail. Since dedupe is first-one-wins, that order DECIDES which project a linked or
         // multi-targeted file is attributed to — so the same query could report different projects
         // on different runs. Ordering here makes attribution a property of the solution instead.
+        //
+        // The tiebreak must be stable ACROSS LOADS, which rules out ProjectId.Id: that Guid is
+        // minted afresh every time a workspace is opened, so ordering two same-named projects by it
+        // is exactly as arbitrary as the dictionary order it replaced. The .csproj path is unique
+        // within a solution and survives reloads; assembly name, then the Guid, cover the
+        // in-memory workspaces that have no path.
         foreach (var (projectId, compilation) in loaded.Compilations
                      .OrderBy(p => resolver.GetProjectName(p.Key), StringComparer.Ordinal)
+                     .ThenBy(p => loaded.Solution.GetProject(p.Key)?.FilePath ?? string.Empty, StringComparer.Ordinal)
+                     .ThenBy(p => loaded.Solution.GetProject(p.Key)?.AssemblyName ?? string.Empty, StringComparer.Ordinal)
                      .ThenBy(p => p.Key.Id))
         {
             cancellationToken.ThrowIfCancellationRequested();
