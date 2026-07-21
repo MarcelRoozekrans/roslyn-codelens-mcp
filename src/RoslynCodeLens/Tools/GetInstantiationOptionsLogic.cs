@@ -241,6 +241,47 @@ public static class GetInstantiationOptionsLogic
         INamedTypeSymbol type,
         CallerContext? caller,
         CancellationToken cancellationToken)
+        => ScanFactories(loaded, resolver, type, caller, cancellationToken)
+            .Select(static pair => pair.Option)
+            .ToList();
+
+    /// <summary>
+    /// The way to construct a type whose constructors are all out of reach — which is exactly when
+    /// <c>generate_test_skeleton</c> must not emit <c>new Foo()</c>. Returns the call expression
+    /// for the first public, parameterless, non-obsolete, non-async static factory, or null when
+    /// there is none.
+    /// <para>
+    /// The declaring type is spelled with its namespace so the emitted call compiles even when the
+    /// factory lives somewhere the generated file does not import.
+    /// </para>
+    /// </summary>
+    internal static string? FindParameterlessFactoryCall(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        INamedTypeSymbol type,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var (member, option) in ScanFactories(
+                     loaded, resolver, type, caller: null, cancellationToken))
+        {
+            if (member.DeclaredAccessibility != Accessibility.Public) continue;
+            if (option.IsAsync || option.IsObsolete || option.Parameters.Count != 0) continue;
+
+            // A field or property is read, not called; only a method takes the argument list.
+            return member is IMethodSymbol
+                ? $"{option.DeclaringType}.{member.Name}()"
+                : $"{option.DeclaringType}.{member.Name}";
+        }
+
+        return null;
+    }
+
+    private static List<(ISymbol Member, FactoryOption Option)> ScanFactories(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        INamedTypeSymbol type,
+        CallerContext? caller,
+        CancellationToken cancellationToken)
     {
         // Compared as a fully-qualified STRING, never with SymbolEqualityComparer: the target was
         // resolved out of one compilation and the candidates come out of every other one, where
@@ -248,7 +289,7 @@ public static class GetInstantiationOptionsLogic
         // false negatives, which here means silently reporting no factory at all.
         var targetKey = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-        var options = new List<FactoryOption>();
+        var options = new List<(ISymbol Member, FactoryOption Option)>();
         var seen = new HashSet<(string DeclaringType, string Signature)>();
 
         foreach (var scanTree in SolutionScanner.EnumerateTrees(
@@ -270,12 +311,13 @@ public static class GetInstantiationOptionsLogic
                 foreach (var member in container.GetMembers())
                     if (TryBuildFactory(member, targetKey, caller) is { } factory
                         && seen.Add((factory.DeclaringType, factory.Signature)))
-                        options.Add(factory);
+                        options.Add((member, factory));
             }
         }
 
-        options.Sort(static (a, b) =>
+        options.Sort(static (x, y) =>
         {
+            var (a, b) = (x.Option, y.Option);
             // Source before metadata: a factory the caller can open and read is the better answer.
             var byOrigin = (a.File is null ? 1 : 0).CompareTo(b.File is null ? 1 : 0);
             if (byOrigin != 0) return byOrigin;

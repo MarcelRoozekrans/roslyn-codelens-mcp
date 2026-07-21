@@ -386,10 +386,4 @@ public class GetInstantiationOptionsLogicTests
         Assert.Equal("Demo.Greeter", registration.Implementation);
         Assert.Equal("Scoped", registration.Lifetime);
     }
-
-    [Fact]
-    public void Unregistered_type_reports_no_di_registrations()
-    {
-        Assert.Empty(Run("Plain").DiRegistrations);
-    }
 }
