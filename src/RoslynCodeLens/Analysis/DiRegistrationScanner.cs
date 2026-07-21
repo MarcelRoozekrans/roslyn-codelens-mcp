@@ -17,6 +17,12 @@ public static class DiRegistrationScanner
         "AddKeyedTransient", "AddKeyedScoped", "AddKeyedSingleton"
     };
 
+    /// <summary>
+    /// Recorded when a factory lambda's body is not a plain <c>new</c>: the service IS registered,
+    /// so dropping the row would be wrong, but naming an implementation would be a guess.
+    /// </summary>
+    private const string UnresolvedFactory = "(factory)";
+
     public static IReadOnlyList<DiRegistration> Scan(
         LoadedSolution loaded,
         SymbolResolver resolver,
@@ -25,55 +31,135 @@ public static class DiRegistrationScanner
     {
         var results = new List<DiRegistration>();
 
-        foreach (var (_, compilation) in loaded.Compilations)
+        // Scoped by PROJECT, not by tree alone. A registration is a per-project fact: two projects
+        // linking one file each genuinely register the service, and the scanner's dedupe is
+        // first-one-wins, so tree-identity alone would award the file to whichever project sorts
+        // first and delete the other's registrations outright. Measured, not reasoned: with the
+        // discriminator dropped, Two_projects_sharing_a_file_path... reports 1 instead of 2.
+        foreach (var scanTree in SolutionScanner.EnumerateTrees(
+                     loaded, resolver,
+                     scopeDiscriminator: static (projectName, _) => projectName,
+                     cancellationToken: cancellationToken))
         {
-            foreach (var tree in compilation.SyntaxTrees)
+            // Syntactic pre-filter: binding is the expensive half of the scan, and a file with no
+            // Add*/TryAdd* call by name can hold no registration whatever it binds to.
+            var invocations = scanTree.Root.DescendantNodes()
+                .OfType<InvocationExpressionSyntax>()
+                .Where(i => GetMethodName(i) is { } name && DiMethodNames.Contains(name))
+                .ToList();
+            if (invocations.Count == 0) continue;
+
+            var semanticModel = scanTree.SemanticModel();
+            foreach (var invocation in invocations)
             {
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = tree.GetRoot();
+                cancellationToken.ThrowIfCancellationRequested();
 
-                foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
-                {
-                    var methodName = GetMethodName(invocation);
-                    if (methodName == null || !DiMethodNames.Contains(methodName))
-                        continue;
+                var methodName = GetMethodName(invocation)!;
+                if (semanticModel.GetSymbolInfo(invocation, cancellationToken).Symbol
+                    is not IMethodSymbol methodSymbol)
+                    continue;
 
-                    var symbolInfo = semanticModel.GetSymbolInfo(invocation);
-                    if (symbolInfo.Symbol is not IMethodSymbol methodSymbol)
-                        continue;
+                if (Describe(invocation, methodSymbol, semanticModel, cancellationToken)
+                    is not ({ } serviceName, { } implementationName))
+                    continue;
 
-                    var typeArgs = methodSymbol.TypeArguments;
-                    if (typeArgs.Length == 0)
-                        continue;
+                if (!MatchesSymbol(serviceName, symbol) && !MatchesSymbol(implementationName, symbol))
+                    continue;
 
-                    string serviceName;
-                    string implementationName;
-
-                    if (typeArgs.Length >= 2)
-                    {
-                        serviceName = typeArgs[0].ToDisplayString();
-                        implementationName = typeArgs[1].ToDisplayString();
-                    }
-                    else
-                    {
-                        serviceName = typeArgs[0].ToDisplayString();
-                        implementationName = serviceName;
-                    }
-
-                    if (!MatchesSymbol(serviceName, symbol) && !MatchesSymbol(implementationName, symbol))
-                        continue;
-
-                    var lifetime = ExtractLifetime(methodName);
-                    var lineSpan = tree.GetLineSpan(invocation.Span);
-                    var file = lineSpan.Path;
-                    var line = lineSpan.StartLinePosition.Line + 1;
-
-                    results.Add(new DiRegistration(serviceName, implementationName, lifetime, file, line));
-                }
+                var lineSpan = scanTree.Tree.GetLineSpan(invocation.Span, cancellationToken);
+                results.Add(new DiRegistration(
+                    serviceName,
+                    implementationName,
+                    ExtractLifetime(methodName),
+                    lineSpan.Path,
+                    lineSpan.StartLinePosition.Line + 1));
             }
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// The (service, implementation) pair a registration call expresses, or null when the call is
+    /// not one this scanner can read.
+    /// </summary>
+    private static (string Service, string Implementation)? Describe(
+        InvocationExpressionSyntax invocation,
+        IMethodSymbol methodSymbol,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        var typeArgs = methodSymbol.TypeArguments;
+
+        if (typeArgs.Length >= 2)
+            return (typeArgs[0].ToDisplayString(), typeArgs[1].ToDisplayString());
+
+        if (typeArgs.Length == 1)
+        {
+            var service = typeArgs[0].ToDisplayString();
+            // `AddSingleton<IFoo>(sp => new Foo())` names its implementation nowhere in the type
+            // arguments — only in the lambda body. Without this the row would claim IFoo registers
+            // itself, which is both wrong and the opposite of useful for a "who implements this".
+            var fromFactory = ResolveFactoryImplementation(invocation, semanticModel, cancellationToken);
+            return (service, fromFactory ?? service);
+        }
+
+        return DescribeTypeOfPair(invocation, semanticModel, cancellationToken);
+    }
+
+    /// <summary>
+    /// The non-generic <c>Add*(typeof(IFoo), typeof(Foo))</c> overloads. Only <c>typeof</c>
+    /// arguments are considered, in source order, so the keyed overloads — whose key sits BETWEEN
+    /// the two types — read correctly without a separate case.
+    /// </summary>
+    private static (string Service, string Implementation)? DescribeTypeOfPair(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        var typeOfs = invocation.ArgumentList.Arguments
+            .Select(a => a.Expression)
+            .OfType<TypeOfExpressionSyntax>()
+            .ToList();
+        if (typeOfs.Count is not (1 or 2)) return null;
+
+        var service = semanticModel.GetTypeInfo(typeOfs[0].Type, cancellationToken).Type;
+        if (service is null) return null;
+
+        if (typeOfs.Count == 1)
+        {
+            var single = service.ToDisplayString();
+            return (single, single);
+        }
+
+        var implementation = semanticModel.GetTypeInfo(typeOfs[1].Type, cancellationToken).Type;
+        return implementation is null
+            ? null
+            : (service.ToDisplayString(), implementation.ToDisplayString());
+    }
+
+    /// <summary>
+    /// The implementation a factory argument constructs, or null when the call has no factory
+    /// argument at all (a plain <c>AddScoped&lt;Foo&gt;()</c>, which registers itself).
+    /// </summary>
+    private static string? ResolveFactoryImplementation(
+        InvocationExpressionSyntax invocation,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        var lambda = invocation.ArgumentList.Arguments
+            .Select(a => a.Expression)
+            .OfType<AnonymousFunctionExpressionSyntax>()
+            .FirstOrDefault();
+        if (lambda is null) return null;
+
+        // A statement-bodied lambda, a method call, a conditional — anything but a `new` — is left
+        // unresolved rather than guessed at.
+        if (lambda.ExpressionBody is not BaseObjectCreationExpressionSyntax creation)
+            return UnresolvedFactory;
+
+        return semanticModel.GetTypeInfo(creation, cancellationToken).Type?.ToDisplayString()
+               ?? UnresolvedFactory;
     }
 
     private static string? GetMethodName(InvocationExpressionSyntax invocation)
