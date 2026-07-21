@@ -32,23 +32,25 @@ public sealed record ScanTree(
 public static class SolutionScanner
 {
     /// <summary>
-    /// Every non-generated tree in the solution, deduped — or every tree, generated ones included,
-    /// when <paramref name="includeGenerated"/> is set.
+    /// Every non-generated tree in the solution, deduped.
     /// </summary>
     /// <param name="projectFilter">
     /// Receives a project's id AND name; returning false skips the whole compilation before any of
     /// its trees are touched. Null means every project.
     /// <para>
-    /// The id is there because a name does not identify a project: two projects in different folders
-    /// can share one (the same reason the ordering below cannot tie-break on name alone). A filter
-    /// that only sees names would skip both when just one of them is, say, a test project. Callers
-    /// matching user-supplied patterns use the name; callers excluding specific projects use the id.
+    /// The id is there because a name does not identify a project: two in different folders can
+    /// share one, which is the same reason the ordering below cannot tie-break on name alone. A
+    /// filter seeing only names would skip both when just one of them is, say, a test project.
+    /// Callers matching user-supplied patterns use the name; callers excluding specific projects
+    /// use the id.
     /// </para>
     /// <para>
-    /// Filtering belongs HERE rather than in a caller's loop body: the dedupe is first-one-wins, so a
-    /// file linked into an excluded project and a wanted one could claim its dedupe slot under the
-    /// excluded project and then be discarded by the caller — losing it from the wanted project
-    /// entirely. Dropping the compilation up front cannot do that.
+    /// Filtering belongs HERE rather than in a caller's loop body. The dedupe is first-one-wins, so
+    /// a file linked into an excluded project and a wanted one could claim its dedupe slot under
+    /// the excluded project and then be discarded by the caller — losing it from the wanted project
+    /// entirely. Dropping the whole compilation up front cannot do that. Any <c>continue</c> whose
+    /// condition depends only on the compilation (a missing well-known symbol, say) belongs here
+    /// for the same reason.
     /// </para>
     /// </param>
     /// <param name="scopeDiscriminator">
@@ -59,14 +61,6 @@ public static class SolutionScanner
     /// DIFFERENT project per compilation, so a caller working in project terms must see it once per
     /// project or it silently loses every project after the first. Null — the common case — dedupes
     /// on tree identity alone.
-    /// </param>
-    /// <param name="includeGenerated">
-    /// Whether machine-written trees are scanned. Default false — most scans report something a
-    /// human is expected to go and edit, and a finding in a file that is regenerated on every build
-    /// is noise. Two tools want the opposite and pass true: <c>find_obsolete_usage</c> and
-    /// <c>find_event_subscribers</c> report generated hits deliberately (a deprecated API called
-    /// from generated code still blocks a migration; a generated <c>+=</c> still leaks) and flag
-    /// each result <c>IsGenerated</c> so the caller decides rather than the scan.
     /// </param>
     /// <param name="modelFactory">
     /// Test observability seam ONLY; production callers leave it null and get
@@ -84,7 +78,6 @@ public static class SolutionScanner
         SymbolResolver resolver,
         Func<ProjectId, string, bool>? projectFilter = null,
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
-        bool includeGenerated = false,
         Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
         Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
         CancellationToken cancellationToken = default)
@@ -117,7 +110,7 @@ public static class SolutionScanner
 
             foreach (var tree in compilation.SyntaxTrees)
             {
-                if (!includeGenerated && GeneratedCodeDetector.IsGenerated(tree))
+                if (GeneratedCodeDetector.IsGenerated(tree))
                     continue;
 
                 cancellationToken.ThrowIfCancellationRequested();

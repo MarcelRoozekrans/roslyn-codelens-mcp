@@ -1,7 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
-using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.TestDiscovery;
 
@@ -15,13 +14,7 @@ public static class FindObsoleteUsageLogic
         string? project,
         bool errorOnly)
     {
-        // Test projects are excluded through the scanner's projectFilter — by ID, because a name
-        // does not identify a project (two in different folders can share one, and excluding by
-        // name would drop both). Filtering there rather than inside the loop matters for a linked
-        // file shared between a test project and a production one: the scanner's dedupe is
-        // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
-        // lost from the production project too. Skipping the whole compilation up front cannot.
-        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
+        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution);
 
         // Step 1: collect all [Obsolete]-marked symbols across the entire solution (including
         // test projects and metadata symbols). Test-project filtering happens in Step 2 on the
@@ -29,16 +22,8 @@ public static class FindObsoleteUsageLogic
         // won't search test-project syntax trees for usages, so it'll get omitted by the
         // zero-usage filter in Step 3 unless production code calls it.
         // SymbolResolver.AttributeIndex is keyed by simple attribute name; entries are
-        // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by FQN.
-        //
-        // The key is a fully-qualified NAME, not the symbol, because these targets and the usages
-        // matched against them in Step 2 come from DIFFERENT compilations. The resolver's indexes
-        // keep whichever compilation reached a type first (an arbitrary, run-varying choice) while
-        // the scanner binds each tree under the compilation it deterministically picked for it —
-        // so symbol identity between the two sides disagrees intermittently and the usage vanishes.
-        // See SymbolKeys.Fqn.
-        var obsoleteSymbols = new Dictionary<string, (ISymbol Symbol, ObsoleteAttributeData Data)>(
-            StringComparer.Ordinal);
+        // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by symbol identity.
+        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(SymbolEqualityComparer.Default);
         foreach (var key in new[] { "Obsolete", "ObsoleteAttribute" })
         {
             if (!resolver.AttributeIndex.TryGetValue(key, out var entries)) continue;
@@ -46,11 +31,9 @@ public static class FindObsoleteUsageLogic
             foreach (var (symbol, attr) in entries)
             {
                 if (attr.AttributeClass?.ToDisplayString() != "System.ObsoleteAttribute") continue;
+                if (obsoleteSymbols.ContainsKey(symbol)) continue;
 
-                var fqn = SymbolKeys.Fqn(symbol);
-                if (obsoleteSymbols.ContainsKey(fqn)) continue;
-
-                obsoleteSymbols[fqn] = (symbol, ParseObsoleteAttribute(attr));
+                obsoleteSymbols[symbol] = ParseObsoleteAttribute(attr);
             }
         }
 
@@ -58,88 +41,81 @@ public static class FindObsoleteUsageLogic
             return new FindObsoleteUsageResult([]);
 
         // Step 2: walk all production syntax trees and collect usages per obsolete symbol.
-        var targetSet = new HashSet<string>(obsoleteSymbols.Keys, StringComparer.Ordinal);
-        var usagesByTarget = new Dictionary<string, List<ObsoleteUsageSite>>(StringComparer.Ordinal);
+        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, SymbolEqualityComparer.Default);
+        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(SymbolEqualityComparer.Default);
         foreach (var s in obsoleteSymbols.Keys)
             usagesByTarget[s] = new List<ObsoleteUsageSite>();
 
         var seen = new HashSet<(string, TextSpan)>();
 
-        // Which trees to walk — once each, project attribution deterministic — is
-        // SolutionScanner's job; this loop only asks what each node is. includeGenerated is set
-        // BECAUSE this tool reports generated hits on purpose and flags them below: a deprecated
-        // API called from generated code still blocks a migration, so the caller decides. The
-        // scanner's default would drop them, and dropping them silently is the whole risk here.
-        foreach (var scan in SolutionScanner.EnumerateTrees(
-                     loaded,
-                     resolver,
-                     // Id for the exclusion (a name does not identify a project), name for the
-                     // caller's own project filter (which is a user-supplied name to match).
-                     projectFilter: (id, name) =>
-                         !testProjectIds.Contains(id) &&
-                         (project is null || string.Equals(name, project, StringComparison.OrdinalIgnoreCase)),
-                     includeGenerated: true))
+        foreach (var (projectId, compilation) in loaded.Compilations)
         {
-            var projectName = scan.ProjectName;
+            if (testProjectIds.Contains(projectId)) continue;
 
-            // The model must come from the tree's OWN compilation, which is what the scan hands
-            // back; binding a tree against any other would resolve nothing.
-            var semanticModel = scan.SemanticModel();
+            var projectName = resolver.GetProjectName(projectId);
+            if (project is not null && !string.Equals(projectName, project, StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            foreach (var node in scan.Root.DescendantNodes())
+            foreach (var tree in compilation.SyntaxTrees)
             {
-                if (node is not (InvocationExpressionSyntax
-                                 or ObjectCreationExpressionSyntax
-                                 or MemberAccessExpressionSyntax
-                                 or IdentifierNameSyntax))
-                    continue;
+                var semanticModel = compilation.GetSemanticModel(tree);
+                var root = tree.GetRoot();
 
-                // Skip [Obsolete] attribute declarations themselves so the attribute target
-                // doesn't count as a usage of the symbol it marks.
-                if (node.FirstAncestorOrSelf<AttributeSyntax>() is not null)
-                    continue;
+                foreach (var node in root.DescendantNodes())
+                {
+                    if (node is not (InvocationExpressionSyntax
+                                     or ObjectCreationExpressionSyntax
+                                     or MemberAccessExpressionSyntax
+                                     or IdentifierNameSyntax))
+                        continue;
 
-                // Avoid counting the same call site multiple times via nested syntax nodes
-                // that all resolve to the same symbol. e.g. `_api.ObsoleteWarning()` yields
-                // an InvocationExpression, a MemberAccessExpression, AND an IdentifierName —
-                // each with a different span — all binding to the same method. Only the
-                // outermost relevant node contributes.
-                if (IsWrappedByOuterRelevantNode(node))
-                    continue;
+                    // Skip [Obsolete] attribute declarations themselves so the attribute target
+                    // doesn't count as a usage of the symbol it marks.
+                    if (node.FirstAncestorOrSelf<AttributeSyntax>() is not null)
+                        continue;
 
-                var symbol = semanticModel.GetSymbolInfo(node).Symbol;
-                if (symbol is null) continue;
+                    // Avoid counting the same call site multiple times via nested syntax nodes
+                    // that all resolve to the same symbol. e.g. `_api.ObsoleteWarning()` yields
+                    // an InvocationExpression, a MemberAccessExpression, AND an IdentifierName —
+                    // each with a different span — all binding to the same method. Only the
+                    // outermost relevant node contributes.
+                    if (IsWrappedByOuterRelevantNode(node))
+                        continue;
 
-                // Constructor calls land on IMethodSymbol (the ctor); we want the type's
-                // [Obsolete] flag too, so we accept either the symbol itself or its containing type.
-                var matched = MatchObsoleteSymbol(symbol, targetSet);
-                if (matched is null) continue;
+                    var symbol = semanticModel.GetSymbolInfo(node).Symbol;
+                    if (symbol is null) continue;
 
-                var lineSpan = node.GetLocation().GetLineSpan();
-                var file = lineSpan.Path;
-                var line = lineSpan.StartLinePosition.Line + 1;
-                var span = node.Span;
+                    // Constructor calls land on IMethodSymbol (the ctor); we want the type's
+                    // [Obsolete] flag too, so we accept either the symbol itself or its containing type.
+                    var matched = MatchObsoleteSymbol(symbol, targetSet);
+                    if (matched is null) continue;
 
-                if (!seen.Add((file, span))) continue;
+                    var lineSpan = node.GetLocation().GetLineSpan();
+                    var file = lineSpan.Path;
+                    var line = lineSpan.StartLinePosition.Line + 1;
+                    var span = node.Span;
 
-                var callerName = GetCallerName(node);
-                var snippet = node.ToString();
+                    if (!seen.Add((file, span))) continue;
 
-                usagesByTarget[matched].Add(new ObsoleteUsageSite(
-                    CallerName: callerName,
-                    FilePath: file,
-                    Line: line,
-                    Snippet: snippet,
-                    Project: projectName,
-                    IsGenerated: resolver.IsGenerated(file)));
+                    var callerName = GetCallerName(node);
+                    var snippet = node.ToString();
+
+                    usagesByTarget[matched].Add(new ObsoleteUsageSite(
+                        CallerName: callerName,
+                        FilePath: file,
+                        Line: line,
+                        Snippet: snippet,
+                        Project: projectName,
+                        IsGenerated: resolver.IsGenerated(file)));
+                }
             }
         }
 
         // Step 3: build groups, drop zero-usage symbols.
         var groups = new List<ObsoleteSymbolGroup>();
-        foreach (var (fqn, (symbol, data)) in obsoleteSymbols)
+        foreach (var (symbol, data) in obsoleteSymbols)
         {
-            var usages = usagesByTarget[fqn];
+            var usages = usagesByTarget[symbol];
             if (usages.Count == 0) continue;
 
             if (errorOnly && !data.IsError) continue;
@@ -182,33 +158,18 @@ public static class FindObsoleteUsageLogic
         return new ObsoleteAttributeData(message, isError);
     }
 
-    /// <summary>
-    /// The fully-qualified name of the obsolete target <paramref name="referenced"/> uses, or null.
-    /// </summary>
-    /// <remarks>
-    /// Names, not <see cref="SymbolEqualityComparer"/>: the target set is built from symbols of one
-    /// compilation and <paramref name="referenced"/> is bound in another, where identity comparison
-    /// silently returns false. See <see cref="SymbolKeys"/>.
-    /// </remarks>
-    private static string? MatchObsoleteSymbol(ISymbol referenced, HashSet<string> targetSet)
+    private static ISymbol? MatchObsoleteSymbol(ISymbol referenced, HashSet<ISymbol> targetSet)
     {
-        var fqn = SymbolKeys.Fqn(referenced);
-        if (targetSet.Contains(fqn)) return fqn;
-
-        var originalFqn = SymbolKeys.Fqn(referenced.OriginalDefinition);
-        if (targetSet.Contains(originalFqn)) return originalFqn;
+        if (targetSet.Contains(referenced)) return referenced;
+        if (targetSet.Contains(referenced.OriginalDefinition)) return referenced.OriginalDefinition;
 
         // Constructor calls: also match the containing type (when the type itself has [Obsolete]).
         if (referenced is IMethodSymbol m && m.MethodKind == MethodKind.Constructor)
         {
-            if (m.ContainingType is not null)
-            {
-                var typeFqn = SymbolKeys.Fqn(m.ContainingType);
-                if (targetSet.Contains(typeFqn)) return typeFqn;
-
-                var typeOriginalFqn = SymbolKeys.Fqn(m.ContainingType.OriginalDefinition);
-                if (targetSet.Contains(typeOriginalFqn)) return typeOriginalFqn;
-            }
+            if (m.ContainingType is not null && targetSet.Contains(m.ContainingType))
+                return m.ContainingType;
+            if (m.ContainingType?.OriginalDefinition is { } ctorTypeOrig && targetSet.Contains(ctorTypeOrig))
+                return ctorTypeOrig;
         }
 
         return null;

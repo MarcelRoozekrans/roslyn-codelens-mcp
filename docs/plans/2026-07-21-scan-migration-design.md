@@ -39,6 +39,30 @@ The existing suites for all four are the regression net. New tests:
 - `find_obsolete_usage` and `find_event_subscribers` **still report usages inside generated code**, with `IsGenerated: true`. This must pass before and after — it is the regression guard on the trap above.
 - A model-count test per migrated tool is not warranted: unlike `check_architecture` none of these filters trees before binding, so there is no laziness invariant to protect beyond what the scanner already pins.
 
+## Outcome: two of the four migrated, two deliberately reverted
+
+`find_async_violations` and `find_disposable_misuse` shipped. `find_obsolete_usage` and
+`find_event_subscribers` were migrated, reviewed, fixed, reviewed again — and then **reverted to
+their hand-rolled loops**, because the migration made them worse.
+
+The reasoning matters more than the outcome. Those two are *correct* on main: walking every tree
+under every compilation means symbol identity always finds a match on some pass. Deduping breaks
+that, and every repair traded one defect for another:
+
+| Attempt | Result |
+|---|---|
+| Migrate as-is | Usage vanished on 9/20 runs (obsolete), 11/20 (events) — nondeterministic, invisible |
+| Match by fully-qualified name instead | Fixed the vanishing; introduced false positives — a `ref` overload's key collides with its non-`ref` sibling, and an FQN carries no assembly identity, so two unrelated projects declaring `Demo.Api.Legacy()` merge into one group and a *non-obsolete* method's calls get reported under another project's deprecation message |
+
+A name is not an identity and a symbol is not portable; for these two tools there is no cheap key
+that is both. Solving it properly means either indexing every compilation's view of a symbol, or
+confirming at the usage site that the resolved symbol itself carries the attribute — a design
+change, not a migration. **Trading correctness for deduplication in tools that are currently correct
+is the wrong direction**, so they stay as they are until that work is done deliberately.
+
+`includeGenerated` was removed with them: it had no remaining caller, and the eventual fix may not
+take this shape.
+
 ## What the migration actually cost — read this before migrating the next tool
 
 The section above framed the risk as "the scanner skips generated trees". That was the *visible*
