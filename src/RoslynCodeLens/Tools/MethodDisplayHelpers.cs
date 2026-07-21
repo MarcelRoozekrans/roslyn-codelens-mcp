@@ -42,9 +42,9 @@ internal static class MethodDisplayHelpers
         _ => "internal",
     };
 
-    internal static string? ExtractSummary(IMethodSymbol method)
+    internal static string? ExtractSummary(ISymbol symbol)
     {
-        var xml = method.GetDocumentationCommentXml();
+        var xml = symbol.GetDocumentationCommentXml();
         if (string.IsNullOrWhiteSpace(xml)) return null;
 
         try

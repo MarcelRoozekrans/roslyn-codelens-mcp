@@ -6,6 +6,35 @@ using Microsoft.CodeAnalysis.Text;
 namespace RoslynCodeLens.Tests.Fixtures;
 
 /// <summary>
+/// Opt-in capabilities for <see cref="RenameTestWorkspace"/>. Both are off by default so that
+/// existing tests keep their cheap, hermetic corelib-only workspace.
+/// </summary>
+[Flags]
+internal enum RenameTestWorkspaceOptions
+{
+    None = 0,
+
+    /// <summary>
+    /// Reference the full trusted-platform-assemblies closure instead of corelib alone.
+    /// <para>
+    /// Needed by any test that touches the BCL beyond <c>System.Private.CoreLib</c> — most
+    /// importantly LINQ. With the corelib-only default, <c>System.Linq.Enumerable</c> does not
+    /// exist in the compilation at all, so BCL extension methods are silently unresolvable and a
+    /// test asserting "Where applies to List&lt;int&gt;" fails with the code under test blameless.
+    /// </para>
+    /// </summary>
+    FrameworkReferences = 1,
+
+    /// <summary>
+    /// Parse with <see cref="LanguageVersion.Preview"/>. Documents are added as
+    /// <see cref="SourceText"/>, so the parse options must be set on the ProjectInfo.
+    /// C# 14 <c>extension</c> blocks happen to parse under the compiler's default language
+    /// version too, but a test relying on that is relying on an SDK default; this states it.
+    /// </summary>
+    PreviewLanguage = 2,
+}
+
+/// <summary>
 /// Builds an in-memory LoadedSolution + SymbolResolver from source strings.
 /// Pass absolute paths as file names when a test needs apply-mode disk writes.
 /// The multi-project overload adds projects in order, each referencing all
@@ -23,11 +52,30 @@ internal static class RenameTestWorkspace
 
     public static (LoadedSolution Loaded, SymbolResolver Resolver) Create(
         params (string ProjectName, (string FilePath, string Source)[] Files)[] projects)
-        => CreateCore(projects
-            .Select(p => (p.ProjectName, p.Files
-                .Select(f => (f.FilePath, SourceText.From(f.Source)))
-                .ToArray()))
-            .ToArray());
+        => Create(RenameTestWorkspaceOptions.None, projects);
+
+    /// <inheritdoc cref="Create(RenameTestWorkspaceOptions, ValueTuple{string, ValueTuple{string, string}[]}[])"/>
+    public static (LoadedSolution Loaded, SymbolResolver Resolver) Create(
+        RenameTestWorkspaceOptions options,
+        params (string FilePath, string Source)[] files)
+        => Create(options, ("RenameProj", files));
+
+    /// <summary>
+    /// As <see cref="Create(ValueTuple{string, string}[])"/>, but with the opt-in capabilities in
+    /// <see cref="RenameTestWorkspaceOptions"/> — a full framework reference closure and/or
+    /// preview-language parse options.
+    /// </summary>
+    public static (LoadedSolution Loaded, SymbolResolver Resolver) Create(
+        RenameTestWorkspaceOptions options,
+        params (string ProjectName, (string FilePath, string Source)[] Files)[] projects)
+        => CreateCore(
+            projects
+                .Select(p => (p.ProjectName, p.Files
+                    .Select(f => (f.FilePath, SourceText.From(f.Source)))
+                    .ToArray()))
+                .ToArray(),
+            chainOnly: false,
+            options);
 
     /// <summary>
     /// Projects in a STRICT chain: each references only its immediate predecessor, so the last
@@ -64,8 +112,18 @@ internal static class RenameTestWorkspace
         => CreateCore(projects, chainOnly: false);
 
     private static (LoadedSolution Loaded, SymbolResolver Resolver) CreateCore(
-        (string ProjectName, (string FilePath, SourceText Text)[] Files)[] projects, bool chainOnly)
+        (string ProjectName, (string FilePath, SourceText Text)[] Files)[] projects,
+        bool chainOnly,
+        RenameTestWorkspaceOptions options = RenameTestWorkspaceOptions.None)
     {
+        IReadOnlyList<MetadataReference> references =
+            options.HasFlag(RenameTestWorkspaceOptions.FrameworkReferences)
+                ? FrameworkReferences.Value
+                : [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)];
+        var parseOptions = options.HasFlag(RenameTestWorkspaceOptions.PreviewLanguage)
+            ? new CSharpParseOptions(LanguageVersion.Preview)
+            : null;
+
         var workspace = new AdhocWorkspace();
         var solution = workspace.CurrentSolution;
         var projectIds = new List<ProjectId>();
@@ -75,9 +133,9 @@ internal static class RenameTestWorkspace
             var projectId = ProjectId.CreateNewId();
             var projectInfo = ProjectInfo.Create(
                     projectId, VersionStamp.Create(), projectName, projectName, LanguageNames.CSharp,
-                    compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
-                .WithMetadataReferences(
-                    [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)])
+                    compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+                    parseOptions: parseOptions)
+                .WithMetadataReferences(references)
                 .WithProjectReferences(
                     (chainOnly ? projectIds.TakeLast(1) : projectIds)
                         .Select(id => new ProjectReference(id)));
@@ -107,4 +165,15 @@ internal static class RenameTestWorkspace
         };
         return (loaded, new SymbolResolver(loaded));
     }
+
+    /// <summary>
+    /// The full trusted-platform-assemblies closure of the test host, built once and shared —
+    /// reading ~175 assemblies per workspace would dominate test time.
+    /// </summary>
+    private static readonly Lazy<IReadOnlyList<MetadataReference>> FrameworkReferences =
+        new(() => ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Where(p => p.EndsWith(".dll", StringComparison.Ordinal))
+            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
+            .ToList());
 }
