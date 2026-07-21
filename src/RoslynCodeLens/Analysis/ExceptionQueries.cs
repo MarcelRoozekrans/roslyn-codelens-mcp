@@ -81,9 +81,12 @@ internal static class ExceptionQueries
     /// prefix — the canonical spelling every comparison and every reported <c>exceptionType</c>
     /// goes through.
     /// </summary>
-    public static string Fqn(INamedTypeSymbol type)
-        => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            .Replace("global::", string.Empty, StringComparison.Ordinal);
+    /// <remarks>
+    /// Delegates to <see cref="SymbolKeys.Fqn"/>, which generalises this convention to members for
+    /// the other tools that match across compilations. The extra member/parameter options that
+    /// helper carries do not affect how a TYPE renders, so this spelling is unchanged.
+    /// </remarks>
+    public static string Fqn(INamedTypeSymbol type) => SymbolKeys.Fqn(type);
 
     /// <summary>
     /// Display name of the member that lexically contains <paramref name="node"/> — the method a
