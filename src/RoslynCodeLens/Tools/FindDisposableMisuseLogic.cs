@@ -13,12 +13,24 @@ public static class FindDisposableMisuseLogic
 
     public static FindDisposableMisuseResult Execute(LoadedSolution loaded, SymbolResolver source)
     {
-        // The scanner filters by project NAME, so the test-project set is translated into names.
-        // Doing it that way — rather than testing scan.ProjectId inside the loop — matters for a
-        // linked file shared between a test project and a production one: the scanner's dedupe is
-        // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
-        // lost from the production project too. Skipping the whole compilation up front cannot.
+        // Both exclusions are made in the projectFilter, which drops a whole compilation before any
+        // of its trees are touched — never inside the loop. The scanner's dedupe is first-one-wins,
+        // so a tree rejected AFTER it has claimed its dedupe slot is lost from every other
+        // compilation holding it too: a linked file shared with a test project would disappear from
+        // the production one, and a file in a project whose references failed to load (a real
+        // MSBuildWorkspace failure mode) would disappear from the healthy project that also has it.
+        //
+        // Test projects are excluded by ID, not name, because a name does not identify a project —
+        // two in different folders can share one, and a name-based exclusion would drop both.
         var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
+
+        // With neither disposable interface resolvable there is nothing this tool can recognise, so
+        // such a compilation is skipped in full rather than per-tree.
+        var projectsWithoutDisposable = loaded.Compilations
+            .Where(p => p.Value.GetTypeByMetadataName("System.IDisposable") is null
+                     && p.Value.GetTypeByMetadataName("System.IAsyncDisposable") is null)
+            .Select(p => p.Key)
+            .ToHashSet();
 
         var violations = new List<DisposableMisuseViolation>();
 
@@ -28,13 +40,17 @@ public static class FindDisposableMisuseLogic
         // project multi-targeted across frameworks) was walked once per compilation and its
         // violations counted that many times.
         foreach (var scan in SolutionScanner.EnumerateTrees(
-                     loaded, source, projectFilter: (id, _) => !testProjectIds.Contains(id)))
+                     loaded, source,
+                     projectFilter: (id, _) =>
+                         !testProjectIds.Contains(id) && !projectsWithoutDisposable.Contains(id)))
         {
             var projectName = scan.ProjectName;
+            // At least one of these is non-null by construction — the projectFilter above dropped
+            // every compilation where both were missing. Either may still be null on its own
+            // (System.IAsyncDisposable does not exist on older targets), which ImplementsDisposable
+            // handles per-interface.
             var idisposable = scan.Compilation.GetTypeByMetadataName("System.IDisposable");
             var iasyncDisposable = scan.Compilation.GetTypeByMetadataName("System.IAsyncDisposable");
-
-            if (idisposable is null && iasyncDisposable is null) continue;
 
             // The model must come from the tree's OWN compilation, which is what the scan hands
             // back; binding a tree against any other would resolve nothing.

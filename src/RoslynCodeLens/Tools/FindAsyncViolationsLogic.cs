@@ -13,12 +13,23 @@ public static class FindAsyncViolationsLogic
 
     public static FindAsyncViolationsResult Execute(LoadedSolution loaded, SymbolResolver source)
     {
-        // The scanner filters by project NAME, so the test-project set is translated into names.
-        // Doing it that way — rather than testing scan.ProjectId inside the loop — matters for a
-        // linked file shared between a test project and a production one: the scanner's dedupe is
-        // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
-        // lost from the production project too. Skipping the whole compilation up front cannot.
+        // Both exclusions are made in the projectFilter, which drops a whole compilation before any
+        // of its trees are touched — never inside the loop. The scanner's dedupe is first-one-wins,
+        // so a tree rejected AFTER it has claimed its dedupe slot is lost from every other
+        // compilation holding it too: a linked file shared with a test project would disappear from
+        // the production one, and a file in a project whose references failed to load (a real
+        // MSBuildWorkspace failure mode) would disappear from the healthy project that also has it.
+        //
+        // Test projects are excluded by ID, not name, because a name does not identify a project —
+        // two in different folders can share one, and a name-based exclusion would drop both.
         var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
+
+        // Nothing this tool looks for can be recognised without System.Threading.Tasks.Task, so a
+        // compilation that cannot resolve it is skipped in full rather than per-tree.
+        var projectsWithoutTask = loaded.Compilations
+            .Where(p => p.Value.GetTypeByMetadataName("System.Threading.Tasks.Task") is null)
+            .Select(p => p.Key)
+            .ToHashSet();
 
         var violations = new List<AsyncViolation>();
 
@@ -28,17 +39,19 @@ public static class FindAsyncViolationsLogic
         // project multi-targeted across frameworks) was walked once per compilation and its
         // violations counted that many times.
         foreach (var scan in SolutionScanner.EnumerateTrees(
-                     loaded, source, projectFilter: (id, _) => !testProjectIds.Contains(id)))
+                     loaded, source,
+                     projectFilter: (id, _) =>
+                         !testProjectIds.Contains(id) && !projectsWithoutTask.Contains(id)))
         {
             var compilation = scan.Compilation;
             var projectName = scan.ProjectName;
-            var taskSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
+            // Non-null by construction: the projectFilter above dropped every compilation that
+            // cannot resolve Task.
+            var taskSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task")!;
             var taskGenericSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
             var valueTaskSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
             var valueTaskGenericSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask`1");
             var eventArgsSymbol = compilation.GetTypeByMetadataName("System.EventArgs");
-
-            if (taskSymbol is null) continue;
 
             // The model must come from the tree's OWN compilation, which is what the scan hands
             // back; binding a tree against any other would resolve nothing.
