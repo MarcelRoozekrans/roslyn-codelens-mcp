@@ -1,4 +1,7 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -18,16 +21,23 @@ namespace RoslynCodeLens.Tools;
 public static class GetExtensionMethodsLogic
 {
     /// <summary>
-    /// Reduced, call-site form without the receiver prefix: <c>Where&lt;int&gt;(Func&lt;int, bool&gt;)</c>.
+    /// Reduced, call-site form without the receiver prefix, return type first:
+    /// <c>IEnumerable&lt;int&gt; Where&lt;int&gt;(Func&lt;int, bool&gt;)</c> for a method,
+    /// <c>int Tripled</c> for a property. One format for both kinds — a listing that prints
+    /// <c>int Tripled</c> beside <c>Thrice()</c> reads as if one of them is broken.
+    /// <para>
+    /// This is the call-site form, NOT literally paste-ready source: a signature names parameter
+    /// <em>types</em>, never arguments, and a partially-inferred generic keeps the type parameters
+    /// the compiler still has to infer from the arguments (<c>Select&lt;int, TResult&gt;</c>).
+    /// Dropping the type-argument list would not make it compile either, and would throw away the
+    /// genuinely useful half — that <c>TSource</c> is already pinned to <c>int</c>.
+    /// </para>
     /// </summary>
     private static readonly SymbolDisplayFormat SignatureFormat = new(
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
-        memberOptions: SymbolDisplayMemberOptions.IncludeParameters,
+        memberOptions: SymbolDisplayMemberOptions.IncludeParameters | SymbolDisplayMemberOptions.IncludeType,
         parameterOptions: SymbolDisplayParameterOptions.IncludeType,
         miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
-
-    private static readonly SymbolDisplayFormat TypeFormat =
-        SymbolDisplayFormat.MinimallyQualifiedFormat;
 
     public static IReadOnlyList<ExtensionMemberInfo> Execute(
         LoadedSolution loaded,
@@ -36,14 +46,23 @@ public static class GetExtensionMethodsLogic
         string type,
         string? nameFilter)
     {
-        var (receiver, compilation) = ResolveReceiver(loaded, resolver, metadata, type);
+        var receivers = ResolveReceivers(loaded, resolver, metadata, type);
 
         var results = new List<ExtensionMemberInfo>();
-        foreach (var candidate in CandidateContainers(compilation))
+        foreach (var (receiver, compilation) in receivers)
         {
-            CollectMethods(candidate, receiver, results);
-            CollectBlockProperties(candidate, receiver, results);
+            foreach (var candidate in CandidateContainers(compilation))
+            {
+                CollectMethods(candidate, receiver, results);
+                CollectBlockMembers(candidate, receiver, results);
+            }
         }
+
+        // Several compilations only ever contribute for a metadata receiver, and they overlap
+        // heavily — every project references the same BCL, so every LINQ member is found once per
+        // project. The records are value-equal for the same member, which is exactly the key.
+        if (receivers.Count > 1)
+            results = results.Distinct().ToList();
 
         if (!string.IsNullOrWhiteSpace(nameFilter))
         {
@@ -101,8 +120,9 @@ public static class GetExtensionMethodsLogic
         => type.IsStatic && type.TypeKind == TypeKind.Class && type.MightContainExtensionMethods;
 
     /// <summary>
-    /// Pass A — ordinary extension methods. C# 14 block <em>methods</em> arrive here for free:
-    /// the compiler lifts them onto the containing static class with IsExtensionMethod set.
+    /// Pass A — ordinary extension methods, i.e. everything callable on an INSTANCE. C# 14 block
+    /// <em>instance</em> methods arrive here for free: the compiler lifts them onto the containing
+    /// static class with IsExtensionMethod set, because they do have a classic call form.
     /// </summary>
     private static void CollectMethods(
         INamedTypeSymbol container, ITypeSymbol receiver, List<ExtensionMemberInfo> results)
@@ -114,22 +134,27 @@ public static class GetExtensionMethodsLogic
             var reduced = method.ReduceExtensionMethod(receiver);
             if (reduced is null) continue;
 
-            results.Add(Build(
-                reduced.Name,
-                "method",
-                reduced.ToDisplayString(SignatureFormat),
-                container,
-                method));
+            results.Add(Build(reduced, "method", container, method));
         }
     }
 
     /// <summary>
-    /// Pass B — C# 14 extension <em>properties</em>. They never appear as extension methods: the
-    /// containing class exposes only a <c>get_X</c> with IsExtensionMethod false. They are
-    /// reachable through the containing class's nested <see cref="INamedTypeSymbol.IsExtension"/>
-    /// type (which has an empty name), whose properties reduce via ReduceExtensionMember.
+    /// Pass B — the C# 14 block members pass A cannot see, reached through the containing class's
+    /// nested <see cref="INamedTypeSymbol.IsExtension"/> type (which has an empty name):
+    /// <list type="bullet">
+    /// <item>every extension <em>property</em>, static or not — the container exposes only a
+    /// <c>get_X</c> with IsExtensionMethod false, so an IsExtensionMethod scan misses them all;</item>
+    /// <item>static extension <em>methods</em> — <c>int.MakeZero()</c> has no classic call form,
+    /// so unlike an instance block method the container's copy has IsExtensionMethod false too.</item>
+    /// </list>
+    /// <para>
+    /// Instance block methods are deliberately skipped here: they appear in BOTH the container
+    /// (lifted, reported by pass A) and this nested type, and IsExtensionMethod is false on the
+    /// nested copy, so anything but an IsStatic test double-reports them. Property accessors
+    /// (<c>get_X</c>/<c>set_X</c>) are skipped too — they are reported as their property.
+    /// </para>
     /// </summary>
-    private static void CollectBlockProperties(
+    private static void CollectBlockMembers(
         INamedTypeSymbol container, ITypeSymbol receiver, List<ExtensionMemberInfo> results)
     {
         foreach (var nested in container.GetTypeMembers())
@@ -138,38 +163,42 @@ public static class GetExtensionMethodsLogic
 
             foreach (var member in nested.GetMembers())
             {
-                if (member is not IPropertySymbol property) continue;
+                switch (member)
+                {
+                    case IPropertySymbol property
+                        when property.ReduceExtensionMember(receiver) is { } reducedProperty:
+                        results.Add(Build(reducedProperty, "property", container, property));
+                        break;
 
-                var reduced = property.ReduceExtensionMember(receiver);
-                if (reduced is null) continue;
-
-                results.Add(Build(
-                    reduced.Name,
-                    "property",
-                    $"{reduced.Type.ToDisplayString(TypeFormat)} {reduced.Name}",
-                    container,
-                    property));
+                    case IMethodSymbol { MethodKind: MethodKind.Ordinary, IsStatic: true } method
+                        when method.ReduceExtensionMember(receiver) is { } reducedMethod:
+                        results.Add(Build(reducedMethod, "method", container, method));
+                        break;
+                }
             }
         }
     }
 
     private static ExtensionMemberInfo Build(
-        string name, string kind, string signature, INamedTypeSymbol container, ISymbol declaration)
+        ISymbol reduced, string kind, INamedTypeSymbol container, ISymbol declaration)
     {
         var location = SymbolResolver.GetLocation(declaration);
         var span = location?.GetLineSpan();
 
         return new ExtensionMemberInfo(
-            Name: name,
+            Name: reduced.Name,
             Kind: kind,
-            Signature: signature,
+            Signature: reduced.ToDisplayString(SignatureFormat),
             DeclaringType: container.ToDisplayString(),
             Namespace: container.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             Origin: location is null ? "metadata" : "source",
-            // Read off the ORIGINAL declaration, not the reduced symbol: reduction rewrites the
-            // member as seen from the receiver, and a static extension member is still invoked on
-            // the type (`int.Zero`) rather than on an instance.
-            IsStatic: declaration.IsStatic,
+            // Off the REDUCED symbol, which is the only one that answers the question the field
+            // actually asks — "is this invoked on the type or on an instance?". The declaration
+            // cannot answer it: a classic `this int` extension is declared static like every other
+            // extension method, yet is called `value.Doubled()`. Reduction models the call site, so
+            // `Doubled` and a block instance method come back IsStatic false while a block's own
+            // `static int Zero` stays true.
+            IsStatic: reduced.IsStatic,
             File: span?.Path,
             Line: span is null ? null : span.Value.StartLinePosition.Line + 1,
             XmlDocSummary: MethodDisplayHelpers.ExtractSummary(declaration));
@@ -197,20 +226,28 @@ public static class GetExtensionMethodsLogic
     };
 
     /// <summary>
-    /// Resolves the receiver type <em>inside each compilation</em> and picks the one that
-    /// declares it, so candidate scope is the receiver's own project. Resolving once and then
-    /// hunting for a compilation would pick whichever compilation the shared symbol index
-    /// happened to cache — for a type referenced by a downstream project that is the wrong one,
-    /// and every extension visible only downstream would be falsely reported.
+    /// Resolves the receiver type <em>inside each compilation</em>, because candidate scope is
+    /// decided per compilation. Resolving once and then hunting for a compilation would pick
+    /// whichever compilation the shared symbol index happened to cache — for a type referenced by
+    /// a downstream project that is the wrong one, and every extension visible only downstream
+    /// would be falsely reported.
+    /// <para>
+    /// A type the solution DECLARES has exactly one right answer: its own project, whose reference
+    /// closure is what is callable there. A type it merely REFERENCES — <c>string</c>, <c>int</c>,
+    /// any BCL type — is declared by no project, so there is no such thing as "its compilation".
+    /// Picking one would silently drop the solution's own extensions on <c>string</c> declared in
+    /// every other project, and any project's extension on <c>string</c> is a legitimate answer to
+    /// "what can I call on a string?". So metadata receivers gather ALL compilations.
+    /// </para>
     /// </summary>
-    private static (ITypeSymbol Receiver, Compilation Compilation) ResolveReceiver(
+    private static IReadOnlyList<(ITypeSymbol Receiver, Compilation Compilation)> ResolveReceivers(
         LoadedSolution loaded, SymbolResolver resolver, MetadataSymbolResolver metadata, string type)
     {
         var compilations = loaded.Compilations.Values
             .OrderBy(c => c.AssemblyName, StringComparer.Ordinal)
             .ToList();
 
-        (ITypeSymbol, Compilation)? fallback = null;
+        var referencing = new List<(ITypeSymbol, Compilation)>();
         foreach (var compilation in compilations)
         {
             if (ResolveInCompilation(compilation, resolver, type) is not { } resolved) continue;
@@ -219,13 +256,13 @@ public static class GetExtensionMethodsLogic
                 && string.Equals(
                     resolved.ContainingAssembly?.Name, compilation.Assembly.Name, StringComparison.Ordinal);
             if (declaredHere)
-                return (resolved, compilation);
+                return [(resolved, compilation)];
 
-            fallback ??= (resolved, compilation);
+            referencing.Add((resolved, compilation));
         }
 
-        if (fallback is { } hit)
-            return hit;
+        if (referencing.Count > 0)
+            return referencing;
 
         // Nothing resolved as a type. Distinguish "you named a namespace / a member" from
         // "no such thing" so the caller gets an actionable error.
@@ -247,34 +284,124 @@ public static class GetExtensionMethodsLogic
             ToolErrorCode.SymbolNotFound, $"Type '{type}' not found.", new { type });
     }
 
+    /// <summary>
+    /// Roslyn's own parser supplies the SHAPE of the type name; only the leaf names are looked up
+    /// here. That is what makes <c>string[]</c>, <c>int?</c>, <c>(int, string)</c>, <c>int[,]</c>
+    /// and combinations of them work — "what can I call on this array" is one of the questions the
+    /// tool exists to answer, and Roslyn reduces against those receivers perfectly well; only the
+    /// hand-rolled name parser this replaced could not spell them.
+    /// <para>
+    /// Leaves still go through <see cref="ResolveNamedType"/> rather than a semantic model, so a
+    /// bare <c>Widget</c> keeps resolving through the solution-wide index — speculative binding
+    /// would need a call-site position the tool does not have, and would only handle names already
+    /// in scope at whatever position was invented for it.
+    /// </para>
+    /// </summary>
     private static ITypeSymbol? ResolveInCompilation(
         Compilation compilation, SymbolResolver resolver, string type)
     {
         var name = type.Trim();
         if (name.Length == 0) return null;
 
-        if (Keywords.TryGetValue(name, out var special))
-            return compilation.GetSpecialType(special);
+        var syntax = SyntaxFactory.ParseTypeName(name);
+        // ParseTypeName never fails outright — it consumes a prefix and reports diagnostics for the
+        // rest — so reject anything that is not entirely a type name ("Widget foo", "int)").
+        if (syntax.ContainsDiagnostics || syntax.FullSpan.End != name.Length) return null;
 
-        if (name.EndsWith('>') && name.IndexOf('<', StringComparison.Ordinal) > 0)
+        return ResolveSyntax(compilation, resolver, syntax);
+    }
+
+    private static ITypeSymbol? ResolveSyntax(
+        Compilation compilation, SymbolResolver resolver, TypeSyntax syntax)
+    {
+        switch (syntax)
         {
-            var open = name.IndexOf('<', StringComparison.Ordinal);
-            var argNames = SplitTypeArguments(name[(open + 1)..^1]);
-            var definition = ResolveNamedType(compilation, resolver, name[..open], argNames.Count);
-            if (definition is null) return null;
-
-            var args = new ITypeSymbol[argNames.Count];
-            for (var i = 0; i < argNames.Count; i++)
+            case ArrayTypeSyntax array:
             {
-                if (ResolveInCompilation(compilation, resolver, argNames[i]) is not { } arg)
+                if (ResolveSyntax(compilation, resolver, array.ElementType) is not { } element)
                     return null;
-                args[i] = arg;
+
+                // Rank specifiers are written outermost-first: `string[][]` is an array of
+                // `string[]`, so they have to be applied inside out.
+                var result = element;
+                for (var i = array.RankSpecifiers.Count - 1; i >= 0; i--)
+                    result = compilation.CreateArrayTypeSymbol(result, array.RankSpecifiers[i].Rank);
+                return result;
             }
 
-            return definition.Construct(args);
+            case NullableTypeSyntax nullable:
+            {
+                if (ResolveSyntax(compilation, resolver, nullable.ElementType) is not { } element)
+                    return null;
+
+                // `string?` is `string` — a nullable reference annotation, not `Nullable<string>`,
+                // and annotations do not change which extensions apply.
+                return element.IsValueType
+                    ? compilation.GetSpecialType(SpecialType.System_Nullable_T).Construct(element)
+                    : element;
+            }
+
+            case TupleTypeSyntax tuple:
+            {
+                if (tuple.Elements.Count < 2) return null;
+
+                var types = ImmutableArray.CreateBuilder<ITypeSymbol>(tuple.Elements.Count);
+                var names = ImmutableArray.CreateBuilder<string?>(tuple.Elements.Count);
+                var named = false;
+                foreach (var element in tuple.Elements)
+                {
+                    if (ResolveSyntax(compilation, resolver, element.Type) is not { } elementType)
+                        return null;
+                    types.Add(elementType);
+                    var elementName = element.Identifier.ValueText;
+                    named |= elementName.Length > 0;
+                    names.Add(elementName.Length > 0 ? elementName : null);
+                }
+
+                return compilation.CreateTupleTypeSymbol(
+                    types.MoveToImmutable(), named ? names.MoveToImmutable() : default);
+            }
+
+            case PredefinedTypeSyntax predefined:
+                return Keywords.TryGetValue(predefined.Keyword.ValueText, out var special)
+                    ? compilation.GetSpecialType(special)
+                    : null;
+
+            case GenericNameSyntax generic:
+                return ResolveGeneric(compilation, resolver, generic, generic.Identifier.ValueText);
+
+            case QualifiedNameSyntax { Right: GenericNameSyntax rightGeneric } qualified:
+                return ResolveGeneric(
+                    compilation, resolver, rightGeneric,
+                    $"{qualified.Left}.{rightGeneric.Identifier.ValueText}");
+
+            case QualifiedNameSyntax or AliasQualifiedNameSyntax:
+                return ResolveNamedType(compilation, resolver, syntax.ToString(), arity: 0);
+
+            case IdentifierNameSyntax identifier:
+                return ResolveNamedType(
+                    compilation, resolver, identifier.Identifier.ValueText, arity: 0);
+
+            default:
+                return null;
+        }
+    }
+
+    private static ITypeSymbol? ResolveGeneric(
+        Compilation compilation, SymbolResolver resolver, GenericNameSyntax generic, string name)
+    {
+        var arguments = generic.TypeArgumentList.Arguments;
+        var definition = ResolveNamedType(compilation, resolver, name, arguments.Count);
+        if (definition is null) return null;
+
+        var args = new ITypeSymbol[arguments.Count];
+        for (var i = 0; i < arguments.Count; i++)
+        {
+            if (ResolveSyntax(compilation, resolver, arguments[i]) is not { } arg) return null;
+            args[i] = arg;
         }
 
-        return ResolveNamedType(compilation, resolver, name, arity: 0);
+        return definition.Construct(args);
     }
 
     private static INamedTypeSymbol? ResolveNamedType(
@@ -304,28 +431,6 @@ public static class GetExtensionMethodsLogic
         var name = string.Join('+', parts);
         var ns = type.ContainingNamespace;
         return ns is null || ns.IsGlobalNamespace ? name : $"{ns.ToDisplayString()}.{name}";
-    }
-
-    private static List<string> SplitTypeArguments(string text)
-    {
-        var parts = new List<string>();
-        var depth = 0;
-        var start = 0;
-        for (var i = 0; i < text.Length; i++)
-        {
-            switch (text[i])
-            {
-                case '<': depth++; break;
-                case '>': depth--; break;
-                case ',' when depth == 0:
-                    parts.Add(text[start..i].Trim());
-                    start = i + 1;
-                    break;
-            }
-        }
-
-        parts.Add(text[start..].Trim());
-        return parts;
     }
 
     private static INamespaceSymbol? FindNamespace(Compilation compilation, string name)

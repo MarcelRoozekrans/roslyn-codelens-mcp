@@ -42,7 +42,23 @@ public class GetExtensionMethodsLogicTests
                 public int Tripled => value * 3;
                 public int Thrice() => value * 3;
                 public static int Zero => 0;
+                public static int MakeZero() => 0;
             }
+        }
+
+        public static class ArrayExtensions
+        {
+            public static T Firsty<T>(this T[] source) => default!;
+        }
+
+        public static class NullableExtensions
+        {
+            public static int OrZero(this int? value) => 0;
+        }
+
+        public static class TupleExtensions
+        {
+            public static int Combine(this (int, string) pair) => 0;
         }
         """;
 
@@ -143,6 +159,131 @@ public class GetExtensionMethodsLogicTests
         Assert.True(zero.IsStatic);
     }
 
+    // ------------------------------------------------------------------ IsStatic semantics
+    //
+    // IsStatic answers ONE question: is this member invoked on the TYPE (`int.Zero`) or on an
+    // INSTANCE (`value.Doubled()`)? It is emphatically not "was the declaration written with the
+    // static keyword" — every classic extension method is declared static, and reporting that
+    // would tell an agent to write `int.Doubled()`, which does not compile.
+
+    [Fact]
+    public void ClassicExtension_IsNotMarkedStatic()
+    {
+        var doubled = Assert.Single(Run("int"), i => i.Name == "Doubled");
+
+        Assert.False(doubled.IsStatic);
+    }
+
+    [Fact]
+    public void BlockInstanceMethod_IsNotMarkedStatic()
+    {
+        var thrice = Assert.Single(Run("int"), i => i.Name == "Thrice");
+
+        Assert.False(thrice.IsStatic);
+    }
+
+    [Fact]
+    public void BclExtensions_AreNotMarkedStatic()
+    {
+        Assert.All(
+            Run("List<int>").Where(i => i.Origin == "metadata"),
+            i => Assert.False(i.IsStatic, $"{i.Name} is called on an instance"));
+    }
+
+    /// <summary>
+    /// A block's static METHOD is invisible to pass A: unlike an instance block method, the
+    /// compiler lifts it onto the container with <c>IsExtensionMethod == false</c> (there is no
+    /// classic form for `int.MakeZero()`), so only the nested extension type exposes it.
+    /// </summary>
+    [Fact]
+    public void StaticExtensionMethodInBlock_IsReportedAndMarkedStatic()
+    {
+        var makeZero = Assert.Single(Run("int"), i => i.Name == "MakeZero");
+
+        Assert.Equal("method", makeZero.Kind);
+        Assert.Equal("Demo.BlockExtensions", makeZero.DeclaringType);
+        Assert.Equal("source", makeZero.Origin);
+        Assert.True(makeZero.IsStatic);
+    }
+
+    /// <summary>
+    /// An instance block method appears TWICE in the symbol model — lifted onto the container with
+    /// IsExtensionMethod set, and again inside the nested extension type. Both passes can see it,
+    /// so it is exactly the member a naive "collect methods in pass B too" fix duplicates.
+    /// </summary>
+    [Fact]
+    public void BlockInstanceMethod_IsReportedExactlyOnce()
+    {
+        Assert.Equal(1, Run("int").Count(i => i.Name == "Thrice"));
+    }
+
+    [Fact]
+    public void BlockPropertyAccessors_AreNotReportedAsMethods()
+    {
+        Assert.DoesNotContain("get_Tripled", Names(Run("int")));
+        Assert.DoesNotContain("get_Zero", Names(Run("int")));
+    }
+
+    // ------------------------------------------------------------------ receiver shapes
+
+    [Fact]
+    public void ArrayReceiver_IsSupported()
+    {
+        var results = Run("string[]");
+
+        Assert.Contains("Firsty", Names(results));
+        // Arrays are IEnumerable<T>, so BCL LINQ applies too — the real reason someone asks.
+        Assert.Contains("Where", Names(results));
+        Assert.DoesNotContain("Doubled", Names(results));
+    }
+
+    [Fact]
+    public void NullableReceiver_IsSupported()
+    {
+        var results = Run("int?");
+
+        Assert.Contains("OrZero", Names(results));
+        Assert.DoesNotContain("Doubled", Names(results));
+    }
+
+    [Fact]
+    public void TupleReceiver_IsSupported()
+    {
+        Assert.Contains("Combine", Names(Run("(int, string)")));
+    }
+
+    [Fact]
+    public void NullableReferenceReceiver_ResolvesToTheUnderlyingType()
+    {
+        // `string?` is `string`; there is no Nullable<string>.
+        Assert.Contains("First2", Names(Run("string?")));
+    }
+
+    // ------------------------------------------------------------------ signature shape
+
+    /// <summary>
+    /// Methods and properties render the same way — leading return type, then the call-site form.
+    /// A tool that prints `int Tripled` beside `Thrice()` reads as if one of them is broken.
+    /// </summary>
+    [Fact]
+    public void Signature_LeadsWithTheReturnType_ForBothKinds()
+    {
+        var results = Run("int");
+
+        Assert.Equal("int Tripled", Assert.Single(results, i => i.Name == "Tripled").Signature);
+        Assert.Equal("int Thrice()", Assert.Single(results, i => i.Name == "Thrice").Signature);
+        Assert.Equal("int Doubled()", Assert.Single(results, i => i.Name == "Doubled").Signature);
+        Assert.Equal("int Zero", Assert.Single(results, i => i.Name == "Zero").Signature);
+    }
+
+    [Fact]
+    public void Signature_ShowsInferredTypeArguments()
+    {
+        var where = Run("List<int>").First(i => i.Name == "Where");
+
+        Assert.StartsWith("IEnumerable<int> Where<int>(", where.Signature);
+    }
+
     [Fact]
     public void NameFilter_Narrows()
     {
@@ -195,24 +336,84 @@ public class GetExtensionMethodsLogicTests
         Assert.DoesNotContain("Boost", Names(results));
     }
 
+    /// <summary>
+    /// Genuinely cross-project control for <see cref="UnreferencedProjectExtension_IsNotReported"/>:
+    /// the extension lives in <c>Core</c>, the receiver type in <c>App</c>, and App references Core.
+    /// This is the branch that walks <c>ReferencedAssemblySymbols</c> rather than the receiver
+    /// compilation's own types — a same-project control never reaches it. It also pins the
+    /// public-only filter applied there: Core's internal container must stay invisible.
+    /// </summary>
     [Fact]
     public void ReferencedProjectExtension_IsReported()
     {
-        // Control for UnreferencedProjectExtension_IsNotReported: identical shape with the
-        // extension in the receiver's own project, proving the absence there is about scope
-        // and not about Widget failing to resolve.
-        const string source = """
-            namespace Demo;
+        const string core = """
+            namespace Core;
 
-            public class Widget { }
+            public interface IWidget { }
 
             public static class WidgetExtensions
             {
-                public static int Boost(this Widget widget) => 1;
+                public static int Boost(this IWidget widget) => 1;
+            }
+
+            internal static class InternalWidgetExtensions
+            {
+                public static int Hidden(this IWidget widget) => 1;
+            }
+            """;
+        const string app = """
+            namespace App;
+
+            using Core;
+
+            public class Widget : IWidget { }
+            """;
+
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Core", [("Core.cs", core)]),
+            ("App", [("App.cs", app)]));
+
+        var results = GetExtensionMethodsLogic.Execute(
+            loaded, resolver, new MetadataSymbolResolver(loaded, resolver), "Widget", null);
+
+        Assert.Contains("Boost", Names(results));
+        Assert.DoesNotContain("Hidden", Names(results));
+    }
+
+    /// <summary>
+    /// A metadata receiver such as <c>string</c> is declared by no project in the solution, so
+    /// there is no "the receiver's compilation" to scope candidates to. Any project's extension on
+    /// <c>string</c> is a legitimate answer to "what can I call on a string?", and picking one
+    /// compilation silently drops the rest.
+    /// </summary>
+    [Fact]
+    public void MetadataReceiver_ReportsExtensionsFromEveryProject()
+    {
+        const string plain = "namespace Aaa; public class Unrelated { }";
+        const string extensions = """
+            namespace Zzz;
+
+            public static class StringExtensions
+            {
+                public static string Slugify(this string value) => value;
             }
             """;
 
-        Assert.Contains("Boost", Names(RunOn(source, "Widget")));
+        // "AaaPlain" is added first, so it does NOT reference "ZzzExtensions" — and it sorts first
+        // by assembly name, which is exactly the compilation a first-match fallback would pick.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            RenameTestWorkspaceOptions.FrameworkReferences,
+            ("AaaPlain", [("Unrelated.cs", plain)]),
+            ("ZzzExtensions", [("StringExtensions.cs", extensions)]));
+
+        var results = GetExtensionMethodsLogic.Execute(
+            loaded, resolver, new MetadataSymbolResolver(loaded, resolver), "string", null);
+
+        Assert.Contains("Slugify", Names(results));
+        // Both compilations reference the same BCL, so every LINQ member is found twice; scanning
+        // more than one compilation is only correct if the results are deduplicated.
+        Assert.Contains("Where", Names(results));
+        Assert.Equal(results.Count, results.Distinct().Count());
     }
 
     [Fact]
