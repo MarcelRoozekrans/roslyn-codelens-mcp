@@ -1,4 +1,6 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 
 namespace RoslynCodeLens.Tools;
@@ -69,7 +71,7 @@ public static class GetInstantiationOptionsLogic
             Instantiable: instantiable,
             Note: note,
             Constructors: constructors,
-            Factories: [],
+            Factories: BuildFactories(loaded, resolver, type, cancellationToken),
             DiRegistrations: [],
             RequiredMembers: BuildRequiredMembers(type));
     }
@@ -109,6 +111,136 @@ public static class GetInstantiationOptionsLogic
         }
 
         return options;
+    }
+
+    // ---------------------------------------------------------------- factories
+
+    /// <summary>
+    /// Every static member in the solution that hands back an instance of the target type.
+    /// <para>
+    /// The scan is solution-wide rather than confined to the type itself because the pattern this
+    /// exists for — <c>WidgetFactory.Create()</c> beside a <c>Widget</c> with a non-public
+    /// constructor — puts the factory on a DIFFERENT type. A self-only scan finds nothing there,
+    /// which is precisely the case where the caller has no other way in.
+    /// </para>
+    /// <para>
+    /// INSTANCE members returning the type (a builder's <c>Build()</c>) are deliberately excluded:
+    /// the builder itself would have to be constructed first, so answering "how do I construct
+    /// Widget" with "call Build() on a WidgetBuilder" just restates the question one level down.
+    /// </para>
+    /// </summary>
+    private static IReadOnlyList<FactoryOption> BuildFactories(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        INamedTypeSymbol type,
+        CancellationToken cancellationToken)
+    {
+        // Compared as a fully-qualified STRING, never with SymbolEqualityComparer: the target was
+        // resolved out of one compilation and the candidates come out of every other one, where
+        // the same type is a different symbol instance. Symbol identity across compilations gives
+        // false negatives, which here means silently reporting no factory at all.
+        var targetKey = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+        var options = new List<FactoryOption>();
+        var seen = new HashSet<(string DeclaringType, string Signature)>();
+
+        foreach (var scanTree in SolutionScanner.EnumerateTrees(
+                     loaded, resolver, cancellationToken: cancellationToken))
+        {
+            // Syntactic pre-filter: binding a tree is the expensive part of the scan, and a file
+            // declaring no type can hold no static factory.
+            var declarations = scanTree.Root.DescendantNodes().OfType<BaseTypeDeclarationSyntax>().ToList();
+            if (declarations.Count == 0) continue;
+
+            var model = scanTree.SemanticModel();
+            foreach (var declaration in declarations)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (model.GetDeclaredSymbol(declaration, cancellationToken) is not INamedTypeSymbol container)
+                    continue;
+
+                foreach (var member in container.GetMembers())
+                    if (TryBuildFactory(member, targetKey) is { } factory
+                        && seen.Add((factory.DeclaringType, factory.Signature)))
+                        options.Add(factory);
+            }
+        }
+
+        options.Sort(static (a, b) =>
+        {
+            // Source before metadata: a factory the caller can open and read is the better answer.
+            var byOrigin = (a.File is null ? 1 : 0).CompareTo(b.File is null ? 1 : 0);
+            if (byOrigin != 0) return byOrigin;
+            var byType = string.CompareOrdinal(a.DeclaringType, b.DeclaringType);
+            return byType != 0 ? byType : string.CompareOrdinal(a.Signature, b.Signature);
+        });
+
+        return options;
+    }
+
+    private static FactoryOption? TryBuildFactory(ISymbol member, string targetKey)
+    {
+        // `static FactoryOnly Instance { get; }` emits a static field <Instance>k__BackingField
+        // whose type is the target — a perfect structural match for a factory, and something no
+        // caller can write. Every compiler-supplied member is excluded for that reason.
+        if (member.IsImplicitlyDeclared || !member.IsStatic) return null;
+
+        var (kind, produced, parameters) = member switch
+        {
+            // Ordinary only: property accessors arrive here as PropertyGet methods returning the
+            // type, and would double-report every static property factory.
+            IMethodSymbol { MethodKind: MethodKind.Ordinary } method =>
+                ("method", method.ReturnType, (IReadOnlyList<IParameterSymbol>)method.Parameters),
+            // A setter-only property hands nothing back.
+            IPropertySymbol { GetMethod: not null } property =>
+                ("property", property.Type, []),
+            IFieldSymbol field => ("field", field.Type, []),
+            _ => (null, null, []),
+        };
+        if (kind is null || produced is null) return null;
+
+        var unwrapped = UnwrapAsync(produced, out var isAsync);
+        if (!string.Equals(
+                unwrapped.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                targetKey,
+                StringComparison.Ordinal))
+            return null;
+
+        var (file, line) = SourceLocation(member);
+        return new FactoryOption(
+            Signature: member.ToDisplayString(SignatureFormat),
+            DeclaringType: member.ContainingType.ToDisplayString(TypeFormat),
+            Kind: kind,
+            Accessibility: DescribeAccessibility(member.DeclaredAccessibility),
+            Accessible: null,
+            IsAsync: isAsync,
+            IsObsolete: IsObsolete(member),
+            Parameters: BuildParameters(parameters),
+            File: file,
+            Line: line);
+    }
+
+    /// <summary>
+    /// Unwraps <c>Task&lt;T&gt;</c>/<c>ValueTask&lt;T&gt;</c> to <c>T</c>, so an async factory
+    /// matches its target. A generic <c>static T Make&lt;T&gt;()</c> needs no special case: its
+    /// return type is a type PARAMETER, whose display string never equals a concrete target's.
+    /// </summary>
+    private static ITypeSymbol UnwrapAsync(ITypeSymbol type, out bool isAsync)
+    {
+        isAsync = false;
+        if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } generic)
+        {
+            var definition = generic.ConstructedFrom.ToDisplayString();
+            if (definition.StartsWith("System.Threading.Tasks.Task<", StringComparison.Ordinal)
+                || definition.StartsWith("System.Threading.Tasks.ValueTask<", StringComparison.Ordinal))
+            {
+                isAsync = true;
+                return generic.TypeArguments[0];
+            }
+        }
+
+        return type;
     }
 
     // ---------------------------------------------------------------- constructors

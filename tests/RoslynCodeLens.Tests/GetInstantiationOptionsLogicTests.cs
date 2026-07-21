@@ -118,6 +118,101 @@ public class GetInstantiationOptionsLogicTests
         Assert.Equal("int", m.Type);
     }
 
+    // ------------------------------------------------------------------ factories
+
+    private const string FactorySource = """
+        using System.Threading.Tasks;
+        namespace Demo;
+
+        public class Widget { internal Widget() {} }
+        public static class WidgetFactory { public static Widget Create() => new(); }
+        public class WidgetBuilder { public Widget Build() => new(); }
+
+        public class FactoryOnly
+        {
+            private FactoryOnly() {}
+            public static FactoryOnly Create() => new();
+            public static Task<FactoryOnly> CreateAsync() => Task.FromResult(new FactoryOnly());
+            public static FactoryOnly Instance { get; } = new();
+            public static readonly FactoryOnly Default = new();
+            public static int NotAFactory() => 1;
+        }
+        """;
+
+    private static InstantiationOptionsResult RunFactories(string symbol)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("F.cs", FactorySource));
+        return GetInstantiationOptionsLogic.Execute(loaded, resolver, symbol, null);
+    }
+
+    [Fact]
+    public void Finds_static_factory_declared_on_another_type()
+    {
+        var r = RunFactories("Widget");
+
+        Assert.Contains(
+            r.Factories,
+            f => f.DeclaringType.EndsWith("WidgetFactory", StringComparison.Ordinal)
+                 && f.Signature.Contains("Create", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Instance_builder_methods_are_excluded()
+    {
+        // WidgetBuilder.Build() returns Widget but is an instance method: the builder itself
+        // would need constructing, so it is deliberately not a construction option.
+        Assert.DoesNotContain(
+            RunFactories("Widget").Factories,
+            f => f.Signature.Contains("Build", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// `static FactoryOnly Instance { get; }` emits a static backing field of self type, which is
+    /// a perfect structural match for a factory and something no caller can write.
+    /// <para>
+    /// Asserted as "Instance appears exactly once, as a property" rather than by hunting for
+    /// <c>k__BackingField</c> in the signature: Roslyn 5.6 renders that field as
+    /// <c>FactoryOnly Instance.field</c>, so a name-based assertion passes whether or not the
+    /// filter exists and tests nothing at all.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Compiler_generated_backing_field_is_not_a_factory()
+    {
+        var instance = Assert.Single(
+            RunFactories("FactoryOnly").Factories,
+            f => f.Signature.Contains("Instance", StringComparison.Ordinal));
+
+        Assert.Equal("property", instance.Kind);
+    }
+
+    [Fact]
+    public void Static_property_and_field_factories_are_reported()
+    {
+        var f = RunFactories("FactoryOnly").Factories;
+
+        Assert.Contains(f, x => x.Kind == "property" && x.Signature.Contains("Instance", StringComparison.Ordinal));
+        Assert.Contains(f, x => x.Kind == "field" && x.Signature.Contains("Default", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Task_returning_factory_is_unwrapped_and_marked_async()
+    {
+        var f = Assert.Single(
+            RunFactories("FactoryOnly").Factories,
+            x => x.Signature.Contains("CreateAsync", StringComparison.Ordinal));
+
+        Assert.True(f.IsAsync);
+    }
+
+    [Fact]
+    public void Members_not_returning_the_type_are_excluded()
+    {
+        Assert.DoesNotContain(
+            RunFactories("FactoryOnly").Factories,
+            x => x.Signature.Contains("NotAFactory", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Required_members_inherited_from_a_base_type_are_reported()
     {
