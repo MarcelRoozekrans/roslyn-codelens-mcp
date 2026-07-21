@@ -23,8 +23,7 @@ public static class FindEventSubscribersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolEqualityComparer.Default);
-        var targetMetadataKeys = BuildMetadataKeys(targetEvents);
+        var targetKeys = BuildTargetKeys(targetEvents);
         var results = new List<EventSubscriberInfo>();
         var seen = new HashSet<(string, TextSpan)>();
 
@@ -40,9 +39,7 @@ public static class FindEventSubscribersLogic
             var syntaxTree = scan.Tree;
 
             // The model must come from the tree's OWN compilation, which is what the scan hands
-            // back; binding a tree against any other would resolve nothing — and this tool matches
-            // events by symbol identity, so a model from the wrong compilation would miss every
-            // subscription rather than fail visibly.
+            // back; binding a tree against any other would resolve nothing.
             var semanticModel = scan.SemanticModel();
 
             foreach (var asg in scan.Root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
@@ -57,7 +54,7 @@ public static class FindEventSubscribersLogic
 
                 if (semanticModel.GetSymbolInfo(asg.Left).Symbol is not IEventSymbol called)
                     continue;
-                if (!IsEventMatch(called, targetSet, targetEvents, targetMetadataKeys))
+                if (!IsEventMatch(called, targetKeys, targetEvents))
                     continue;
 
                 if (!seen.Add((syntaxTree.FilePath, asg.Span)))
@@ -92,35 +89,42 @@ public static class FindEventSubscribersLogic
         return results;
     }
 
-    private static HashSet<string> BuildMetadataKeys(IReadOnlyList<IEventSymbol> events)
+    /// <summary>
+    /// The fully-qualified names the target events answer to — the declaration itself and, for a
+    /// constructed generic, its original definition.
+    /// </summary>
+    /// <remarks>
+    /// Names rather than symbols because the two sides of the match live in different compilations:
+    /// the targets come from <see cref="SymbolResolver"/>/<see cref="MetadataSymbolResolver"/>,
+    /// which keep whichever compilation reached the type first — an arbitrary, run-varying choice —
+    /// while each <c>+=</c> is bound under the one compilation the scanner picked for its tree.
+    /// <see cref="SymbolEqualityComparer"/> across that boundary is always false, so every
+    /// subscription would disappear whenever the two disagreed. See <see cref="SymbolKeys"/>.
+    /// <para>
+    /// This subsumes the separate metadata-only key set this method replaced: a metadata event's
+    /// key was its containing type's display name plus its own name, which is exactly its FQN.
+    /// </para>
+    /// </remarks>
+    private static HashSet<string> BuildTargetKeys(IReadOnlyList<IEventSymbol> events)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var e in events)
         {
-            if (e.Locations.All(l => !l.IsInSource))
-            {
-                var typeName = e.ContainingType?.ToDisplayString() ?? string.Empty;
-                keys.Add($"{typeName}.{e.Name}");
-            }
+            keys.Add(SymbolKeys.Fqn(e));
+            keys.Add(SymbolKeys.Fqn(e.OriginalDefinition));
         }
         return keys;
     }
 
     private static bool IsEventMatch(
         IEventSymbol called,
-        HashSet<IEventSymbol> targetSet,
-        IReadOnlyList<IEventSymbol> targetEvents,
-        HashSet<string> targetMetadataKeys)
+        HashSet<string> targetKeys,
+        IReadOnlyList<IEventSymbol> targetEvents)
     {
-        if (targetSet.Contains(called) || targetSet.Contains((IEventSymbol)called.OriginalDefinition))
-            return true;
-
-        if (targetMetadataKeys.Count > 0 && called.Locations.All(l => !l.IsInSource))
+        if (targetKeys.Contains(SymbolKeys.Fqn(called)) ||
+            targetKeys.Contains(SymbolKeys.Fqn(called.OriginalDefinition)))
         {
-            var typeName = (called.OriginalDefinition.ContainingType ?? called.ContainingType)
-                ?.ToDisplayString() ?? string.Empty;
-            if (targetMetadataKeys.Contains($"{typeName}.{called.Name}"))
-                return true;
+            return true;
         }
 
         for (int i = 0; i < targetEvents.Count; i++)
@@ -134,36 +138,34 @@ public static class FindEventSubscribersLogic
         return false;
     }
 
+    /// <summary>
+    /// Whether a subscription to <paramref name="called"/> reaches <paramref name="target"/> through
+    /// an interface: the interface event itself, or the member implementing it on a type that
+    /// declares the interface.
+    /// </summary>
+    /// <remarks>
+    /// Compares containing types by FQN for the reason in <see cref="BuildTargetKeys"/>. That also
+    /// replaces <c>FindImplementationForInterfaceMember</c>, which takes a symbol of the SAME
+    /// compilation and simply returns null for a target from another — so the check it guarded
+    /// never fired across the boundary anyway. Callers only reach here with matching names.
+    /// </remarks>
     private static bool IsInterfaceImplementation(IEventSymbol called, IEventSymbol target)
     {
-        if (target.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            if (SymbolEqualityComparer.Default.Equals(called, target))
-                return true;
+        if (target.ContainingType.TypeKind != TypeKind.Interface) return false;
+        if (!string.Equals(called.Name, target.Name, StringComparison.Ordinal)) return false;
 
-            var containingType = called.ContainingType;
-            var implementation = containingType.FindImplementationForInterfaceMember(target);
-            if (implementation != null &&
-                SymbolEqualityComparer.Default.Equals(implementation, called))
-                return true;
-        }
+        var targetTypeFqn = SymbolKeys.Fqn(target.ContainingType);
 
-        if (called.ContainingType.TypeKind == TypeKind.Interface &&
-            target.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            return SymbolEqualityComparer.Default.Equals(
-                       called.ContainingType, target.ContainingType) &&
-                   string.Equals(called.Name, target.Name, StringComparison.Ordinal);
-        }
-
-        // Last-resort: target is interface event, called is a non-interface event whose containing type
-        // implements the interface (covers explicit re-declarations of interface events).
-        if (target.ContainingType.TypeKind == TypeKind.Interface &&
-            called.ContainingType.TypeKind != TypeKind.Interface &&
-            string.Equals(called.Name, target.Name, StringComparison.Ordinal) &&
-            called.ContainingType.AllInterfaces.Contains(target.ContainingType, SymbolEqualityComparer.Default))
-        {
+        // The interface event itself, seen through any compilation.
+        if (string.Equals(SymbolKeys.Fqn(called.ContainingType), targetTypeFqn, StringComparison.Ordinal))
             return true;
+
+        // An event of the same name on a type that implements the interface — the implementation,
+        // implicit or an explicit re-declaration.
+        foreach (var iface in called.ContainingType.AllInterfaces)
+        {
+            if (string.Equals(SymbolKeys.Fqn(iface), targetTypeFqn, StringComparison.Ordinal))
+                return true;
         }
 
         return false;
