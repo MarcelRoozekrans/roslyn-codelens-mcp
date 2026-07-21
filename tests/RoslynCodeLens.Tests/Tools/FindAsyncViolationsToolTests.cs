@@ -176,4 +176,31 @@ public class FindAsyncViolationsToolTests
             Assert.NotEmpty(v.ContainingMethod);
         }
     }
+
+    [Fact]
+    public void LinkedFile_InTwoCompilations_ReportsOneViolation()
+    {
+        // One physical file, two compilations — a linked file, or equivalently one project
+        // multi-targeted across two frameworks. The scan must report what is written once, not once
+        // per compilation the file happens to be compiled into.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("ProjA", [("Shared.cs", LinkedViolation)]),
+            ("ProjB", [("Shared.cs", LinkedViolation)]));
+
+        var result = FindAsyncViolationsLogic.Execute(loaded, resolver);
+
+        Assert.Single(result.Violations);
+        Assert.Equal(AsyncViolationPattern.SyncOverAsyncResult, result.Violations[0].Pattern);
+    }
+
+    private const string LinkedViolation = """
+        using System.Threading.Tasks;
+
+        namespace Linked;
+
+        public class Blocking
+        {
+            public int Block(Task<int> work) => work.Result;
+        }
+        """;
 }

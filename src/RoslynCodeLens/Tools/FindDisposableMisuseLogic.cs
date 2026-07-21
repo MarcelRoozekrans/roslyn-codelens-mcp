@@ -13,42 +13,49 @@ public static class FindDisposableMisuseLogic
 
     public static FindDisposableMisuseResult Execute(LoadedSolution loaded, SymbolResolver source)
     {
-        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution);
+        // The scanner filters by project NAME, so the test-project set is translated into names.
+        // Doing it that way — rather than testing scan.ProjectId inside the loop — matters for a
+        // linked file shared between a test project and a production one: the scanner's dedupe is
+        // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
+        // lost from the production project too. Skipping the whole compilation up front cannot.
+        var testProjectNames = TestProjectDetector.GetTestProjectIds(loaded.Solution)
+            .Select(source.GetProjectName)
+            .ToHashSet(StringComparer.Ordinal);
+
         var violations = new List<DisposableMisuseViolation>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, generated ones skipped, project attribution
+        // deterministic — is SolutionScanner's job; this loop only asks what each node is.
+        // Before this, every tree present in more than one compilation (a linked file, or one
+        // project multi-targeted across frameworks) was walked once per compilation and its
+        // violations counted that many times.
+        foreach (var scan in SolutionScanner.EnumerateTrees(
+                     loaded, source, projectFilter: name => !testProjectNames.Contains(name)))
         {
-            if (testProjectIds.Contains(projectId))
-                continue;
-
-            var projectName = source.GetProjectName(projectId);
-            var idisposable = compilation.GetTypeByMetadataName("System.IDisposable");
-            var iasyncDisposable = compilation.GetTypeByMetadataName("System.IAsyncDisposable");
+            var projectName = scan.ProjectName;
+            var idisposable = scan.Compilation.GetTypeByMetadataName("System.IDisposable");
+            var iasyncDisposable = scan.Compilation.GetTypeByMetadataName("System.IAsyncDisposable");
 
             if (idisposable is null && iasyncDisposable is null) continue;
 
-            foreach (var tree in compilation.SyntaxTrees)
+            // The model must come from the tree's OWN compilation, which is what the scan hands
+            // back; binding a tree against any other would resolve nothing.
+            var semanticModel = scan.SemanticModel();
+
+            foreach (var methodDecl in scan.Root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree)) continue;
+                var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
+                if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared) continue;
 
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = tree.GetRoot();
+                var containingMethodName = methodSymbol.ContainingType is null
+                    ? methodSymbol.Name
+                    : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
 
-                foreach (var methodDecl in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-                {
-                    var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
-                    if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared) continue;
+                var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
+                if (body is null) continue;
 
-                    var containingMethodName = methodSymbol.ContainingType is null
-                        ? methodSymbol.Name
-                        : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
-
-                    var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
-                    if (body is null) continue;
-
-                    AnalyzeBody(body, semanticModel, idisposable, iasyncDisposable,
-                        containingMethodName, projectName, violations);
-                }
+                AnalyzeBody(body, semanticModel, idisposable, iasyncDisposable,
+                    containingMethodName, projectName, violations);
             }
         }
 

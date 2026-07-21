@@ -166,4 +166,39 @@ public class FindDisposableMisuseToolTests
             Assert.NotEmpty(v.ContainingMethod);
         }
     }
+
+    [Fact]
+    public void LinkedFile_InTwoCompilations_ReportsOneViolation()
+    {
+        // One physical file, two compilations — a linked file, or equivalently one project
+        // multi-targeted across two frameworks. The scan must report what is written once, not once
+        // per compilation the file happens to be compiled into.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("ProjA", [("Shared.cs", LinkedMisuse)]),
+            ("ProjB", [("Shared.cs", LinkedMisuse)]));
+
+        var result = FindDisposableMisuseLogic.Execute(loaded, resolver);
+
+        Assert.Single(result.Violations);
+        Assert.Equal(DisposableMisusePattern.DisposableNotDisposed, result.Violations[0].Pattern);
+    }
+
+    private const string LinkedMisuse = """
+        using System;
+
+        namespace Linked;
+
+        public sealed class Handle : IDisposable
+        {
+            public void Dispose() { }
+        }
+
+        public class Leaky
+        {
+            public void Leak()
+            {
+                var handle = new Handle();
+            }
+        }
+        """;
 }

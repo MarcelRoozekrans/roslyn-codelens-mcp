@@ -13,15 +13,27 @@ public static class FindAsyncViolationsLogic
 
     public static FindAsyncViolationsResult Execute(LoadedSolution loaded, SymbolResolver source)
     {
-        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution);
+        // The scanner filters by project NAME, so the test-project set is translated into names.
+        // Doing it that way — rather than testing scan.ProjectId inside the loop — matters for a
+        // linked file shared between a test project and a production one: the scanner's dedupe is
+        // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
+        // lost from the production project too. Skipping the whole compilation up front cannot.
+        var testProjectNames = TestProjectDetector.GetTestProjectIds(loaded.Solution)
+            .Select(source.GetProjectName)
+            .ToHashSet(StringComparer.Ordinal);
+
         var violations = new List<AsyncViolation>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, generated ones skipped, project attribution
+        // deterministic — is SolutionScanner's job; this loop only asks what each node is.
+        // Before this, every tree present in more than one compilation (a linked file, or one
+        // project multi-targeted across frameworks) was walked once per compilation and its
+        // violations counted that many times.
+        foreach (var scan in SolutionScanner.EnumerateTrees(
+                     loaded, source, projectFilter: name => !testProjectNames.Contains(name)))
         {
-            if (testProjectIds.Contains(projectId))
-                continue;
-
-            var projectName = source.GetProjectName(projectId);
+            var compilation = scan.Compilation;
+            var projectName = scan.ProjectName;
             var taskSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
             var taskGenericSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
             var valueTaskSymbol = compilation.GetTypeByMetadataName("System.Threading.Tasks.ValueTask");
@@ -30,112 +42,107 @@ public static class FindAsyncViolationsLogic
 
             if (taskSymbol is null) continue;
 
-            foreach (var tree in compilation.SyntaxTrees)
+            // The model must come from the tree's OWN compilation, which is what the scan hands
+            // back; binding a tree against any other would resolve nothing.
+            var semanticModel = scan.SemanticModel();
+
+            foreach (var methodDecl in scan.Root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
+                if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared)
                     continue;
 
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = tree.GetRoot();
+                var containingMethodName = methodSymbol.ContainingType is null
+                    ? methodSymbol.Name
+                    : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
 
-                foreach (var methodDecl in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+                // Pattern 4: AsyncVoid
+                if (IsAsyncVoid(methodDecl) && !IsEventHandlerShaped(methodSymbol, eventArgsSymbol))
                 {
-                    var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
-                    if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared)
-                        continue;
+                    violations.Add(BuildViolation(
+                        AsyncViolationPattern.AsyncVoid,
+                        AsyncViolationSeverity.Error,
+                        methodDecl.Identifier.GetLocation(),
+                        containingMethodName,
+                        projectName,
+                        "async void " + methodDecl.Identifier.Text + "(...)"));
+                }
 
-                    var containingMethodName = methodSymbol.ContainingType is null
-                        ? methodSymbol.Name
-                        : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
+                var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
+                if (body is null) continue;
 
-                    // Pattern 4: AsyncVoid
-                    if (IsAsyncVoid(methodDecl) && !IsEventHandlerShaped(methodSymbol, eventArgsSymbol))
+                var isAsync = methodDecl.Modifiers.Any(SyntaxKind.AsyncKeyword);
+
+                // Patterns 1-3: walk member-access + invocation expressions in the body
+                foreach (var node in body.DescendantNodes())
+                {
+                    if (node is MemberAccessExpressionSyntax memberAccess &&
+                        memberAccess.Name.Identifier.Text == "Result" &&
+                        memberAccess.Parent is not InvocationExpressionSyntax)
                     {
-                        violations.Add(BuildViolation(
-                            AsyncViolationPattern.AsyncVoid,
-                            AsyncViolationSeverity.Error,
-                            methodDecl.Identifier.GetLocation(),
-                            containingMethodName,
-                            projectName,
-                            "async void " + methodDecl.Identifier.Text + "(...)"));
-                    }
-
-                    var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
-                    if (body is null) continue;
-
-                    var isAsync = methodDecl.Modifiers.Any(SyntaxKind.AsyncKeyword);
-
-                    // Patterns 1-3: walk member-access + invocation expressions in the body
-                    foreach (var node in body.DescendantNodes())
-                    {
-                        if (node is MemberAccessExpressionSyntax memberAccess &&
-                            memberAccess.Name.Identifier.Text == "Result" &&
-                            memberAccess.Parent is not InvocationExpressionSyntax)
+                        var receiverType = semanticModel.GetTypeInfo(memberAccess.Expression).Type;
+                        if (HasTaskResultProperty(receiverType, taskSymbol, taskGenericSymbol, valueTaskGenericSymbol))
                         {
-                            var receiverType = semanticModel.GetTypeInfo(memberAccess.Expression).Type;
-                            if (HasTaskResultProperty(receiverType, taskSymbol, taskGenericSymbol, valueTaskGenericSymbol))
-                            {
-                                violations.Add(BuildViolation(
-                                    AsyncViolationPattern.SyncOverAsyncResult,
-                                    AsyncViolationSeverity.Error,
-                                    memberAccess.GetLocation(),
-                                    containingMethodName,
-                                    projectName,
-                                    Snippet(memberAccess.ToString())));
-                            }
-                        }
-                        else if (node is InvocationExpressionSyntax invocation)
-                        {
-                            var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
-                            if (symbol is null) continue;
-
-                            if (IsTaskWaitMethod(symbol, taskSymbol))
-                            {
-                                violations.Add(BuildViolation(
-                                    AsyncViolationPattern.SyncOverAsyncWait,
-                                    AsyncViolationSeverity.Error,
-                                    invocation.GetLocation(),
-                                    containingMethodName,
-                                    projectName,
-                                    Snippet(invocation.ToString())));
-                            }
-                            else if (IsGetResultOnAwaiter(invocation, symbol))
-                            {
-                                violations.Add(BuildViolation(
-                                    AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult,
-                                    AsyncViolationSeverity.Error,
-                                    invocation.GetLocation(),
-                                    containingMethodName,
-                                    projectName,
-                                    Snippet(invocation.ToString())));
-                            }
+                            violations.Add(BuildViolation(
+                                AsyncViolationPattern.SyncOverAsyncResult,
+                                AsyncViolationSeverity.Error,
+                                memberAccess.GetLocation(),
+                                containingMethodName,
+                                projectName,
+                                Snippet(memberAccess.ToString())));
                         }
                     }
-
-                    // Patterns 5 & 6: bare expression statement of Task-returning invocation
-                    foreach (var stmt in body.DescendantNodes().OfType<ExpressionStatementSyntax>())
+                    else if (node is InvocationExpressionSyntax invocation)
                     {
-                        if (stmt.Expression is not InvocationExpressionSyntax invocation)
-                            continue;
-
                         var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
                         if (symbol is null) continue;
 
-                        if (!IsTaskOrValueTaskType(symbol.ReturnType, taskSymbol, taskGenericSymbol, valueTaskSymbol, valueTaskGenericSymbol))
-                            continue;
-
-                        var pattern = isAsync
-                            ? AsyncViolationPattern.MissingAwait
-                            : AsyncViolationPattern.FireAndForget;
-
-                        violations.Add(BuildViolation(
-                            pattern,
-                            AsyncViolationSeverity.Warning,
-                            invocation.GetLocation(),
-                            containingMethodName,
-                            projectName,
-                            Snippet(invocation.ToString())));
+                        if (IsTaskWaitMethod(symbol, taskSymbol))
+                        {
+                            violations.Add(BuildViolation(
+                                AsyncViolationPattern.SyncOverAsyncWait,
+                                AsyncViolationSeverity.Error,
+                                invocation.GetLocation(),
+                                containingMethodName,
+                                projectName,
+                                Snippet(invocation.ToString())));
+                        }
+                        else if (IsGetResultOnAwaiter(invocation, symbol))
+                        {
+                            violations.Add(BuildViolation(
+                                AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult,
+                                AsyncViolationSeverity.Error,
+                                invocation.GetLocation(),
+                                containingMethodName,
+                                projectName,
+                                Snippet(invocation.ToString())));
+                        }
                     }
+                }
+
+                // Patterns 5 & 6: bare expression statement of Task-returning invocation
+                foreach (var stmt in body.DescendantNodes().OfType<ExpressionStatementSyntax>())
+                {
+                    if (stmt.Expression is not InvocationExpressionSyntax invocation)
+                        continue;
+
+                    var symbol = semanticModel.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+                    if (symbol is null) continue;
+
+                    if (!IsTaskOrValueTaskType(symbol.ReturnType, taskSymbol, taskGenericSymbol, valueTaskSymbol, valueTaskGenericSymbol))
+                        continue;
+
+                    var pattern = isAsync
+                        ? AsyncViolationPattern.MissingAwait
+                        : AsyncViolationPattern.FireAndForget;
+
+                    violations.Add(BuildViolation(
+                        pattern,
+                        AsyncViolationSeverity.Warning,
+                        invocation.GetLocation(),
+                        containingMethodName,
+                        projectName,
+                        Snippet(invocation.ToString())));
                 }
             }
         }
