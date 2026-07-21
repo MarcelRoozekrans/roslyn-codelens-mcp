@@ -32,7 +32,8 @@ public sealed record ScanTree(
 public static class SolutionScanner
 {
     /// <summary>
-    /// Every non-generated tree in the solution, deduped.
+    /// Every non-generated tree in the solution, deduped — or every tree, generated ones included,
+    /// when <paramref name="includeGenerated"/> is set.
     /// </summary>
     /// <param name="projectFilter">
     /// Receives a project name; returning false skips the whole compilation before any of its trees
@@ -46,6 +47,14 @@ public static class SolutionScanner
     /// DIFFERENT project per compilation, so a caller working in project terms must see it once per
     /// project or it silently loses every project after the first. Null — the common case — dedupes
     /// on tree identity alone.
+    /// </param>
+    /// <param name="includeGenerated">
+    /// Whether machine-written trees are scanned. Default false — most scans report something a
+    /// human is expected to go and edit, and a finding in a file that is regenerated on every build
+    /// is noise. Two tools want the opposite and pass true: <c>find_obsolete_usage</c> and
+    /// <c>find_event_subscribers</c> report generated hits deliberately (a deprecated API called
+    /// from generated code still blocks a migration; a generated <c>+=</c> still leaks) and flag
+    /// each result <c>IsGenerated</c> so the caller decides rather than the scan.
     /// </param>
     /// <param name="modelFactory">
     /// Test observability seam ONLY; production callers leave it null and get
@@ -63,6 +72,7 @@ public static class SolutionScanner
         SymbolResolver resolver,
         Func<string, bool>? projectFilter = null,
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
+        bool includeGenerated = false,
         Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
         Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
         CancellationToken cancellationToken = default)
@@ -95,7 +105,7 @@ public static class SolutionScanner
 
             foreach (var tree in compilation.SyntaxTrees)
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                if (!includeGenerated && GeneratedCodeDetector.IsGenerated(tree))
                     continue;
 
                 cancellationToken.ThrowIfCancellationRequested();
