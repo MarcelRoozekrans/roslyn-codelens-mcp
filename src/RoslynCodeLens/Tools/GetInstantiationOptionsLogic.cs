@@ -71,7 +71,44 @@ public static class GetInstantiationOptionsLogic
             Constructors: constructors,
             Factories: [],
             DiRegistrations: [],
-            RequiredMembers: []);
+            RequiredMembers: BuildRequiredMembers(type));
+    }
+
+    // ---------------------------------------------------------------- required members
+
+    /// <summary>
+    /// Members the caller must set in an object initializer. Base types are walked because
+    /// <c>required</c> is inherited: a base's required property still has to be set by whoever
+    /// constructs the derived type, and <see cref="ITypeSymbol.GetMembers()"/> on the derived type
+    /// never mentions it.
+    /// </summary>
+    private static IReadOnlyList<RequiredMemberOption> BuildRequiredMembers(INamedTypeSymbol type)
+    {
+        var options = new List<RequiredMemberOption>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        // Most-derived first, so an overriding declaration wins over the base one it shadows.
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var member in current.GetMembers())
+            {
+                if (member.IsImplicitlyDeclared) continue;
+
+                var memberType = member switch
+                {
+                    IPropertySymbol { IsRequired: true } property => property.Type,
+                    IFieldSymbol { IsRequired: true } field => field.Type,
+                    _ => null,
+                };
+                if (memberType is null) continue;
+
+                if (seen.Add(member.Name))
+                    options.Add(new RequiredMemberOption(
+                        memberType.ToDisplayString(TypeFormat), member.Name));
+            }
+        }
+
+        return options;
     }
 
     // ---------------------------------------------------------------- constructors

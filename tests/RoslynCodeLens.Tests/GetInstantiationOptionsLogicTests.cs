@@ -86,4 +86,46 @@ public class GetInstantiationOptionsLogicTests
         var ex = Assert.Throws<McpToolException>(() => Run("Nope"));
         Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
+
+    // ------------------------------------------------------------------ required members
+
+    private const string RequiredSource = """
+        namespace Demo;
+
+        public class Req
+        {
+            public required int A { get; init; }
+            public string B { get; init; }
+            public int C { get; set; }
+        }
+
+        public class BaseReq { public required string Name { get; init; } }
+        public class DerivedReq : BaseReq { public required int Age { get; init; } }
+        """;
+
+    private static InstantiationOptionsResult RunRequired(string symbol)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("R.cs", RequiredSource));
+        return GetInstantiationOptionsLogic.Execute(loaded, resolver, symbol, null);
+    }
+
+    [Fact]
+    public void Required_members_are_reported()
+    {
+        var m = Assert.Single(RunRequired("Req").RequiredMembers);
+
+        Assert.Equal("A", m.Name);
+        Assert.Equal("int", m.Type);
+    }
+
+    [Fact]
+    public void Required_members_inherited_from_a_base_type_are_reported()
+    {
+        // A base type's required member must still be set by whoever constructs the derived type,
+        // and GetMembers() on the derived type alone never mentions it.
+        var names = RunRequired("DerivedReq").RequiredMembers.Select(m => m.Name).ToList();
+
+        Assert.Contains("Age", names);
+        Assert.Contains("Name", names);
+    }
 }
