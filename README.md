@@ -85,7 +85,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **get_type_overview** — Compound tool: type context + hierarchy + file diagnostics in one call
 - **analyze_method** — Compound tool: method signature + callers + outgoing calls in one call
 - **get_overloads** — Every overload of a method/constructor (source + metadata) with full parameter and modifier detail in one call
-- **get_extension_methods** — Every extension member applicable to a type, from the solution and referenced assemblies (so LINQ shows up), using Roslyn's own applicability rules; covers C# 14 `extension` blocks including properties
+- **get_extension_methods** — Every extension member applicable to a type — including arrays, nullables and tuples — from the solution and referenced assemblies (so LINQ shows up), using Roslyn's own applicability rules; covers C# 14 `extension` blocks including properties and static members
 - **get_operators** — Every user-defined operator and conversion operator on a type (source + metadata) with kind, signature, parameters, and source location. Includes synthesized record equality and .NET 7+ checked variants
 - **get_call_graph** — Transitive caller/callee graph for a method, depth-bounded with cycle detection
 - **get_file_overview** — Compound tool: types defined in a file + file-scoped diagnostics in one call

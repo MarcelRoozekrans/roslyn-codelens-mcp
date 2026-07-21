@@ -17,16 +17,24 @@ public static class GetExtensionMethodsTool
         "Applicability is decided by the compiler's own reduction, not by name matching: " +
         "`this IEnumerable<T>` is reported for `string` (which is `IEnumerable<char>`) while " +
         "`this IEnumerable<string>` is not. Each entry carries the reduced call-site signature " +
-        "(what you actually type), kind (`method` or `property`), declaring type, namespace, " +
-        "origin (`source` or `metadata`), source file/line for source members, and XML doc summary. " +
+        "(receiver dropped, generic inference applied, return type first: " +
+        "`IEnumerable<int> Where<int>(Func<int, bool>)`, `int Tripled`), kind (`method` or " +
+        "`property`), declaring type, namespace, origin (`source` or `metadata`), source file/line " +
+        "for source members, XML doc summary, and `isStatic`. Read `isStatic` before writing the " +
+        "call: false means an instance call (`value.Doubled()`) and is the normal case even though " +
+        "every extension method is DECLARED static; true means a C# 14 static extension member, " +
+        "called on the type itself (`int.Zero`). " +
         "Results are NOT filtered by `using` scope — the tool has no call-site position, so every " +
         "applicable member is reported and its namespace is given for you to add the import. " +
         "Pass a type name: simple (`Widget`), fully qualified (`MyApp.Widget`), a C# keyword " +
-        "(`int`, `string`), or a constructed generic (`List<int>`). " +
+        "(`int`, `string`), a constructed generic (`List<int>`), an array (`string[]`), a nullable " +
+        "(`int?`), or a tuple (`(int, string)`). " +
         "Sort: source before metadata, then declaring type, then name.")]
     public static ToolListResult<ExtensionMemberInfo> Execute(
         MultiSolutionManager manager,
-        [Description("Receiver type — e.g. `Widget`, `MyApp.Widget`, `int`, `List<int>`")]
+        [Description(
+            "Receiver type — e.g. `Widget`, `MyApp.Widget`, `int`, `List<int>`, `string[]`, " +
+            "`int?`, `(int, string)`")]
             string type,
         [Description("Optional case-insensitive substring filter on the member name — e.g. `chunk`")]
             string? nameFilter = null,
