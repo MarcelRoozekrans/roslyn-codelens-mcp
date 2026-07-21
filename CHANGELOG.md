@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.11.1...v2.12.0) (2026-07-21)
+
+
+### Features
+
+* get_extension_methods — which extension members apply to a type ([#319](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/319)) ([d1b7709](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/d1b7709194142f98ff1316d2ef269927d2d3f340))
+
 ## [2.11.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.11.0...v2.11.1) (2026-07-21)
 
 
