@@ -76,7 +76,7 @@ public class SolutionScannerTests
 
         var asked = new List<string>();
         var scans = SolutionScanner
-            .EnumerateTrees(loaded, resolver, projectFilter: name =>
+            .EnumerateTrees(loaded, resolver, projectFilter: (_, name) =>
             {
                 asked.Add(name);
                 return name == "ProjB";
@@ -86,6 +86,29 @@ public class SolutionScannerTests
         var scan = Assert.Single(scans);
         Assert.Equal("ProjB", scan.ProjectName);
         Assert.Equal(["ProjA", "ProjB"], asked);
+    }
+
+    /// <summary>
+    /// The filter receives the project id as well as the name because a name does not identify a
+    /// project — two in different folders can share one, which is the same reason the enumeration
+    /// order cannot tie-break on name alone. A name-only filter excluding one of them (a test
+    /// project, say) would silently exclude the other too.
+    /// </summary>
+    [Fact]
+    public void ProjectFilter_CanDistinguishSameNamedProjects()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Common", [("A.cs", "namespace A; public class Aa { }")]),
+            ("Common", [("B.cs", "namespace B; public class Bb { }")]));
+
+        var excluded = loaded.Solution.Projects.First().Id;
+
+        var scans = SolutionScanner
+            .EnumerateTrees(loaded, resolver, projectFilter: (id, _) => id != excluded)
+            .ToList();
+
+        var scan = Assert.Single(scans);
+        Assert.NotEqual(excluded, scan.ProjectId);
     }
 
     [Fact]

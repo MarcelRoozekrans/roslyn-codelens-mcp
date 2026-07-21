@@ -90,7 +90,7 @@ public static class CheckArchitectureLogic
             resolver,
             projectFilter: byNamespace
                 ? null
-                : projectName => rules.Any(r => ScopePattern.Matches(r.From, projectName)),
+                : (_, projectName) => rules.Any(r => ScopePattern.Matches(r.From, projectName)),
             scopeDiscriminator: byNamespace ? null : (projectName, _) => projectName,
             modelFactory: modelFactory,
             cancellationToken: cancellationToken);

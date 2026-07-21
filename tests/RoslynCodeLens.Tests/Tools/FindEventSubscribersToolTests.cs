@@ -152,4 +152,60 @@ public class FindEventSubscribersToolTests
             e => { Assert.Equal("a.cs", e.FilePath); Assert.Equal(9, e.Line); },
             e => { Assert.Equal("b.cs", e.FilePath); Assert.Equal(1, e.Line); });
     }
+
+    [Fact]
+    public void GeneratedCode_SubscriptionIsReported_AndFlagged()
+    {
+        // This tool includes machine-written code ON PURPOSE and flags it, rather than skipping it:
+        // a generated `+=` with no matching `-=` leaks exactly like a hand-written one, so the
+        // caller — not the scan — decides what to do about it. The guard exists because the obvious
+        // way to share a solution walker skips generated trees by default, which would delete these
+        // results silently rather than failing loudly.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            (GeneratedSourcePath, GeneratedSource),
+            (HandwrittenPath, HandwrittenSource));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var results = FindEventSubscribersLogic.Execute(
+            loaded, resolver, metadata, "Publisher.Fired");
+
+        var subscription = Assert.Single(results, r =>
+            string.Equals(r.FilePath, GeneratedSourcePath, StringComparison.Ordinal));
+        Assert.Equal(SubscriptionKind.Subscribe, subscription.Kind);
+        Assert.True(subscription.IsGenerated);
+    }
+
+    // Both markers matter: ".g.cs" is what GeneratedCodeDetector keys on (so a shared walker would
+    // skip the tree), and the "obj" segment is what SymbolResolver.IsGenerated keys on (so the
+    // result carries IsGenerated: true). A file with only one of the two would let the test pass
+    // for the wrong reason.
+    private const string GeneratedSourcePath = @"C:\proj\obj\Debug\Wiring.g.cs";
+    private const string HandwrittenPath = @"C:\proj\Api.cs";
+
+    private const string HandwrittenSource = """
+        using System;
+
+        namespace GenDemo;
+
+        public class Publisher
+        {
+            public event EventHandler? Fired;
+        }
+        """;
+
+    private const string GeneratedSource = """
+        using System;
+
+        namespace GenDemo;
+
+        public static class Wiring
+        {
+            public static void Attach(Publisher publisher)
+            {
+                publisher.Fired += OnFired;
+            }
+
+            private static void OnFired(object? sender, EventArgs args) { }
+        }
+        """;
 }

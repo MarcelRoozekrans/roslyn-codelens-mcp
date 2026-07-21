@@ -203,4 +203,53 @@ public class FindObsoleteUsageToolTests
         // TestLib2 has no [Obsolete(..., true)] in the fixture, so the filtered result is empty.
         Assert.Empty(result.Groups);
     }
+
+    [Fact]
+    public void GeneratedCode_UsageIsReported_AndFlagged()
+    {
+        // This tool includes machine-written code ON PURPOSE and flags it, rather than skipping it:
+        // a deprecated API called from generated code still blocks a migration, so the caller — not
+        // the scan — decides what to do about it. The guard exists because the obvious way to share
+        // a solution walker skips generated trees by default, which would delete these results
+        // silently rather than failing loudly.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            (GeneratedSourcePath, GeneratedSource),
+            (HandwrittenPath, HandwrittenSource));
+
+        var result = FindObsoleteUsageLogic.Execute(loaded, resolver, project: null, errorOnly: false);
+
+        var group = Assert.Single(result.Groups, g =>
+            g.SymbolName.Contains("Legacy", StringComparison.Ordinal));
+        var usage = Assert.Single(group.Usages, u =>
+            string.Equals(u.FilePath, GeneratedSourcePath, StringComparison.Ordinal));
+        Assert.True(usage.IsGenerated);
+    }
+
+    // Both markers matter: ".g.cs" is what GeneratedCodeDetector keys on (so a shared walker would
+    // skip the tree), and the "obj" segment is what SymbolResolver.IsGenerated keys on (so the
+    // result carries IsGenerated: true). A file with only one of the two would let the test pass
+    // for the wrong reason.
+    private const string GeneratedSourcePath = @"C:\proj\obj\Debug\Wiring.g.cs";
+    private const string HandwrittenPath = @"C:\proj\Api.cs";
+
+    private const string HandwrittenSource = """
+        using System;
+
+        namespace GenDemo;
+
+        public static class Api
+        {
+            [Obsolete("Use NewApi instead")]
+            public static void Legacy() { }
+        }
+        """;
+
+    private const string GeneratedSource = """
+        namespace GenDemo;
+
+        public static class Wiring
+        {
+            public static void Run() => Api.Legacy();
+        }
+        """;
 }

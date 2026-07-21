@@ -13,42 +13,63 @@ public static class FindDisposableMisuseLogic
 
     public static FindDisposableMisuseResult Execute(LoadedSolution loaded, SymbolResolver source)
     {
-        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution);
+        // Both exclusions are made in the projectFilter, which drops a whole compilation before any
+        // of its trees are touched — never inside the loop. The scanner's dedupe is first-one-wins,
+        // so a tree rejected AFTER it has claimed its dedupe slot is lost from every other
+        // compilation holding it too: a linked file shared with a test project would disappear from
+        // the production one, and a file in a project whose references failed to load (a real
+        // MSBuildWorkspace failure mode) would disappear from the healthy project that also has it.
+        //
+        // Test projects are excluded by ID, not name, because a name does not identify a project —
+        // two in different folders can share one, and a name-based exclusion would drop both.
+        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
+
+        // With neither disposable interface resolvable there is nothing this tool can recognise, so
+        // such a compilation is skipped in full rather than per-tree.
+        var projectsWithoutDisposable = loaded.Compilations
+            .Where(p => p.Value.GetTypeByMetadataName("System.IDisposable") is null
+                     && p.Value.GetTypeByMetadataName("System.IAsyncDisposable") is null)
+            .Select(p => p.Key)
+            .ToHashSet();
+
         var violations = new List<DisposableMisuseViolation>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, generated ones skipped, project attribution
+        // deterministic — is SolutionScanner's job; this loop only asks what each node is.
+        // Before this, every tree present in more than one compilation (a linked file, or one
+        // project multi-targeted across frameworks) was walked once per compilation and its
+        // violations counted that many times.
+        foreach (var scan in SolutionScanner.EnumerateTrees(
+                     loaded, source,
+                     projectFilter: (id, _) =>
+                         !testProjectIds.Contains(id) && !projectsWithoutDisposable.Contains(id)))
         {
-            if (testProjectIds.Contains(projectId))
-                continue;
+            var projectName = scan.ProjectName;
+            // At least one of these is non-null by construction — the projectFilter above dropped
+            // every compilation where both were missing. Either may still be null on its own
+            // (System.IAsyncDisposable does not exist on older targets), which ImplementsDisposable
+            // handles per-interface.
+            var idisposable = scan.Compilation.GetTypeByMetadataName("System.IDisposable");
+            var iasyncDisposable = scan.Compilation.GetTypeByMetadataName("System.IAsyncDisposable");
 
-            var projectName = source.GetProjectName(projectId);
-            var idisposable = compilation.GetTypeByMetadataName("System.IDisposable");
-            var iasyncDisposable = compilation.GetTypeByMetadataName("System.IAsyncDisposable");
+            // The model must come from the tree's OWN compilation, which is what the scan hands
+            // back; binding a tree against any other would resolve nothing.
+            var semanticModel = scan.SemanticModel();
 
-            if (idisposable is null && iasyncDisposable is null) continue;
-
-            foreach (var tree in compilation.SyntaxTrees)
+            foreach (var methodDecl in scan.Root.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
-                if (GeneratedCodeDetector.IsGenerated(tree)) continue;
+                var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
+                if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared) continue;
 
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = tree.GetRoot();
+                var containingMethodName = methodSymbol.ContainingType is null
+                    ? methodSymbol.Name
+                    : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
 
-                foreach (var methodDecl in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
-                {
-                    var methodSymbol = semanticModel.GetDeclaredSymbol(methodDecl);
-                    if (methodSymbol is null || methodSymbol.IsImplicitlyDeclared) continue;
+                var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
+                if (body is null) continue;
 
-                    var containingMethodName = methodSymbol.ContainingType is null
-                        ? methodSymbol.Name
-                        : $"{methodSymbol.ContainingType.Name}.{methodSymbol.Name}";
-
-                    var body = (SyntaxNode?)methodDecl.Body ?? methodDecl.ExpressionBody;
-                    if (body is null) continue;
-
-                    AnalyzeBody(body, semanticModel, idisposable, iasyncDisposable,
-                        containingMethodName, projectName, violations);
-                }
+                AnalyzeBody(body, semanticModel, idisposable, iasyncDisposable,
+                    containingMethodName, projectName, violations);
             }
         }
 

@@ -35,8 +35,23 @@ public static class SolutionScanner
     /// Every non-generated tree in the solution, deduped.
     /// </summary>
     /// <param name="projectFilter">
-    /// Receives a project name; returning false skips the whole compilation before any of its trees
-    /// are touched. Null means every project.
+    /// Receives a project's id AND name; returning false skips the whole compilation before any of
+    /// its trees are touched. Null means every project.
+    /// <para>
+    /// The id is there because a name does not identify a project: two in different folders can
+    /// share one, which is the same reason the ordering below cannot tie-break on name alone. A
+    /// filter seeing only names would skip both when just one of them is, say, a test project.
+    /// Callers matching user-supplied patterns use the name; callers excluding specific projects
+    /// use the id.
+    /// </para>
+    /// <para>
+    /// Filtering belongs HERE rather than in a caller's loop body. The dedupe is first-one-wins, so
+    /// a file linked into an excluded project and a wanted one could claim its dedupe slot under
+    /// the excluded project and then be discarded by the caller — losing it from the wanted project
+    /// entirely. Dropping the whole compilation up front cannot do that. Any <c>continue</c> whose
+    /// condition depends only on the compilation (a missing well-known symbol, say) belongs here
+    /// for the same reason.
+    /// </para>
     /// </param>
     /// <param name="scopeDiscriminator">
     /// An extra dimension on the dedupe key, computed from the project name and the tree alone —
@@ -61,7 +76,7 @@ public static class SolutionScanner
     public static IEnumerable<ScanTree> EnumerateTrees(
         LoadedSolution loaded,
         SymbolResolver resolver,
-        Func<string, bool>? projectFilter = null,
+        Func<ProjectId, string, bool>? projectFilter = null,
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
         Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
         Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
@@ -90,7 +105,7 @@ public static class SolutionScanner
             cancellationToken.ThrowIfCancellationRequested();
 
             var projectName = resolver.GetProjectName(projectId);
-            if (projectFilter is not null && !projectFilter(projectName))
+            if (projectFilter is not null && !projectFilter(projectId, projectName))
                 continue;
 
             foreach (var tree in compilation.SyntaxTrees)
