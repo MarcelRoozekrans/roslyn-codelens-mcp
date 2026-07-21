@@ -39,6 +39,62 @@ The existing suites for all four are the regression net. New tests:
 - `find_obsolete_usage` and `find_event_subscribers` **still report usages inside generated code**, with `IsGenerated: true`. This must pass before and after — it is the regression guard on the trap above.
 - A model-count test per migrated tool is not warranted: unlike `check_architecture` none of these filters trees before binding, so there is no laziness invariant to protect beyond what the scanner already pins.
 
+## What the migration actually cost — read this before migrating the next tool
+
+The section above framed the risk as "the scanner skips generated trees". That was the *visible*
+trap. The one that shipped bugs is subtler, and every remaining hand-rolled tool will meet it.
+
+**Tree-level dedupe means a tree present in N compilations is now bound under exactly ONE of them.**
+The hand-rolled loops walked every tree under every compilation. Any state a tool carried per
+compilation, and any symbol it obtained from outside the loop, silently assumed the opposite.
+
+Two distinct failure shapes came out of that, both of which reached review:
+
+### 1. Cross-compilation symbol identity
+
+`find_obsolete_usage` built its target set from `SymbolResolver` and matched usages with
+`SymbolEqualityComparer`. But `SymbolResolver` dedupes types by display name across compilations and
+keeps whichever one reached the type first — a `ConcurrentDictionary` walk, so an arbitrary choice
+that **differs between runs**. The scanner, by design, binds each tree under the one compilation it
+deterministically picked. A symbol from compilation A is never `SymbolEqualityComparer`-equal to the
+same declaration seen through compilation B, so whenever the two disagreed the usage vanished —
+9 of 20 runs reported zero on a two-project solution sharing a linked declaration and use.
+`find_event_subscribers` had the identical defect via `IsEventMatch` (11 of 20).
+
+Before the migration these tools happened to survive because they saw the tree under *every*
+compilation, so one of the passes always agreed with the resolver.
+
+**Rule: never compare a symbol obtained outside the scan loop with one bound inside it by identity.**
+Compare fully-qualified display names. `SymbolKeys.Fqn` is the one spelling — the convention the
+exception-flow tools (PR #309) arrived at independently, generalised to members with parameter types
+so two overloads cannot share a key. `ExceptionQueries.Fqn` delegates to it.
+
+This applies to `FindImplementationForInterfaceMember` and friends too: they take a symbol of the
+*same* compilation and quietly return null for one from another.
+
+### 2. Per-compilation guards that became per-tree
+
+`find_disposable_misuse` opened with `if (idisposable is null && iasyncDisposable is null) continue;`
+— a guard on the *compilation*, cheap and correct when it ran once per compilation. Moved verbatim
+into the per-tree loop it became actively harmful: the scanner has already awarded that tree's
+first-one-wins dedupe slot to the compilation being skipped, so the tree is lost from every other
+compilation holding it. A project whose references failed to load — a real MSBuildWorkspace failure
+mode this repo has hit — silently deletes a shared file's findings from the healthy project too.
+`find_async_violations` had the same structure around `taskSymbol is null`.
+
+**Rule: a `continue` whose condition depends only on the compilation belongs in `projectFilter`, not
+in the loop body.** That is what the parameter is documented to be for. Pre-compute the excluded
+`ProjectId` set in one pass over `loaded.Compilations` and add it to the filter. The same argument
+already applied to the test-project exclusion; the well-known-symbol guards are the same shape and
+were simply missed.
+
+### The general test that catches both
+
+Neither defect shows up on a single-project solution, and the first one passes ~half the time on any
+single run. A migration test needs **two projects sharing a file path** — and, for anything touching
+resolver-provided symbols, **repeated iterations over independently built workspaces**, because the
+nondeterminism is fixed at resolver-construction time and one workspace freezes one outcome.
+
 ## Out of scope
 
 The node-walking in each tool is untouched. `find_obsolete_usage`'s and `find_event_subscribers`' result-level dedupe stays as-is.
