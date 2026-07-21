@@ -7,6 +7,13 @@ namespace RoslynCodeLens.Analysis;
 /// <summary>
 /// The solution-wide scan for <c>IServiceCollection</c> registrations of a type, shared by
 /// <c>get_di_registrations</c> and <c>get_instantiation_options</c>.
+/// <para>
+/// Generated trees are NOT scanned — <see cref="SolutionScanner"/> skips them, where the earlier
+/// hand-rolled loop did not. Registrations written by a source generator are therefore invisible
+/// here. That is deliberate for now: every other scanner in the codebase draws the line in the
+/// same place, and a registration a human cannot edit is not an answer to "where is this wired
+/// up". Revisit only with a tool-wide decision, not a local exception.
+/// </para>
 /// </summary>
 public static class DiRegistrationScanner
 {
