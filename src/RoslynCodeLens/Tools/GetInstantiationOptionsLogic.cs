@@ -46,6 +46,7 @@ public static class GetInstantiationOptionsLogic
         CancellationToken cancellationToken = default)
     {
         var type = ResolveType(resolver, symbol);
+        var caller = ResolveCaller(loaded, resolver, fromProject);
 
         var instantiable = type.TypeKind is not TypeKind.Interface && !type.IsAbstract && !type.IsStatic;
         var note = type.TypeKind switch
@@ -62,7 +63,7 @@ public static class GetInstantiationOptionsLogic
         // reports `protected Abs()` for an abstract class, and a caller shown a constructor will
         // try to call it.
         var constructors = instantiable
-            ? BuildConstructors(type)
+            ? BuildConstructors(type, caller)
             : [];
 
         return new InstantiationOptionsResult(
@@ -71,9 +72,109 @@ public static class GetInstantiationOptionsLogic
             Instantiable: instantiable,
             Note: note,
             Constructors: constructors,
-            Factories: BuildFactories(loaded, resolver, type, cancellationToken),
+            Factories: BuildFactories(loaded, resolver, type, caller, cancellationToken),
             DiRegistrations: [],
             RequiredMembers: BuildRequiredMembers(type));
+    }
+
+    // ---------------------------------------------------------------- caller accessibility
+
+    /// <summary>
+    /// The viewpoint <c>accessible</c> is computed from: one project's compilation, plus a symbol
+    /// inside it to stand in for "code written here".
+    /// </summary>
+    private sealed record CallerContext(Compilation Compilation, ISymbol Within);
+
+    /// <summary>
+    /// Null when no caller project was named — which propagates to <c>Accessible = null</c>,
+    /// meaning NOT COMPUTED. It must never collapse into <c>false</c>: "you cannot call this" and
+    /// "nobody asked from where" are different answers, and conflating them tells a caller a
+    /// perfectly reachable public constructor is off limits.
+    /// </summary>
+    private static CallerContext? ResolveCaller(
+        LoadedSolution loaded, SymbolResolver resolver, string? fromProject)
+    {
+        if (string.IsNullOrWhiteSpace(fromProject)) return null;
+
+        var match = loaded.Compilations.FirstOrDefault(pair =>
+            string.Equals(
+                resolver.GetProjectName(pair.Key), fromProject, StringComparison.OrdinalIgnoreCase));
+
+        if (match.Value is null)
+            throw new McpToolException(
+                ToolErrorCode.SymbolNotFound,
+                $"Project '{fromProject}' not found.",
+                new
+                {
+                    fromProject,
+                    availableProjects = loaded.Compilations.Keys
+                        .Select(resolver.GetProjectName)
+                        .Where(n => !string.IsNullOrEmpty(n))
+                        .OrderBy(n => n, StringComparer.Ordinal)
+                        .ToList(),
+                });
+
+        // A type declared in the project models "code written in this project" more faithfully
+        // than the assembly does — it is the only context that can answer a `protected` question
+        // at all. Ordered by name so the answer does not depend on symbol enumeration order; the
+        // assembly is the fallback for a project that declares nothing.
+        var within = SymbolResolver.GetAllTypes(match.Value.Assembly.GlobalNamespace)
+            .OrderBy(t => t.ToDisplayString(), StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        return new CallerContext(match.Value, within ?? (ISymbol)match.Value.Assembly);
+    }
+
+    /// <summary>
+    /// Whether the caller project could actually write this member.
+    /// <para>
+    /// The member arrives here as a symbol from the compilation that DECLARES it, and
+    /// <see cref="Compilation.IsSymbolAccessibleWithin"/> throws <c>ArgumentException</c> when the
+    /// two symbols it is handed come from unrelated compilations. So the member is first looked up
+    /// again inside the caller's own compilation; only those two symbols may be compared.
+    /// </para>
+    /// <para>
+    /// A member with no counterpart there means the caller's project does not reference the
+    /// declaring assembly at all — inaccessible, and reported as such rather than thrown.
+    /// </para>
+    /// </summary>
+    private static bool? ComputeAccessible(CallerContext? caller, ISymbol member)
+    {
+        if (caller is null) return null;
+
+        var counterpart = FindCounterpart(caller.Compilation, member);
+        return counterpart is not null
+               && caller.Compilation.IsSymbolAccessibleWithin(counterpart, caller.Within);
+    }
+
+    private static ISymbol? FindCounterpart(Compilation compilation, ISymbol member)
+    {
+        if (member.ContainingType is not { } declaring) return null;
+
+        var localType = compilation.GetTypeByMetadataName(FullMetadataName(declaring));
+        if (localType is null) return null;
+
+        // Matched on the rendered signature rather than by SymbolEqualityComparer, for the same
+        // reason the factory scan is: the two symbols belong to different compilations and are
+        // never reference-equal, however identical the source.
+        var key = member.ToDisplayString(SignatureFormat);
+        var candidates = member is IMethodSymbol { MethodKind: MethodKind.Constructor }
+            ? localType.InstanceConstructors.Cast<ISymbol>()
+            : localType.GetMembers(member.Name);
+
+        return candidates.FirstOrDefault(c =>
+            string.Equals(c.ToDisplayString(SignatureFormat), key, StringComparison.Ordinal));
+    }
+
+    private static string FullMetadataName(INamedTypeSymbol type)
+    {
+        var parts = new List<string> { type.MetadataName };
+        for (var outer = type.ContainingType; outer is not null; outer = outer.ContainingType)
+            parts.Insert(0, outer.MetadataName);
+
+        var name = string.Join('+', parts);
+        var ns = type.ContainingNamespace;
+        return ns is null || ns.IsGlobalNamespace ? name : $"{ns.ToDisplayString()}.{name}";
     }
 
     // ---------------------------------------------------------------- required members
@@ -133,6 +234,7 @@ public static class GetInstantiationOptionsLogic
         LoadedSolution loaded,
         SymbolResolver resolver,
         INamedTypeSymbol type,
+        CallerContext? caller,
         CancellationToken cancellationToken)
     {
         // Compared as a fully-qualified STRING, never with SymbolEqualityComparer: the target was
@@ -161,7 +263,7 @@ public static class GetInstantiationOptionsLogic
                     continue;
 
                 foreach (var member in container.GetMembers())
-                    if (TryBuildFactory(member, targetKey) is { } factory
+                    if (TryBuildFactory(member, targetKey, caller) is { } factory
                         && seen.Add((factory.DeclaringType, factory.Signature)))
                         options.Add(factory);
             }
@@ -179,7 +281,8 @@ public static class GetInstantiationOptionsLogic
         return options;
     }
 
-    private static FactoryOption? TryBuildFactory(ISymbol member, string targetKey)
+    private static FactoryOption? TryBuildFactory(
+        ISymbol member, string targetKey, CallerContext? caller)
     {
         // `static FactoryOnly Instance { get; }` emits a static field <Instance>k__BackingField
         // whose type is the target — a perfect structural match for a factory, and something no
@@ -213,7 +316,7 @@ public static class GetInstantiationOptionsLogic
             DeclaringType: member.ContainingType.ToDisplayString(TypeFormat),
             Kind: kind,
             Accessibility: DescribeAccessibility(member.DeclaredAccessibility),
-            Accessible: null,
+            Accessible: ComputeAccessible(caller, member),
             IsAsync: isAsync,
             IsObsolete: IsObsolete(member),
             Parameters: BuildParameters(parameters),
@@ -245,7 +348,8 @@ public static class GetInstantiationOptionsLogic
 
     // ---------------------------------------------------------------- constructors
 
-    private static IReadOnlyList<ConstructorOption> BuildConstructors(INamedTypeSymbol type)
+    private static IReadOnlyList<ConstructorOption> BuildConstructors(
+        INamedTypeSymbol type, CallerContext? caller)
     {
         var options = new List<ConstructorOption>();
         foreach (var ctor in type.InstanceConstructors)
@@ -256,7 +360,7 @@ public static class GetInstantiationOptionsLogic
             options.Add(new ConstructorOption(
                 Signature: ctor.ToDisplayString(SignatureFormat),
                 Accessibility: DescribeAccessibility(ctor.DeclaredAccessibility),
-                Accessible: null,
+                Accessible: ComputeAccessible(caller, ctor),
                 // Kept, not filtered: `new S()` and `new Implicit()` both compile, so a
                 // compiler-supplied constructor is a real option — just one with no source to
                 // point at.

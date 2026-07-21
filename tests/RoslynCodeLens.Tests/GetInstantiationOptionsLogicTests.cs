@@ -87,6 +87,137 @@ public class GetInstantiationOptionsLogicTests
         Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
     }
 
+    // ------------------------------------------------------------------ accessibility
+
+    private static (LoadedSolution, SymbolResolver) IvtWorkspace() =>
+        RenameTestWorkspace.Create(
+            ("Lib", [("Svc.cs", """
+                [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Tests")]
+                namespace Demo;
+                public class Svc { public Svc() {} internal Svc(int a) {} private Svc(string s) {} }
+                """)]),
+            ("Tests", [("T.cs", "namespace T; public class Ctx {}")]),
+            ("Stranger", [("S.cs", "namespace S; public class Ctx {}")]));
+
+    [Fact]
+    public void Internal_constructor_is_accessible_from_an_InternalsVisibleTo_project()
+    {
+        var (loaded, resolver) = IvtWorkspace();
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "Tests");
+
+        Assert.True(Assert.Single(r.Constructors, c => c.Accessibility == "internal").Accessible);
+    }
+
+    [Fact]
+    public void Internal_constructor_is_not_accessible_from_an_unrelated_project()
+    {
+        var (loaded, resolver) = IvtWorkspace();
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "Stranger");
+
+        Assert.False(Assert.Single(r.Constructors, c => c.Accessibility == "internal").Accessible);
+    }
+
+    /// <summary>
+    /// Control for the two tests above: the SAME constructor list must still report the public
+    /// constructor as reachable from the stranger project. Without this, "internal is
+    /// inaccessible" would also pass if accessibility were hardcoded false.
+    /// </summary>
+    [Fact]
+    public void Public_constructor_stays_accessible_from_an_unrelated_project()
+    {
+        var (loaded, resolver) = IvtWorkspace();
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "Stranger");
+
+        Assert.True(Assert.Single(r.Constructors, c => c.Accessibility == "public").Accessible);
+    }
+
+    [Fact]
+    public void Accessible_is_null_when_no_caller_project_given()
+    {
+        var (loaded, resolver) = IvtWorkspace();
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", null);
+
+        Assert.NotEmpty(r.Constructors);
+        Assert.All(r.Constructors, c => Assert.Null(c.Accessible));
+    }
+
+    /// <summary>
+    /// A caller project that does not reference the type's assembly at all. The type has no
+    /// counterpart in that compilation, and handing a symbol from an unrelated compilation to
+    /// <see cref="Compilation.IsSymbolAccessibleWithin"/> is what makes it throw
+    /// <c>ArgumentException</c> — so this is the case that must answer "inaccessible" instead of
+    /// blowing up. "Upstream" is added FIRST, so it does not reference "Downstream".
+    /// </summary>
+    [Fact]
+    public void Caller_project_that_cannot_see_the_type_reports_inaccessible_rather_than_throwing()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Upstream", [("U.cs", "namespace U; public class Ctx {}")]),
+            ("Downstream", [("D.cs", """
+                namespace Demo;
+                public class Only { public Only() {} public static Only Create() => new(); }
+                """)]));
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Only", "Upstream");
+
+        Assert.NotEmpty(r.Constructors);
+        Assert.All(r.Constructors, c => Assert.False(c.Accessible));
+        Assert.NotEmpty(r.Factories);
+        Assert.All(r.Factories, f => Assert.False(f.Accessible));
+    }
+
+    [Fact]
+    public void Unknown_fromProject_throws()
+    {
+        var (loaded, resolver) = IvtWorkspace();
+
+        var ex = Assert.Throws<McpToolException>(() =>
+            GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "NoSuchProject"));
+
+        Assert.Equal(ToolErrorCode.SymbolNotFound, ex.Code);
+    }
+
+    /// <summary>
+    /// Factories are subject to the same viewpoint as constructors, and go through the same
+    /// re-resolve-in-the-caller's-compilation dance — which is where
+    /// <see cref="Compilation.IsSymbolAccessibleWithin"/> throws if the two symbols come from
+    /// different compilations.
+    /// </summary>
+    [Fact]
+    public void Factory_accessibility_is_computed_from_the_caller_project_too()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Lib", [("Svc.cs", """
+                [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Tests")]
+                namespace Demo;
+                public class Svc
+                {
+                    private Svc() {}
+                    public static Svc Create() => new();
+                    internal static Svc CreateInternal() => new();
+                }
+                """)]),
+            ("Tests", [("T.cs", "namespace T; public class Ctx {}")]),
+            ("Stranger", [("S.cs", "namespace S; public class Ctx {}")]));
+
+        var fromTests = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "Tests");
+        var fromStranger = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Svc", "Stranger");
+
+        Assert.True(Assert.Single(
+            fromTests.Factories,
+            f => f.Signature.Contains("CreateInternal", StringComparison.Ordinal)).Accessible);
+        Assert.False(Assert.Single(
+            fromStranger.Factories,
+            f => f.Signature.Contains("CreateInternal", StringComparison.Ordinal)).Accessible);
+        Assert.True(Assert.Single(
+            fromStranger.Factories,
+            f => f.Signature.EndsWith("Create()", StringComparison.Ordinal)).Accessible);
+    }
+
     // ------------------------------------------------------------------ required members
 
     private const string RequiredSource = """
