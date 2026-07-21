@@ -129,9 +129,10 @@ public static class GetInstantiationOptionsLogic
     /// Whether the caller project could actually write this member.
     /// <para>
     /// The member arrives here as a symbol from the compilation that DECLARES it, and
-    /// <see cref="Compilation.IsSymbolAccessibleWithin"/> throws <c>ArgumentException</c> when the
-    /// two symbols it is handed come from unrelated compilations. So the member is first looked up
-    /// again inside the caller's own compilation; only those two symbols may be compared.
+    /// <see cref="Compilation.IsSymbolAccessibleWithin"/> rejects that outright — "Parameter
+    /// 'symbol' must be a symbol from this compilation or some referenced assembly" — with an
+    /// <c>ArgumentException</c>. So the member is first looked up again inside the caller's own
+    /// compilation; only that counterpart may be asked about.
     /// </para>
     /// <para>
     /// A member with no counterpart there means the caller's project does not reference the
