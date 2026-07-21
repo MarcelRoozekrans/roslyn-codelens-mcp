@@ -48,7 +48,7 @@ Comparison against [sharplens-mcp](https://github.com/pzalutski-pixel/sharplens-
 
 - ✅ **`change_signature`** — *shipped* (PR #313). Add/remove/reorder parameters with all call sites updated, via a reflection bridge over Roslyn's internal change-signature engine (no public API exists, unlike `Renamer`). Design: [docs/plans/2026-07-20-change-signature-design.md](plans/2026-07-20-change-signature-design.md).
 - ✅ **`get_extension_methods`** — *shipped* (PR #319). Applicability via Roslyn's own `ReduceExtensionMethod`/`ReduceExtensionMember`, across solution source and referenced metadata, including C# 14 extension blocks and their properties. Design: [docs/plans/2026-07-21-get-extension-methods-design.md](plans/2026-07-21-get-extension-methods-design.md).
-- ✅ **`get_instantiation_options`** — *shipped* (PR #322). Constructors (with the record copy-ctor filtered and implicit struct/class ctors kept), solution-wide static factories including ones on a separate factory type, DI registrations, and `required` members. Optional `fromProject` computes real accessibility via `IsSymbolAccessibleWithin`, honouring `InternalsVisibleTo`. Also fixed `generate_test_skeleton`, which emitted an uncompilable `new Foo()` for private-constructor types. Design: [docs/plans/2026-07-21-get-instantiation-options-design.md](plans/2026-07-21-get-instantiation-options-design.md).
+- ✅ **`get_instantiation_options`** — *shipped* (PR #327). Constructors (with the record copy-ctor filtered and implicit struct/class ctors kept), solution-wide static factories including ones on a separate factory type, DI registrations, and `required` members. Optional `fromProject` computes real accessibility via `IsSymbolAccessibleWithin`, honouring `InternalsVisibleTo`. Also fixed `generate_test_skeleton`, which emitted an uncompilable `new Foo()` for private-constructor types. Design: [docs/plans/2026-07-21-get-instantiation-options-design.md](plans/2026-07-21-get-instantiation-options-design.md).
 - **Cognitive complexity + nesting depth in `get_complexity_metrics`** — we only report cyclomatic; cognitive complexity is a better refactoring-priority signal. Enhancement to the existing tool.
 - ✅ **`check_architecture`** — *shipped* (PR #314). Enforces user-supplied `forbid`/`allowOnly` rules over the semantic type graph (not `using` directives), grouped per violated boundary. Design: [docs/plans/2026-07-20-check-architecture-design.md](plans/2026-07-20-check-architecture-design.md).
 - **`find_similar_code`** — folded into the existing `find_duplicated_code` entry in §2 above.
@@ -69,7 +69,7 @@ Items previously in this backlog, now merged. Listed for orientation; do not re-
 
 | Tool | Theme | PR |
 |---|---|---|
-| `get_instantiation_options` | Navigation | #322 |
+| `get_instantiation_options` | Navigation | #327 |
 | `get_extension_methods` | Navigation | #319 |
 | `check_architecture` | Code quality | #314 |
 | `change_signature` | Refactoring | #313 |
@@ -104,7 +104,7 @@ Items considered during design of shipped features and consciously punted on. Re
 ### From `get_extension_methods` (shipped 2026-07-21, PR #319)
 - **Scan each referenced assembly once, not once per referencing compilation.** A metadata receiver (`string`, `int`, any BCL type) is resolved by every compilation, so candidate gathering runs N times over largely the same framework closure — N× the measured 59 ms warm / 815 ms cold. The results are deduplicated but the *work* is not. Only each compilation's own source types genuinely differ; the referenced assemblies produce identical answers every time. Correctness came first (the single-compilation shortcut dropped the solution's own extensions on BCL types), but this is the obvious next step for large solutions.
 
-### From `get_instantiation_options` (shipped 2026-07-21, PR #322)
+### From `get_instantiation_options` (shipped 2026-07-21, PR #327)
 - **Multi-targeted projects double-count DI registrations.** `Foo(net8.0)` and `Foo(net9.0)` are distinct `Project.Name`s, so the project-scoped dedupe treats them as two projects and reports each registration twice. Pre-existing — the hand-rolled loop did the same — and *not* fixed by the `SolutionScanner` migration, because a project-name scope is exactly what linked files require. A correct fix needs a project identity that collapses target frameworks without merging genuinely distinct projects; TFM-suffix stripping is a guess, not a rule, so it was deliberately not attempted.
 - **Generic types don't match DI registrations.** `get_instantiation_options` passes the type to the scanner as `Demo.Foo<T>`, which never string-matches a registration of `Demo.Foo<int>`. Narrow, and untested today.
 - **`ActivatorUtilities.CreateInstance<Foo>(sp)` factories yield no implementation name.** The factory-lambda reader follows `sp => new X()` only; anything else degrades to `"(factory)"` rather than guessing. That degradation is tested and correct, but this particular form is common enough to be worth reading properly.
