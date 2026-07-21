@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 
@@ -27,51 +28,58 @@ public static class FindEventSubscribersLogic
         var results = new List<EventSubscriberInfo>();
         var seen = new HashSet<(string, TextSpan)>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // Which trees to walk — once each, project attribution deterministic — is
+        // SolutionScanner's job; this loop only asks what each node is. includeGenerated is set
+        // BECAUSE this tool reports generated subscriptions on purpose and flags them below: a
+        // generated `+=` with no matching `-=` leaks exactly like a hand-written one, so the caller
+        // decides. The scanner's default would drop them, and dropping them silently is the whole
+        // risk here.
+        foreach (var scan in SolutionScanner.EnumerateTrees(loaded, source, includeGenerated: true))
         {
-            var projectName = source.GetProjectName(projectId);
+            var projectName = scan.ProjectName;
+            var syntaxTree = scan.Tree;
 
-            foreach (var syntaxTree in compilation.SyntaxTrees)
+            // The model must come from the tree's OWN compilation, which is what the scan hands
+            // back; binding a tree against any other would resolve nothing — and this tool matches
+            // events by symbol identity, so a model from the wrong compilation would miss every
+            // subscription rather than fail visibly.
+            var semanticModel = scan.SemanticModel();
+
+            foreach (var asg in scan.Root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
             {
-                var semanticModel = compilation.GetSemanticModel(syntaxTree);
-                var root = syntaxTree.GetRoot();
-
-                foreach (var asg in root.DescendantNodes().OfType<AssignmentExpressionSyntax>())
+                var kind = asg.Kind() switch
                 {
-                    var kind = asg.Kind() switch
-                    {
-                        SyntaxKind.AddAssignmentExpression => SubscriptionKind.Subscribe,
-                        SyntaxKind.SubtractAssignmentExpression => SubscriptionKind.Unsubscribe,
-                        _ => (SubscriptionKind?)null
-                    };
-                    if (kind is null) continue;
+                    SyntaxKind.AddAssignmentExpression => SubscriptionKind.Subscribe,
+                    SyntaxKind.SubtractAssignmentExpression => SubscriptionKind.Unsubscribe,
+                    _ => (SubscriptionKind?)null
+                };
+                if (kind is null) continue;
 
-                    if (semanticModel.GetSymbolInfo(asg.Left).Symbol is not IEventSymbol called)
-                        continue;
-                    if (!IsEventMatch(called, targetSet, targetEvents, targetMetadataKeys))
-                        continue;
+                if (semanticModel.GetSymbolInfo(asg.Left).Symbol is not IEventSymbol called)
+                    continue;
+                if (!IsEventMatch(called, targetSet, targetEvents, targetMetadataKeys))
+                    continue;
 
-                    if (!seen.Add((syntaxTree.FilePath, asg.Span)))
-                        continue;
+                if (!seen.Add((syntaxTree.FilePath, asg.Span)))
+                    continue;
 
-                    var lineSpan = asg.GetLocation().GetLineSpan();
-                    var file = lineSpan.Path;
-                    var line = lineSpan.StartLinePosition.Line + 1;
-                    var handler = ResolveHandlerName(asg.Right, semanticModel, file, line);
+                var lineSpan = asg.GetLocation().GetLineSpan();
+                var file = lineSpan.Path;
+                var line = lineSpan.StartLinePosition.Line + 1;
+                var handler = ResolveHandlerName(asg.Right, semanticModel, file, line);
 
-                    var sourceText = syntaxTree.GetText();
-                    var lineText = sourceText.Lines[lineSpan.StartLinePosition.Line].ToString().Trim();
+                var sourceText = syntaxTree.GetText();
+                var lineText = sourceText.Lines[lineSpan.StartLinePosition.Line].ToString().Trim();
 
-                    results.Add(new EventSubscriberInfo(
-                        EventName: called.ToDisplayString(),
-                        HandlerName: handler,
-                        Kind: kind.Value,
-                        FilePath: file,
-                        Line: line,
-                        Snippet: lineText,
-                        Project: projectName,
-                        IsGenerated: source.IsGenerated(file)));
-                }
+                results.Add(new EventSubscriberInfo(
+                    EventName: called.ToDisplayString(),
+                    HandlerName: handler,
+                    Kind: kind.Value,
+                    FilePath: file,
+                    Line: line,
+                    Snippet: lineText,
+                    Project: projectName,
+                    IsGenerated: source.IsGenerated(file)));
             }
         }
 
