@@ -20,9 +20,7 @@ public static class FindObsoleteUsageLogic
         // linked file shared between a test project and a production one: the scanner's dedupe is
         // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
         // lost from the production project too. Skipping the whole compilation up front cannot.
-        var testProjectNames = TestProjectDetector.GetTestProjectIds(loaded.Solution)
-            .Select(resolver.GetProjectName)
-            .ToHashSet(StringComparer.Ordinal);
+        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
 
         // Step 1: collect all [Obsolete]-marked symbols across the entire solution (including
         // test projects and metadata symbols). Test-project filtering happens in Step 2 on the
@@ -64,8 +62,10 @@ public static class FindObsoleteUsageLogic
         foreach (var scan in SolutionScanner.EnumerateTrees(
                      loaded,
                      resolver,
-                     projectFilter: name =>
-                         !testProjectNames.Contains(name) &&
+                     // Id for the exclusion (a name does not identify a project), name for the
+                     // caller's own project filter (which is a user-supplied name to match).
+                     projectFilter: (id, name) =>
+                         !testProjectIds.Contains(id) &&
                          (project is null || string.Equals(name, project, StringComparison.OrdinalIgnoreCase)),
                      includeGenerated: true))
         {

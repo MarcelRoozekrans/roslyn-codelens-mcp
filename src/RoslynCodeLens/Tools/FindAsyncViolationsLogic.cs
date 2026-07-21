@@ -18,9 +18,7 @@ public static class FindAsyncViolationsLogic
         // linked file shared between a test project and a production one: the scanner's dedupe is
         // first-one-wins, so a tree rejected after it has already claimed the dedupe slot would be
         // lost from the production project too. Skipping the whole compilation up front cannot.
-        var testProjectNames = TestProjectDetector.GetTestProjectIds(loaded.Solution)
-            .Select(source.GetProjectName)
-            .ToHashSet(StringComparer.Ordinal);
+        var testProjectIds = TestProjectDetector.GetTestProjectIds(loaded.Solution).ToHashSet();
 
         var violations = new List<AsyncViolation>();
 
@@ -30,7 +28,7 @@ public static class FindAsyncViolationsLogic
         // project multi-targeted across frameworks) was walked once per compilation and its
         // violations counted that many times.
         foreach (var scan in SolutionScanner.EnumerateTrees(
-                     loaded, source, projectFilter: name => !testProjectNames.Contains(name)))
+                     loaded, source, projectFilter: (id, _) => !testProjectIds.Contains(id)))
         {
             var compilation = scan.Compilation;
             var projectName = scan.ProjectName;

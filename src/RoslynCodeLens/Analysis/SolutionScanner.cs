@@ -36,8 +36,20 @@ public static class SolutionScanner
     /// when <paramref name="includeGenerated"/> is set.
     /// </summary>
     /// <param name="projectFilter">
-    /// Receives a project name; returning false skips the whole compilation before any of its trees
-    /// are touched. Null means every project.
+    /// Receives a project's id AND name; returning false skips the whole compilation before any of
+    /// its trees are touched. Null means every project.
+    /// <para>
+    /// The id is there because a name does not identify a project: two projects in different folders
+    /// can share one (the same reason the ordering below cannot tie-break on name alone). A filter
+    /// that only sees names would skip both when just one of them is, say, a test project. Callers
+    /// matching user-supplied patterns use the name; callers excluding specific projects use the id.
+    /// </para>
+    /// <para>
+    /// Filtering belongs HERE rather than in a caller's loop body: the dedupe is first-one-wins, so a
+    /// file linked into an excluded project and a wanted one could claim its dedupe slot under the
+    /// excluded project and then be discarded by the caller — losing it from the wanted project
+    /// entirely. Dropping the compilation up front cannot do that.
+    /// </para>
     /// </param>
     /// <param name="scopeDiscriminator">
     /// An extra dimension on the dedupe key, computed from the project name and the tree alone —
@@ -70,7 +82,7 @@ public static class SolutionScanner
     public static IEnumerable<ScanTree> EnumerateTrees(
         LoadedSolution loaded,
         SymbolResolver resolver,
-        Func<string, bool>? projectFilter = null,
+        Func<ProjectId, string, bool>? projectFilter = null,
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
         bool includeGenerated = false,
         Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
@@ -100,7 +112,7 @@ public static class SolutionScanner
             cancellationToken.ThrowIfCancellationRequested();
 
             var projectName = resolver.GetProjectName(projectId);
-            if (projectFilter is not null && !projectFilter(projectName))
+            if (projectFilter is not null && !projectFilter(projectId, projectName))
                 continue;
 
             foreach (var tree in compilation.SyntaxTrees)
