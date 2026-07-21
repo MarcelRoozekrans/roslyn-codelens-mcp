@@ -22,6 +22,7 @@ var categoryMap = new Dictionary<string, string>(StringComparer.Ordinal)
     ["find_attribute_usages"]      = "navigation",
     ["resolve_stack_trace"]        = "navigation",
     ["get_extension_methods"]      = "navigation",
+    ["get_instantiation_options"]  = "navigation",
     ["get_symbol_context"]         = "analysis",
     ["get_type_overview"]          = "analysis",
     ["get_type_hierarchy"]         = "analysis",
