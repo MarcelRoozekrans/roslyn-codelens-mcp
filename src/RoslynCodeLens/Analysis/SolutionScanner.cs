@@ -73,6 +73,16 @@ public static class SolutionScanner
     /// <see cref="SyntaxTree.GetRoot"/>. It exists so a test can COUNT how many roots a scan
     /// realises, which is how "duplicates are never parsed" is pinned.
     /// </param>
+    /// <param name="includeGenerated">
+    /// Generated trees are skipped by default: most callers report findings a human is expected to
+    /// go and fix, and a finding in generated code is noise at best.
+    /// <para>
+    /// Callers reporting what the program DOES rather than what someone should change must opt in.
+    /// DI registration is the motivating case — a registration emitted by a source generator is
+    /// every bit as real as a hand-written one, and omitting it makes the answer wrong rather than
+    /// merely quieter.
+    /// </para>
+    /// </param>
     public static IEnumerable<ScanTree> EnumerateTrees(
         LoadedSolution loaded,
         SymbolResolver resolver,
@@ -80,6 +90,7 @@ public static class SolutionScanner
         Func<string, SyntaxTree, string>? scopeDiscriminator = null,
         Func<Compilation, SyntaxTree, SemanticModel>? modelFactory = null,
         Func<SyntaxTree, CancellationToken, SyntaxNode>? rootFactory = null,
+        bool includeGenerated = false,
         CancellationToken cancellationToken = default)
     {
         var walked = new HashSet<(string Scope, string Identity)>();
@@ -110,7 +121,7 @@ public static class SolutionScanner
 
             foreach (var tree in compilation.SyntaxTrees)
             {
-                if (GeneratedCodeDetector.IsGenerated(tree))
+                if (!includeGenerated && GeneratedCodeDetector.IsGenerated(tree))
                     continue;
 
                 cancellationToken.ThrowIfCancellationRequested();

@@ -132,4 +132,38 @@ public class DiRegistrationScannerTests
     {
         Assert.Empty(Scan("Bar"));
     }
+
+    /// <summary>
+    /// Registrations emitted by a source generator count. Most scanners skip generated trees
+    /// because they report things a human should go and fix; this one reports what the container
+    /// actually does at startup, and a generated <c>AddScoped</c> wires it up exactly as a
+    /// hand-written one does.
+    /// <para>
+    /// This is a REGRESSION guard, not a new feature: the hand-rolled loop this scanner replaced
+    /// had no generated-code filter, so migrating to <see cref="SolutionScanner"/> — which skips
+    /// them by default — silently narrowed a shipped tool. Nothing in the suite covered it, so
+    /// nothing failed. Delete the <c>includeGenerated: true</c> argument and this test fails.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Registrations_in_generated_files_are_still_found()
+    {
+        const string Generated = """
+            namespace Demo;
+            public static class GeneratedRegistrations
+            {
+                public static void Register(IServiceCollection s) => s.AddScoped<Foo>();
+            }
+            """;
+
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Stub.cs", Stub),
+            ("Types.cs", "namespace Demo; public interface IFoo {} public class Foo : IFoo {}"),
+            // .g.cs is what GeneratedCodeDetector keys on.
+            ("Registrations.g.cs", Generated));
+
+        Assert.Single(
+            DiRegistrationScanner.Scan(loaded, resolver, "Foo"),
+            r => r.File.EndsWith("Registrations.g.cs", StringComparison.Ordinal));
+    }
 }

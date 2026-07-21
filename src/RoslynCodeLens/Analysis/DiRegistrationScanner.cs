@@ -8,11 +8,11 @@ namespace RoslynCodeLens.Analysis;
 /// The solution-wide scan for <c>IServiceCollection</c> registrations of a type, shared by
 /// <c>get_di_registrations</c> and <c>get_instantiation_options</c>.
 /// <para>
-/// Generated trees are NOT scanned — <see cref="SolutionScanner"/> skips them, where the earlier
-/// hand-rolled loop did not. Registrations written by a source generator are therefore invisible
-/// here. That is deliberate for now: every other scanner in the codebase draws the line in the
-/// same place, and a registration a human cannot edit is not an answer to "where is this wired
-/// up". Revisit only with a tool-wide decision, not a local exception.
+/// Generated trees ARE scanned, via the scanner's <c>includeGenerated</c> opt-in. Most scanners
+/// skip them because they report things a human should go and fix; this one reports what the
+/// program actually does at startup. A registration emitted by a source generator wires up the
+/// container exactly as a hand-written one does, so omitting it would not make the answer quieter
+/// — it would make it wrong. The pre-migration hand-rolled loop saw them too; this preserves that.
 /// </para>
 /// </summary>
 public static class DiRegistrationScanner
@@ -46,6 +46,7 @@ public static class DiRegistrationScanner
         foreach (var scanTree in SolutionScanner.EnumerateTrees(
                      loaded, resolver,
                      scopeDiscriminator: static (projectName, _) => projectName,
+                     includeGenerated: true,
                      cancellationToken: cancellationToken))
         {
             // Syntactic pre-filter: binding is the expensive half of the scan, and a file with no
