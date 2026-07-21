@@ -73,7 +73,11 @@ public static class GetInstantiationOptionsLogic
             Note: note,
             Constructors: constructors,
             Factories: BuildFactories(loaded, resolver, type, caller, cancellationToken),
-            DiRegistrations: [],
+            // Queried by the type's own display name rather than the caller's `symbol` argument:
+            // `symbol` may be a simple name that matched several types, and the DI scan must answer
+            // for the one actually resolved above.
+            DiRegistrations: DiRegistrationScanner.Scan(
+                loaded, resolver, type.ToDisplayString(TypeFormat), cancellationToken),
             RequiredMembers: BuildRequiredMembers(type));
     }
 

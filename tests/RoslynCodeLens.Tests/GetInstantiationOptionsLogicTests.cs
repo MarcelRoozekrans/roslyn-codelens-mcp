@@ -354,4 +354,42 @@ public class GetInstantiationOptionsLogicTests
         Assert.Contains("Age", names);
         Assert.Contains("Name", names);
     }
+
+    [Fact]
+    public void Di_registration_of_the_type_is_reported()
+    {
+        // The whole point of folding DI in: a type registered as an implementation is usually
+        // meant to be RESOLVED, not newed up, and that is invisible from its constructors alone.
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Di.cs", """
+            using System;
+            namespace Demo;
+
+            public interface IServiceCollection {}
+            public static class Ext
+            {
+                public static IServiceCollection AddScoped<TService, TImpl>(this IServiceCollection s) => s;
+            }
+
+            public interface IGreeter {}
+            public class Greeter : IGreeter {}
+
+            public class Startup
+            {
+                public void Configure(IServiceCollection s) => s.AddScoped<IGreeter, Greeter>();
+            }
+            """));
+
+        var r = GetInstantiationOptionsLogic.Execute(loaded, resolver, "Greeter", null);
+
+        var registration = Assert.Single(r.DiRegistrations);
+        Assert.Equal("Demo.IGreeter", registration.Service);
+        Assert.Equal("Demo.Greeter", registration.Implementation);
+        Assert.Equal("Scoped", registration.Lifetime);
+    }
+
+    [Fact]
+    public void Unregistered_type_reports_no_di_registrations()
+    {
+        Assert.Empty(Run("Plain").DiRegistrations);
+    }
 }
