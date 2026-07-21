@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.11.0...v2.11.1) (2026-07-21)
+
+
+### Bug Fixes
+
+* stop find_async_violations and find_disposable_misuse double-counting ([#317](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/317)) ([69b27b4](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/69b27b47c5705443c0d4d7a974b5e263d3822c86))
+
 ## [2.11.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.10.0...v2.11.0) (2026-07-20)
 
 
