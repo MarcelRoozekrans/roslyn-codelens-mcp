@@ -166,6 +166,10 @@ public static class GetExtensionMethodsLogic
             DeclaringType: container.ToDisplayString(),
             Namespace: container.ContainingNamespace?.ToDisplayString() ?? string.Empty,
             Origin: location is null ? "metadata" : "source",
+            // Read off the ORIGINAL declaration, not the reduced symbol: reduction rewrites the
+            // member as seen from the receiver, and a static extension member is still invoked on
+            // the type (`int.Zero`) rather than on an instance.
+            IsStatic: declaration.IsStatic,
             File: span?.Path,
             Line: span is null ? null : span.Value.StartLinePosition.Line + 1,
             XmlDocSummary: MethodDisplayHelpers.ExtractSummary(declaration));

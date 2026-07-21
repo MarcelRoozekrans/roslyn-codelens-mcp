@@ -41,6 +41,7 @@ public class GetExtensionMethodsLogicTests
             {
                 public int Tripled => value * 3;
                 public int Thrice() => value * 3;
+                public static int Zero => 0;
             }
         }
         """;
@@ -124,6 +125,22 @@ public class GetExtensionMethodsLogicTests
         Assert.Equal("property", tripled.Kind);
         Assert.Equal("Demo.BlockExtensions", tripled.DeclaringType);
         Assert.Equal("source", tripled.Origin);
+        Assert.False(tripled.IsStatic);
+    }
+
+    /// <summary>
+    /// A C# 14 block may declare static members, and they are invoked on the TYPE
+    /// (<c>int.Zero</c>) rather than on an instance. Both are genuinely applicable, so both are
+    /// reported — but a caller told only "Zero applies to int" would write <c>value.Zero</c> and
+    /// be wrong, so the distinction has to survive into the result.
+    /// </summary>
+    [Fact]
+    public void StaticExtensionProperty_IsReportedAndMarkedStatic()
+    {
+        var zero = Assert.Single(Run("int"), i => i.Name == "Zero");
+
+        Assert.Equal("property", zero.Kind);
+        Assert.True(zero.IsStatic);
     }
 
     [Fact]

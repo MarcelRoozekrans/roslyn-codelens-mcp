@@ -89,6 +89,7 @@ If any of these thoughts cross your mind, stop and switch to the MCP tool:
 | "Let me `Grep` for `Activator.CreateInstance`" | `find_reflection_usage` |
 | "I'll check if this method is used by reading files" | `find_callers` / `find_unused_symbols` |
 | "What overloads does this method have?" / "Show me all signatures of Foo" / "Compare overloads side-by-side" | `get_overloads` |
+| "What can I call on this type?" / "Is there an extension method for X?" / "Does LINQ have something for this?" | `get_extension_methods` |
 | "What operators does this type define?" / "Does it have a custom `==` or implicit conversion?" / "List `+`, `-`, conversions on this type" | `get_operators` |
 | "I'll eyeball complexity by reading the method" | `get_complexity_metrics` |
 | "How is this project doing?" / "Where should I focus?" / "Show me the technical debt picture" | `get_project_health` |
@@ -175,6 +176,7 @@ Inspect an arbitrary DLL           → add a <ProjectReference> to a throwaway
 - `get_method_source` — full declaration source (XML docs, attributes, body, original formatting) for one or MANY members by name in a single call: methods (all overloads), constructors (request as `Type.TypeName` — simple or fully qualified; nested types need full qualification), properties, indexers (`Type.this` or `Type.this[]`), fields, events, explicit interface implementations. Per-item statuses (`ok`/`notFound`/`ambiguous`/`metadata`/`unsupportedKind`) — a batch never fails wholesale; `metadata` items carry `Origin` (assembly name/version for `peek_il`) and a `Note` explains non-`ok` outcomes. `StartLine` always matches the first line of `Source`. Whole types are out of scope (`get_type_overview` / `Read`).
 - `get_overloads` — Every overload of a method or constructor (source + metadata) with full parameter detail, modifiers, generic type params, XML doc summary, and location. One call instead of N analyze_method calls.
 - `get_operators` — every `+`, `-`, `==`, `<`, conversion, etc. on a type, with kind, signature, source location. Includes synthesized record equality. Covers what `get_overloads` excludes.
+- `get_extension_methods` — every extension member applicable to a type, from the solution AND referenced assemblies, so LINQ shows up for an `IEnumerable`. Applicability is Roslyn's own (`ReduceExtensionMethod`), so generic inference is exact: `this IEnumerable<T>` applies to `string`, `this IEnumerable<string>` does not. `signature` is the reduced, call-site form — what you actually type. C# 14 `extension` blocks are covered including **properties**, which no `IsExtensionMethod` scan can see; `isStatic` marks members invoked on the type (`int.Zero`) rather than an instance. Results are **not** filtered by `using` scope — the tool has no call site — so `namespace` is always reported and you may need to add the import. Source extensions sort before metadata ones; `nameFilter` narrows by substring.
 - `get_call_graph` — Transitive caller/callee graph for a method, depth-bounded with cycle detection. Adjacency-list output. Use when you need depth > 1 (`analyze_method` is depth=1).
 
 ### Navigating Code (**instead of Grep/Glob**)
@@ -383,6 +385,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `analyze_method` | "Show signature, callers, and outgoing calls" |
 | `get_method_source` | "Show me this method's body" / "Give me the source of these members" |
 | `get_overloads` | "What overloads does this method have?" |
+| `get_extension_methods` | "What can I call on this type?" / "Is there an extension for X?" |
 | `get_operators` | "What operators does this type define?" |
 | `get_call_graph` | "Transitive callers/callees, depth-bounded" |
 | `get_file_overview` | "What types are in this file?" |
@@ -454,6 +457,7 @@ State the reason when you take the exception. If you're about to type a Grep/Glo
 | `generate_test_skeleton` | No — source only | | |
 | `get_call_graph` | No — source only | | |
 | `get_overloads` | Yes — source + metadata overloads, full parameter detail | | |
+| `get_extension_methods` | Yes — reports both source and metadata (BCL/NuGet) extensions | Not filtered by `using` scope; an extension in a project the receiver's project doesn't reference is excluded | |
 | `get_operators` | Yes — source + metadata operators and conversions | | |
 | `get_project_dependencies` | N/A — project-level graph | | |
 | `get_project_health` | No — source only | | |
