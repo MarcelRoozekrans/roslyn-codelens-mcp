@@ -7,7 +7,19 @@ namespace RoslynCodeLens.Tools;
 
 public static class GetComplexityMetricsLogic
 {
-    public static IReadOnlyList<ComplexityMetric> Execute(LoadedSolution loaded, SymbolResolver resolver, string? project, int threshold)
+    /// <param name="threshold">
+    /// Minimum score to report, applied to whichever metric <paramref name="metric"/> selects.
+    /// </param>
+    /// <param name="metric">
+    /// Which number <paramref name="threshold"/> filters on and the results are sorted by. Both
+    /// numbers are reported either way. Defaults to cyclomatic so existing callers are unaffected.
+    /// </param>
+    public static IReadOnlyList<ComplexityMetric> Execute(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        string? project,
+        int threshold,
+        ComplexityMetricKind metric = ComplexityMetricKind.Cyclomatic)
     {
         var results = new List<ComplexityMetric>();
 
@@ -42,7 +54,8 @@ public static class GetComplexityMetricsLogic
                         maxNesting = Math.Max(maxNesting, analysis.MaxNesting);
                     }
 
-                    if (complexity < threshold)
+                    var selected = metric == ComplexityMetricKind.Cognitive ? cognitive : complexity;
+                    if (selected < threshold)
                         continue;
 
                     var symbol = semanticModel.GetDeclaredSymbol(member);
@@ -61,8 +74,12 @@ public static class GetComplexityMetricsLogic
             }
         }
 
-        return results.OrderByDescending(r => r.Complexity).ToList();
+        return results.OrderByDescending(r => Score(r, metric)).ToList();
     }
+
+    /// <summary>The selected metric's value for one row.</summary>
+    internal static int Score(ComplexityMetric metric, ComplexityMetricKind kind)
+        => kind == ComplexityMetricKind.Cognitive ? metric.Cognitive : metric.Complexity;
 
     /// <summary>
     /// The syntax to score for a member, or an empty list for members that hold no code (fields,

@@ -65,6 +65,60 @@ public class GetComplexityMetricsToolTests
     }
 
     [Fact]
+    public void Execute_MetricSelectsWhatThresholdFiltersOn()
+    {
+        // Validator.SumPositives is cyclomatic 4 but cognitive 6 — the two metrics disagree
+        // across a threshold of 5, so this one pair pins both the filtering and the selection.
+        var byCognitive = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 5, ComplexityMetricKind.Cognitive);
+        var byCyclomatic = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 5, ComplexityMetricKind.Cyclomatic);
+
+        Assert.Contains(byCognitive, r => r.MethodName == "SumPositives");
+        Assert.DoesNotContain(byCyclomatic, r => r.MethodName == "SumPositives");
+    }
+
+    [Fact]
+    public void Execute_DefaultsToCyclomatic()
+    {
+        // get_project_health and every other existing caller must be unaffected by the new
+        // parameter, so omitting it has to behave exactly like asking for cyclomatic.
+        var defaulted = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 5);
+        var explicitly = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 5, ComplexityMetricKind.Cyclomatic);
+
+        Assert.Equal(explicitly, defaulted);
+    }
+
+    [Fact]
+    public void Sort_ByCognitive_OrdersByCognitiveDesc()
+    {
+        var input = new List<ComplexityMetric>
+        {
+            new("worstCyclomatic", "T", 20, 1, 1, "a.cs", 1, "P"),
+            new("worstCognitive",  "T", 3, 19, 4, "b.cs", 1, "P"),
+        };
+
+        var sorted = GetComplexityMetricsTool.Sort(input, ComplexityMetricKind.Cognitive);
+
+        Assert.Equal("worstCognitive", sorted[0].MethodName);
+    }
+
+    [Fact]
+    public void BuildSummary_ByCognitive_SummarisesCognitiveAndStillReportsMaxCognitive()
+    {
+        var input = new List<ComplexityMetric>
+        {
+            new("a", "T", 30, 5,  1, "a.cs", 1, "P"),
+            new("b", "T", 30, 15, 3, "a.cs", 2, "P"),
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            GetComplexityMetricsTool.BuildSummary(input, threshold: 10, ComplexityMetricKind.Cognitive));
+
+        Assert.Contains("\"max\":15", json, StringComparison.Ordinal);          // cognitive, not 30
+        Assert.Contains("\"overThreshold\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"maxCognitive\":15", json, StringComparison.Ordinal); // always visible
+    }
+
+    [Fact]
     public void Sort_OrdersByComplexityDesc()
     {
         var input = new List<ComplexityMetric>
