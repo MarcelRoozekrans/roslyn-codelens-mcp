@@ -39,8 +39,75 @@ public class ComplexityCalculatorTests
                 }
                 return 0;
             }");
-        // base 1 + if + for + nested if + else = 5
-        Assert.Equal(5, ComplexityCalculator.Calculate(method));
+        // base 1 + if + for + nested if = 4.
+        // Was 5: the `else` was counted as a decision, which it is not.
+        Assert.Equal(4, ComplexityCalculator.Calculate(method));
+    }
+
+    [Fact]
+    public void Calculate_ElseIfChain_CountsEachDecisionOnce()
+    {
+        var method = ParseMethod(@"
+            public int M(int a)
+            {
+                if (a == 1) return 1;
+                else if (a == 2) return 2;
+                else if (a == 3) return 3;
+                else return 4;
+            }");
+        // 1 + three `if` decisions = 4.
+        // Was 7: ElseClause was counted too, so each `else if` scored twice and
+        // the bare `else` — which is no decision at all — scored as well.
+        Assert.Equal(4, ComplexityCalculator.Calculate(method));
+    }
+
+    [Fact]
+    public void Calculate_BareElse_IsNotADecision()
+    {
+        var method = ParseMethod("public int M(bool a) { if (a) return 1; else return 2; }");
+        Assert.Equal(2, ComplexityCalculator.Calculate(method)); // was 3
+    }
+
+    [Fact]
+    public void Calculate_SwitchExpression_CountsArmsExceptDiscard()
+    {
+        var method = ParseMethod("public int M(int a) => a switch { 1 => 1, 2 => 2, _ => 0 };");
+        // 1 + two real arms = 3. Was 1 — switch expressions were invisible.
+        Assert.Equal(3, ComplexityCalculator.Calculate(method));
+    }
+
+    [Fact]
+    public void Calculate_SwitchStatement_CountsCasesExceptDefault()
+    {
+        var method = ParseMethod(@"
+            public int M(int a)
+            {
+                switch (a)
+                {
+                    case 1: return 1;
+                    case 2: return 2;
+                    default: return 0;
+                }
+            }");
+        // 1 + two cases = 3. Was 4: `default` was counted as a decision.
+        Assert.Equal(3, ComplexityCalculator.Calculate(method));
+    }
+
+    [Fact]
+    public void Calculate_MultipleLabelsOnOneSection_CountsEachLabel()
+    {
+        var method = ParseMethod(@"
+            public int M(int a)
+            {
+                switch (a)
+                {
+                    case 1:
+                    case 2: return 1;
+                    default: return 0;
+                }
+            }");
+        // Two case labels share one SwitchSection but are two decisions.
+        Assert.Equal(3, ComplexityCalculator.Calculate(method));
     }
 
     [Fact]

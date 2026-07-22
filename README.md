@@ -53,7 +53,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_obsolete_usage** — Every `[Obsolete]` call site grouped by deprecation message and severity, errors first; for planning migrations
 - **find_circular_dependencies** — Detect cycles in project or namespace dependency graphs
 - **check_architecture** — Enforce layering rules you supply (`forbid` and `allowOnly`) against the real semantic type graph rather than `using` directives; violations are grouped per boundary with a reference count and example sites
-- **get_complexity_metrics** — Cyclomatic complexity analysis per method
+- **get_complexity_metrics** — Cyclomatic complexity, cognitive complexity and max nesting depth per member (methods, constructors, properties, indexers, operators). Cyclomatic counts paths and starts at 1; cognitive measures how hard the code is to follow and starts at 0. `metric` picks which one the threshold and sort use — cognitive is the better refactoring-priority signal, cyclomatic the better test-budget one
 - **find_naming_violations** — Check .NET naming convention compliance
 - **find_async_violations** — Sync-over-async, `async void` misuse, missing awaits, fire-and-forget tasks; per-violation report with severity
 - **find_disposable_misuse** — `IDisposable`/`IAsyncDisposable` instances not wrapped in `using`/`await using`/returned/assigned to field; severity error/warning per violation.
@@ -115,7 +115,7 @@ Tools that include a `summary` aggregate today:
 - `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
 - `find_unused_symbols` — `{ byKind, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
 - `find_naming_violations` — `{ byRule: {...} }`
-- `get_complexity_metrics` — `{ max, avg, overThreshold }`
+- `get_complexity_metrics` — `{ max, avg, overThreshold, maxCognitive }` (the first three describe the selected `metric`)
 
 Single-object tools (`get_type_overview`, `get_symbol_context`, `apply_code_action`, etc.) return their bespoke shape directly — the envelope only wraps list-returning tools.
 
