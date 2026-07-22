@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.13.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.12.0...v2.13.0) (2026-07-22)
+
+
+### Features
+
+* get_instantiation_options — how do I construct this type ([#327](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/327)) ([d17352c](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/d17352c33ca043118fb29f68eb9a06655999ff3b))
+
+
+### Bug Fixes
+
+* **deps:** pin brace-expansion to 1.1.16 to clear the DoS alert ([#329](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/329)) ([7f4201b](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/7f4201b43c0fe93fb468d9ee524b8e1c1ec03b0e))
+
 ## [2.12.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.11.1...v2.12.0) (2026-07-21)
 
 
