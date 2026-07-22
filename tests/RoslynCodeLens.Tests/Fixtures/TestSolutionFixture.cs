@@ -49,10 +49,14 @@ public class TestSolutionFixture : IAsyncLifetime
         {
             Loaded = await new SolutionLoader().LoadAsync(SolutionPath).ConfigureAwait(false);
             var resolver = new SymbolResolver(Loaded);
-            if (FixtureIsHealthy(Loaded, resolver, out problem))
+            // Built before the probe rather than after it, because one of the invariants runs
+            // through the metadata resolver — a path that was previously unprobed, and the one
+            // that kept flaking.
+            var metadata = new MetadataSymbolResolver(Loaded, resolver);
+            if (FixtureIsHealthy(Loaded, resolver, metadata, out problem))
             {
                 Resolver = resolver;
-                Metadata = new MetadataSymbolResolver(Loaded, Resolver);
+                Metadata = metadata;
                 return;
             }
         }
@@ -60,7 +64,9 @@ public class TestSolutionFixture : IAsyncLifetime
         throw new InvalidOperationException(
             $"TestSolution failed to load healthily after {MaxLoadAttempts} attempts: {problem}. " +
             "This is the MSBuildWorkspace design-time build flake from #260 — a fixture project's references were " +
-            "dropped, so [Fact]/[Test]/[TestMethod] or the call into TestLib.Greeter did not bind and discovery returns nothing.");
+            "dropped, so [Fact]/[Test]/[TestMethod] or the call into TestLib.Greeter did not bind and discovery returns " +
+            "nothing, or TestLib's framework references went and metadata types such as System.ObsoleteAttribute no " +
+            "longer resolve.");
     }
 
     /// <summary>
@@ -74,8 +80,21 @@ public class TestSolutionFixture : IAsyncLifetime
     /// A load that fails either dropped references — the caller retries on a fresh
     /// workspace. Checking coverage as well as discovery matters: the two use slightly
     /// different reference queries, and a load can satisfy one while degrading the other.
+    /// <para>
+    /// A third invariant covers the METADATA path, which the two above never touch: both
+    /// rest on the test→TestLib.Greeter <em>project</em> reference, so a load that drops
+    /// TestLib's framework references passes them while `System.ObsoleteAttribute` no longer
+    /// resolves. That gap let
+    /// <c>FindAttributeUsages_FullyQualifiedMetadata_FindsUsage</c> fail intermittently on CI
+    /// (twice in two days, on unrelated commits) with "Collection was empty" — the fixture
+    /// declared itself healthy and handed the test a solution that could not answer.
+    /// </para>
     /// </summary>
-    private static bool FixtureIsHealthy(LoadedSolution loaded, SymbolResolver resolver, out string problem)
+    private static bool FixtureIsHealthy(
+        LoadedSolution loaded,
+        SymbolResolver resolver,
+        MetadataSymbolResolver metadata,
+        out string problem)
     {
         var discovery = FindTestsForSymbolLogic.Execute(loaded, resolver, "Greeter.Greet", transitive: false, maxDepth: 3);
         var found = discovery.DirectTests.Select(t => t.Framework).ToHashSet();
@@ -91,6 +110,18 @@ public class TestSolutionFixture : IAsyncLifetime
         if (coverage.UncoveredSymbols.Any(s => string.Equals(s.Symbol, "Greeter.Greet", StringComparison.Ordinal)))
         {
             problem = "Greeter.Greet is reported uncovered despite having test callers (coverage reference query degraded)";
+            return false;
+        }
+
+        // Greeter.OldGreet carries [Obsolete], so resolving System.ObsoleteAttribute out of
+        // metadata and scanning for its usages must find it. Empty here means TestLib's
+        // framework references were dropped: the attribute type itself no longer resolves.
+        var attributeUsages = FindAttributeUsagesLogic.Execute(
+            loaded, resolver, metadata, "System.ObsoleteAttribute");
+        if (!attributeUsages.Any(u => u.TargetName.Contains("OldGreet", StringComparison.Ordinal)))
+        {
+            problem = $"System.ObsoleteAttribute usages do not include Greeter.OldGreet " +
+                      $"(found {attributeUsages.Count}) — the metadata reference set was degraded";
             return false;
         }
 
