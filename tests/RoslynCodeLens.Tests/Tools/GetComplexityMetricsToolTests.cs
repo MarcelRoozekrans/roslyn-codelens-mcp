@@ -118,6 +118,66 @@ public class GetComplexityMetricsToolTests
         Assert.Contains("\"maxCognitive\":15", json, StringComparison.Ordinal); // always visible
     }
 
+    /// <summary>
+    /// The scan runs through <see cref="RoslynCodeLens.Analysis.SolutionScanner"/>, whose dedupe is
+    /// first-one-wins on (scope, tree identity). Complexity is a per-FILE fact: the same file linked
+    /// into two projects is the same code with the same score, so it must be reported ONCE — the
+    /// opposite of <c>DiRegistrationScanner</c>, where a registration is a per-project fact and a
+    /// project-scoped discriminator is required.
+    /// <para>
+    /// This was decided by measurement, not reasoning: adding
+    /// <c>scopeDiscriminator: (p, _) =&gt; p</c> to the scan makes this report 2 and fails.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Two_projects_sharing_a_file_path_are_reported_once()
+    {
+        var (loaded, resolver) = SharedFileSolution();
+
+        var results = GetComplexityMetricsLogic.Execute(loaded, resolver, null, 0);
+
+        Assert.Single(results, r => r.MethodName == "Shared");
+    }
+
+    /// <summary>
+    /// The companion half. Dedupe awards the shared file to whichever project sorts first (ProjA),
+    /// so a project filter applied in the LOOP BODY would discard that row and report nothing for
+    /// ProjB — the file having already spent its dedupe slot. Passing the filter to the scanner as
+    /// <c>projectFilter</c> drops ProjA's whole compilation up front, so ProjB gets the file.
+    /// Move the filter back into the body and this test fails while the one above still passes.
+    /// </summary>
+    [Fact]
+    public void Project_filter_still_finds_a_file_shared_with_an_excluded_project()
+    {
+        var (loaded, resolver) = SharedFileSolution();
+
+        var results = GetComplexityMetricsLogic.Execute(loaded, resolver, "ProjB", 0);
+
+        var shared = Assert.Single(results, r => r.MethodName == "Shared");
+        Assert.Equal("ProjB", shared.Project);
+    }
+
+    /// <summary>Two projects that each link the same <c>Shared.cs</c> path.</summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) SharedFileSolution()
+    {
+        const string Shared = """
+            namespace Demo;
+            public class SharedType
+            {
+                public int Shared(int a)
+                {
+                    if (a == 1) return 1;
+                    if (a == 2) return 2;
+                    return 0;
+                }
+            }
+            """;
+
+        return RenameTestWorkspace.Create(
+            ("ProjA", [("Shared.cs", Shared)]),
+            ("ProjB", [("Shared.cs", Shared)]));
+    }
+
     [Fact]
     public void Sort_OrdersByComplexityDesc()
     {

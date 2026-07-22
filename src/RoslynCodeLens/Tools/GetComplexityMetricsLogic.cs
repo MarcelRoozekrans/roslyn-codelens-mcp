@@ -23,54 +23,60 @@ public static class GetComplexityMetricsLogic
     {
         var results = new List<ComplexityMetric>();
 
-        foreach (var (projectId, compilation) in loaded.Compilations)
+        // The project filter belongs HERE, not as a `continue` in the loop body. The scanner's
+        // dedupe is first-one-wins, so a file linked into an unwanted project could claim its
+        // dedupe slot there and then be discarded — losing it from the wanted project entirely.
+        // Dropping the whole compilation up front cannot do that.
+        //
+        // No scopeDiscriminator: complexity is a per-FILE fact, so a file linked into two projects
+        // is the same code and must be reported ONCE. (Contrast DiRegistrationScanner, where a
+        // registration is a per-project fact and the discriminator is required.) Measured, not
+        // reasoned: with `scopeDiscriminator: (p, _) => p` added,
+        // Two_projects_sharing_a_file_path_are_reported_once reports 2 rows instead of 1.
+        //
+        // Generated code stays excluded (the scanner default): nobody refactors a generated file.
+        foreach (var scanTree in SolutionScanner.EnumerateTrees(
+                     loaded, resolver,
+                     projectFilter: project is null
+                         ? null
+                         : (_, name) => name.Contains(project, StringComparison.OrdinalIgnoreCase)))
         {
-            var projectName = resolver.GetProjectName(projectId);
-
-            if (project != null &&
-                !projectName.Contains(project, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            foreach (var tree in compilation.SyntaxTrees)
+            foreach (var member in scanTree.Root.DescendantNodes().OfType<MemberDeclarationSyntax>())
             {
-                var semanticModel = compilation.GetSemanticModel(tree);
-                var root = tree.GetRoot();
+                var bodies = ScoredBodies(member);
+                if (bodies.Count == 0)
+                    continue;
 
-                foreach (var member in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
+                // Max across a property's accessors, per metric: the property is one row and
+                // the worst accessor is what a reader has to deal with.
+                var complexity = bodies.Max(ComplexityCalculator.Calculate);
+                var cognitive = 0;
+                var maxNesting = 0;
+                foreach (var body in bodies)
                 {
-                    var bodies = ScoredBodies(member);
-                    if (bodies.Count == 0)
-                        continue;
-
-                    // Max across a property's accessors, per metric: the property is one row and
-                    // the worst accessor is what a reader has to deal with.
-                    var complexity = bodies.Max(ComplexityCalculator.Calculate);
-                    var cognitive = 0;
-                    var maxNesting = 0;
-                    foreach (var body in bodies)
-                    {
-                        var analysis = CognitiveComplexityCalculator.Analyze(body);
-                        cognitive = Math.Max(cognitive, analysis.Cognitive);
-                        maxNesting = Math.Max(maxNesting, analysis.MaxNesting);
-                    }
-
-                    var selected = metric == ComplexityMetricKind.Cognitive ? cognitive : complexity;
-                    if (selected < threshold)
-                        continue;
-
-                    var symbol = semanticModel.GetDeclaredSymbol(member);
-                    var lineSpan = member.GetLocation().GetLineSpan();
-
-                    results.Add(new ComplexityMetric(
-                        MemberName(member, symbol),
-                        symbol?.ContainingType?.Name ?? "Unknown",
-                        complexity,
-                        cognitive,
-                        maxNesting,
-                        lineSpan.Path ?? "",
-                        lineSpan.StartLinePosition.Line + 1,
-                        projectName));
+                    var analysis = CognitiveComplexityCalculator.Analyze(body);
+                    cognitive = Math.Max(cognitive, analysis.Cognitive);
+                    maxNesting = Math.Max(maxNesting, analysis.MaxNesting);
                 }
+
+                var selected = metric == ComplexityMetricKind.Cognitive ? cognitive : complexity;
+                if (selected < threshold)
+                    continue;
+
+                // Memoised by the scanner, so asking per member builds exactly one model per tree
+                // — and none at all for a tree whose members are all filtered out by threshold.
+                var symbol = scanTree.SemanticModel().GetDeclaredSymbol(member);
+                var lineSpan = member.GetLocation().GetLineSpan();
+
+                results.Add(new ComplexityMetric(
+                    MemberName(member, symbol),
+                    symbol?.ContainingType?.Name ?? "Unknown",
+                    complexity,
+                    cognitive,
+                    maxNesting,
+                    lineSpan.Path ?? "",
+                    lineSpan.StartLinePosition.Line + 1,
+                    scanTree.ProjectName));
             }
         }
 

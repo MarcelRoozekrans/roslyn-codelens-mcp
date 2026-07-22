@@ -33,6 +33,10 @@ public class SemanticModelLazinessTests
     [InlineData("Tools/CheckArchitectureLogic.cs")]
     [InlineData("Tools/FindThrowSitesLogic.cs")]
     [InlineData("Tools/FindCatchBlocksLogic.cs")]
+    // get_complexity_metrics scores every member syntactically and only asks for a model to name
+    // the ones that clear the threshold. At the default threshold of 10 most trees never need one
+    // at all, so an eager model would turn a cheap scan into a full solution bind.
+    [InlineData("Tools/GetComplexityMetricsLogic.cs")]
     // Verified non-vacuous: adding Analysis/SolutionScanner.cs here — the one file that legitimately
     // creates models — makes this test fail, so the detector really does fire.
     public void ScanningTools_NeverCreateASemanticModelDirectly(string relativePath)
