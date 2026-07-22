@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.14.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.13.0...v2.14.0) (2026-07-22)
+
+
+### Features
+
+* cognitive complexity and nesting depth, and correct three cyclomatic defects ([#338](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/338)) ([8f1712a](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/8f1712a42dc6de2bb129b88101cea183fe250040))
+
+
+### Bug Fixes
+
+* **deps:** keep brace-expansion on 1.x — v5 breaks minimatch at runtime ([#334](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/334)) ([0176e8d](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/0176e8d00dae3eba97b28e0f203f5af7482758f7))
+* **trust:** survive transient file locks when persisting trust ([#337](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/337)) ([3c19b49](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/3c19b49b3ddeef82844afac0242ffa25f6e69713))
+
 ## [2.13.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.12.0...v2.13.0) (2026-07-22)
 
 
