@@ -41,6 +41,12 @@ public class GetProjectHealthToolTests
         var direct = GetComplexityMetricsLogic.Execute(_loaded, _resolver, "TestLib", 10);
         var result = GetProjectHealthLogic.Execute(_loaded, _resolver, project: "TestLib", hotspotsPerDimension: 5);
 
+        // The fixture must actually contain a hotspot, or this test compares 0 against 0 and
+        // passes even if the composite stops reporting complexity altogether. It did exactly
+        // that until TestLib.ComplexitySamples was added: nothing in the solution reached the
+        // default threshold of 10, so the whole dimension was untested.
+        Assert.NotEmpty(direct);
+
         var entry = Assert.Single(result.Projects);
         Assert.Equal(direct.Count, entry.Counts.ComplexityHotspots);
     }

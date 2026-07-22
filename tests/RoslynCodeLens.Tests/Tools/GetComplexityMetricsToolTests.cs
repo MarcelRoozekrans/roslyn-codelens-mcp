@@ -24,6 +24,40 @@ public class GetComplexityMetricsToolTests
         Assert.NotEmpty(results);
     }
 
+    /// <summary>
+    /// Pins the fixture member that makes the default threshold reachable at all. If someone
+    /// simplifies <c>ComplexitySamples.Classify</c>, this fails loudly — rather than every
+    /// complexity assertion in the suite quietly going back to comparing 0 against 0.
+    /// </summary>
+    [Fact]
+    public void DefaultThreshold_IsReachableInTheFixture()
+    {
+        var atDefaultThreshold = GetComplexityMetricsLogic.Execute(_loaded, _resolver, "TestLib", 10);
+
+        var classify = Assert.Single(atDefaultThreshold, m => m.MethodName == "Classify");
+        Assert.Equal(13, classify.Complexity);
+        Assert.Equal("ComplexitySamples", classify.TypeName);
+    }
+
+    /// <summary>
+    /// The cognitive metric must also be exercisable at the default threshold. Before
+    /// <c>ComplexitySamples</c> the most cognitively complex member in the whole fixture scored
+    /// 6, so `metric: "cognitive"` at threshold 10 returned nothing and proved nothing.
+    /// </summary>
+    [Fact]
+    public void DefaultThreshold_IsReachableForCognitiveToo()
+    {
+        var byCognitive = GetComplexityMetricsLogic.Execute(
+            _loaded, _resolver, "TestLib", 10, ComplexityMetricKind.Cognitive);
+
+        var nested = Assert.Single(byCognitive, m => m.MethodName == "DeeplyNested");
+        // 1 + 2 + 3 + 4 + 5, one per nesting level — deliberately clear of the threshold
+        // rather than sitting on it.
+        Assert.Equal(15, nested.Cognitive);
+        // Cyclomatic is far lower on the same member — the divergence is the point.
+        Assert.Equal(6, nested.Complexity);
+    }
+
     [Fact]
     public void GetComplexityMetrics_HighThreshold_ReturnsEmpty()
     {
