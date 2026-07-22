@@ -161,4 +161,92 @@ public class TrustStoreTests : IDisposable
             Console.SetError(prevErr);
         }
     }
+
+    // ---------------------------------------------------------------- transient file locks
+    //
+    // TrustStoreTests.AddPersistentTrust_IsIdempotent failed intermittently on Windows with
+    // UnauthorizedAccessException out of File.Move in SaveToDisk. Each test writes to its own
+    // GUID temp directory, so it was never cross-test collision — it is a scanner or indexer
+    // momentarily holding the file between the write and the rename.
+    //
+    // The retry is tested through an injected operation rather than by trying to provoke a real
+    // lock: a timing-dependent test for a timing-dependent bug proves nothing on a green run.
+
+    [Fact]
+    public void RunWithRetry_RetriesTransientSharingViolations_ThenSucceeds()
+    {
+        var attempts = 0;
+        TrustStore.RunWithRetry(() =>
+        {
+            attempts++;
+            if (attempts < 3) throw new UnauthorizedAccessException("Access to the path is denied.");
+        }, maxAttempts: 5, baseDelayMs: 1);
+
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public void RunWithRetry_RetriesIOException()
+    {
+        var attempts = 0;
+        TrustStore.RunWithRetry(() =>
+        {
+            attempts++;
+            if (attempts < 2) throw new IOException("The process cannot access the file.");
+        }, maxAttempts: 5, baseDelayMs: 1);
+
+        Assert.Equal(2, attempts);
+    }
+
+    /// <summary>
+    /// A persistent failure must surface as itself. Swallowing it would turn "this file is
+    /// read-only" into silent data loss — the caller believes trust was persisted when it was not.
+    /// </summary>
+    [Fact]
+    public void RunWithRetry_GivesUpAndRethrowsTheOriginalException()
+    {
+        var attempts = 0;
+        var ex = Assert.Throws<UnauthorizedAccessException>(() =>
+            TrustStore.RunWithRetry(() =>
+            {
+                attempts++;
+                throw new UnauthorizedAccessException("permanently denied");
+            }, maxAttempts: 4, baseDelayMs: 1));
+
+        Assert.Equal(4, attempts);
+        Assert.Equal("permanently denied", ex.Message);
+    }
+
+    /// <summary>
+    /// Unrelated exceptions must not be retried — retrying a bug wastes time and hides it.
+    /// </summary>
+    [Fact]
+    public void RunWithRetry_DoesNotRetryUnrelatedExceptions()
+    {
+        var attempts = 0;
+        Assert.Throws<InvalidOperationException>(() =>
+            TrustStore.RunWithRetry(() =>
+            {
+                attempts++;
+                throw new InvalidOperationException("not a file problem");
+            }, maxAttempts: 5, baseDelayMs: 1));
+
+        Assert.Equal(1, attempts);
+    }
+
+    /// <summary>
+    /// The reason the temp name carries a GUID: back-to-back saves must not reuse the path just
+    /// renamed away, which is the window the flake lived in.
+    /// </summary>
+    [Fact]
+    public void RepeatedSaves_LeaveNoTempFilesBehind()
+    {
+        var store = new TrustStore(_trustFile);
+        for (var i = 0; i < 10; i++)
+            store.AddPersistentTrust(Sln("repos", $"foo{i}.sln"));
+
+        Assert.True(File.Exists(_trustFile));
+        Assert.Empty(Directory.GetFiles(_tempDir, "*.tmp"));
+        Assert.Equal(10, store.GetSnapshot().PersistentSolutions.Count);
+    }
 }

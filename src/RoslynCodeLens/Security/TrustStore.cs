@@ -117,13 +117,68 @@ public sealed class TrustStore
         }
     }
 
+    /// <summary>
+    /// Writes the store to a temp file and renames it over the target, so a crash cannot leave a
+    /// half-written trust.json.
+    /// <para>
+    /// The temp name carries a GUID rather than a fixed <c>.tmp</c> suffix. Two saves in quick
+    /// succession — which <see cref="AddPersistentTrust"/> does whenever a caller trusts twice —
+    /// would otherwise recreate the exact path just renamed away, and on Windows that path can
+    /// still be held briefly by a scanner or indexer. A fresh name per save cannot collide with
+    /// the previous one.
+    /// </para>
+    /// <para>
+    /// Both file operations go through <see cref="RunWithRetry"/>: those holds are transient, and
+    /// failing the whole call because an antivirus looked at the file for a few milliseconds means
+    /// the server silently fails to persist trust the user just granted.
+    /// </para>
+    /// </summary>
     private void SaveToDisk()
     {
         var dir = Path.GetDirectoryName(_filePath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var tmp = _filePath + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(_persistent, TrustStoreModel.JsonOptions));
-        File.Move(tmp, _filePath, overwrite: true);
+
+        var tmp = $"{_filePath}.{Guid.NewGuid():N}.tmp";
+        var json = JsonSerializer.Serialize(_persistent, TrustStoreModel.JsonOptions);
+        try
+        {
+            RunWithRetry(() => File.WriteAllText(tmp, json));
+            RunWithRetry(() => File.Move(tmp, _filePath, overwrite: true));
+        }
+        catch
+        {
+            // A GUID-named temp would otherwise be left behind for good, since nothing else knows
+            // its name. Best-effort: the original exception is what the caller needs to see.
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Retries a file operation through the transient sharing violations Windows produces when a
+    /// scanner, indexer or backup agent momentarily holds a file that was just written. Waits
+    /// grow linearly (10ms, 20ms, ...), which is ample for a hold measured in milliseconds and
+    /// still bounded well under a tenth of a second in the worst case.
+    /// <para>
+    /// The final attempt does NOT catch: a genuine permission problem — a read-only file, a
+    /// locked-down profile directory — must surface as itself rather than as a timeout, and
+    /// retrying it five times changes nothing but the delay.
+    /// </para>
+    /// </summary>
+    internal static void RunWithRetry(Action operation, int maxAttempts = 5, int baseDelayMs = 10)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                operation();
+                return;
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < maxAttempts)
+            {
+                Thread.Sleep(baseDelayMs * attempt);
+            }
+        }
     }
 
     private static string Normalize(string path)
