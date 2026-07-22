@@ -31,7 +31,8 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_uncovered_symbols** — Public methods and properties no test transitively reaches; sorted by cyclomatic complexity for prioritization
 - **generate_test_skeleton** — Emit a compilable test-class skeleton (as text) for a method or type. Auto-detects xUnit/NUnit/MSTest; surfaces constructor dependencies as TodoNotes; returns a suggested file path. Closes the loop with `find_uncovered_symbols`
 - **get_type_hierarchy** — Walk base classes, interfaces, and derived types
-- **get_di_registrations** — Scan for DI service registrations
+- **get_di_registrations** — Scan for DI service registrations. Reads generic (`AddSingleton<IFoo, Foo>()`), single-generic, `typeof` pair and factory-lambda forms
+- **get_instantiation_options** — "How do I construct this type?" in one call: constructors with full parameter detail, static factory methods declared anywhere in the solution (including on a separate factory type), DI registrations, and `required` members. Pass `fromProject` to learn whether *that* project can actually reach each option — it honours `InternalsVisibleTo`, so it answers "can my test project call this internal constructor?"
 - **get_project_dependencies** — Get the project reference graph
 - **get_symbol_context** — One-shot context dump for any type
 - **get_public_api_surface** — Enumerate every public/protected type and member in production projects; flat, deterministically-sorted list suitable for API review or breaking-change baselines.

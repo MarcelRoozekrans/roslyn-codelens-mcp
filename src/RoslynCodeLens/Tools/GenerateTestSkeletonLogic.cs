@@ -57,7 +57,16 @@ public static class GenerateTestSkeletonLogic
 
         var compilation = FindCompilationForType(loaded, targetType);
 
-        var code = BuildClass(targetType, targetMethods, className, ns, fw, todoNotes, compilation);
+        // Only when `new` is off the table: the factory search is a solution-wide scan, and a type
+        // with a public constructor never needs it.
+        var factoryFallback = targetType.IsStatic
+                              || targetType.InstanceConstructors.Any(c =>
+                                  c.DeclaredAccessibility == Accessibility.Public)
+            ? null
+            : GetInstantiationOptionsLogic.FindParameterlessFactoryCall(loaded, resolver, targetType);
+
+        var code = BuildClass(
+            targetType, targetMethods, className, ns, fw, todoNotes, compilation, factoryFallback);
 
         var suggestedPath = SuggestFilePath(loaded, targetType, todoNotes);
 
@@ -152,7 +161,8 @@ public static class GenerateTestSkeletonLogic
         string ns,
         TestFramework fw,
         List<string> todoNotes,
-        Compilation? compilation)
+        Compilation? compilation,
+        string? factoryFallback)
     {
         var sb = new StringBuilder();
 
@@ -181,7 +191,7 @@ public static class GenerateTestSkeletonLogic
         for (int i = 0; i < methods.Count; i++)
         {
             if (i > 0) sb.AppendLine();
-            EmitMethodStub(sb, targetType, methods[i], fw, todoNotes, compilation);
+            EmitMethodStub(sb, targetType, methods[i], fw, todoNotes, compilation, factoryFallback);
         }
 
         sb.AppendLine("}");
@@ -202,7 +212,8 @@ public static class GenerateTestSkeletonLogic
         IMethodSymbol method,
         TestFramework fw,
         List<string> todoNotes,
-        Compilation? compilation)
+        Compilation? compilation,
+        string? factoryFallback)
     {
         var isAsync = ReturnsTask(method);
         var hasParams = method.Parameters.Length > 0;
@@ -210,14 +221,14 @@ public static class GenerateTestSkeletonLogic
 
         if (allPrimitive && !isAsync)
         {
-            EmitTheoryStub(sb, targetType, method, fw, todoNotes);
+            EmitTheoryStub(sb, targetType, method, fw, todoNotes, factoryFallback);
         }
         else
         {
-            EmitHappyPathFact(sb, targetType, method, fw, isAsync, todoNotes);
+            EmitHappyPathFact(sb, targetType, method, fw, isAsync, todoNotes, factoryFallback);
         }
 
-        EmitThrowStubs(sb, targetType, method, fw, isAsync, compilation, todoNotes);
+        EmitThrowStubs(sb, targetType, method, fw, isAsync, compilation, todoNotes, factoryFallback);
     }
 
     private static void EmitThrowStubs(
@@ -227,7 +238,8 @@ public static class GenerateTestSkeletonLogic
         TestFramework fw,
         bool isAsync,
         Compilation? compilation,
-        List<string> todoNotes)
+        List<string> todoNotes,
+        string? factoryFallback)
     {
         if (compilation is null) return;
 
@@ -258,7 +270,7 @@ public static class GenerateTestSkeletonLogic
             }
             else
             {
-                sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes)};");
+                sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes, factoryFallback)};");
                 callExpr = $"() => sut.{method.Name}({argList})";
             }
 
@@ -330,7 +342,8 @@ public static class GenerateTestSkeletonLogic
         IMethodSymbol method,
         TestFramework fw,
         bool isAsync,
-        List<string> todoNotes)
+        List<string> todoNotes,
+        string? factoryFallback)
     {
         var factAttr = fw switch
         {
@@ -354,7 +367,7 @@ public static class GenerateTestSkeletonLogic
         }
         else
         {
-            sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes)};");
+            sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes, factoryFallback)};");
             sb.AppendLine($"        {awaitable}sut.{method.Name}();");
         }
 
@@ -362,7 +375,18 @@ public static class GenerateTestSkeletonLogic
         sb.AppendLine("    }");
     }
 
-    private static string SutCreation(INamedTypeSymbol type, List<string> todoNotes)
+    /// <summary>
+    /// The expression the skeleton uses to build the system under test.
+    /// <para>
+    /// A type with no public constructor gets its factory, not <c>new</c>: emitting
+    /// <c>new FactoryOnly()</c> for a private-constructor type produces a file that does not
+    /// compile, which is worse than no skeleton at all because the caller has to work out why.
+    /// When there is no factory either, the expression is a TODO that names the problem —
+    /// deliberately still uncompilable, but self-explaining rather than misleading.
+    /// </para>
+    /// </summary>
+    private static string SutCreation(
+        INamedTypeSymbol type, List<string> todoNotes, string? factoryFallback)
     {
         if (type.IsStatic) return ""; // never used, all-static path
         var ctor = type.InstanceConstructors
@@ -370,7 +394,18 @@ public static class GenerateTestSkeletonLogic
             .OrderBy(c => c.Parameters.Length)
             .FirstOrDefault();
 
-        if (ctor is null || ctor.Parameters.Length == 0)
+        if (ctor is null)
+        {
+            if (factoryFallback is not null) return factoryFallback;
+
+            todoNotes.Add(
+                $"{type.Name} has no public constructor and no parameterless static factory — "
+                + "construct it another way (internal constructor from a friend assembly, "
+                + "DI container, or a test-only subclass).");
+            return $"/* TODO: no public constructor on {type.Name} */ default!";
+        }
+
+        if (ctor.Parameters.Length == 0)
             return $"new {type.Name}()";
 
         foreach (var p in ctor.Parameters)
@@ -407,7 +442,8 @@ public static class GenerateTestSkeletonLogic
         INamedTypeSymbol targetType,
         IMethodSymbol method,
         TestFramework fw,
-        List<string> todoNotes)
+        List<string> todoNotes,
+        string? factoryFallback)
     {
         var literals = string.Join(", ", method.Parameters.Select(DefaultLiteral));
 
@@ -437,7 +473,7 @@ public static class GenerateTestSkeletonLogic
         }
         else
         {
-            sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes)};");
+            sb.AppendLine($"        var sut = {SutCreation(targetType, todoNotes, factoryFallback)};");
             sb.AppendLine($"        sut.{method.Name}({argList});");
         }
         sb.AppendLine("        // TODO: assert");

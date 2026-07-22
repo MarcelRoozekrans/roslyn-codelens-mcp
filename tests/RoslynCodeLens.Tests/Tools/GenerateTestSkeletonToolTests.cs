@@ -368,3 +368,80 @@ public class GenerateTestSkeletonThrowStubTests
         Assert.DoesNotContain("Assert.Throws<Exception>", result.Code, StringComparison.Ordinal);
     }
 }
+
+/// <summary>
+/// The system under test cannot always be `new`ed. A skeleton that emits `new Foo()` for a type
+/// whose only constructor is private hands back a file that does not compile.
+/// </summary>
+public class GenerateTestSkeletonSutCreationTests
+{
+    private static GenerateTestSkeletonResult Run(string source, string symbol)
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Sut.cs", source));
+        return GenerateTestSkeletonLogic.Execute(loaded, resolver, symbol, framework: "xunit");
+    }
+
+    private const string FactoryOnlySource = """
+        namespace Demo;
+
+        public class FactoryOnly
+        {
+            private FactoryOnly() {}
+            public static FactoryOnly Create() => new FactoryOnly();
+            public void Work() {}
+        }
+        """;
+
+    [Fact]
+    public void Private_constructor_type_uses_a_factory_instead_of_uncompilable_new()
+    {
+        var result = Run(FactoryOnlySource, "Demo.FactoryOnly");
+
+        Assert.DoesNotContain("new FactoryOnly()", result.Code, StringComparison.Ordinal);
+        Assert.Contains("FactoryOnly.Create()", result.Code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Private_constructor_type_with_no_factory_says_so_instead_of_emitting_new()
+    {
+        var result = Run(
+            """
+            namespace Demo;
+
+            public class Sealed
+            {
+                private Sealed() {}
+                public void Work() {}
+            }
+            """,
+            "Demo.Sealed");
+
+        Assert.DoesNotContain("new Sealed()", result.Code, StringComparison.Ordinal);
+        Assert.Contains("no public constructor", result.Code, StringComparison.Ordinal);
+        Assert.Contains(result.TodoNotes, n => n.Contains("no public constructor", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Public_constructor_type_still_uses_new()
+    {
+        // The factory path must not displace the normal case: a public constructor wins even when
+        // a static factory for the same type also exists.
+        var result = Run(
+            """
+            namespace Demo;
+
+            public class Both
+            {
+                public Both() {}
+                public static Both Create() => new Both();
+                public void Work() {}
+            }
+            """,
+            "Demo.Both");
+
+        // `Create` is itself a public static method, so it gets its own stub; the assertion is
+        // about what the SUT expression is, not about the factory being absent from the file.
+        Assert.Contains("var sut = new Both()", result.Code, StringComparison.Ordinal);
+        Assert.DoesNotContain("var sut = Demo.Both.Create()", result.Code, StringComparison.Ordinal);
+    }
+}
