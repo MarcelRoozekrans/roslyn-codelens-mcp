@@ -129,6 +129,42 @@ public class CognitiveComplexityCalculatorTests
         Assert.Equal(0, CognitiveComplexityCalculator.Calculate(ParseMethod("public void M() { }")));
     }
 
+    [Theory]
+    [InlineData("public void M() { }", 0)]
+    [InlineData("public void M(bool a) { if (a) { } }", 1)]
+    [InlineData("public void M(bool a, bool b) { if (a) { if (b) { } } }", 2)]
+    public void MaxNesting_MeasuresDeepestControlStructure(string code, int expected)
+        => Assert.Equal(expected, CognitiveComplexityCalculator.MaxNesting(ParseMethod(code)));
+
+    [Fact]
+    public void MaxNesting_CountsLambdaBodies()
+    {
+        var method = ParseMethod(@"
+            public void M(System.Collections.Generic.List<int> xs)
+            {
+                xs.ForEach(x => { if (x > 0) { } });
+            }");
+        // The walk looks INSIDE the lambda — so this is 1, not 0. The lambda itself is not a
+        // control structure, so it does not add a level of its own: only the `if` does.
+        Assert.Equal(1, CognitiveComplexityCalculator.MaxNesting(method));
+    }
+
+    [Fact]
+    public void Analyze_ReturnsBothMetricsFromOneWalk()
+    {
+        var method = ParseMethod(@"
+            public void M(int[] xs)
+            {
+                foreach (var x in xs)
+                    if (x > 0)
+                        while (x > 1)
+                            System.Console.Write(x);
+            }");
+        var result = CognitiveComplexityCalculator.Analyze(method);
+        Assert.Equal(6, result.Cognitive);
+        Assert.Equal(3, result.MaxNesting);
+    }
+
     private static MethodDeclarationSyntax ParseMethod(string code)
     {
         var tree = CSharpSyntaxTree.ParseText($"class C {{ {code} }}");
