@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
@@ -24,25 +24,78 @@ public static class GetComplexityMetricsLogic
                 var semanticModel = compilation.GetSemanticModel(tree);
                 var root = tree.GetRoot();
 
-                foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>())
+                foreach (var member in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
                 {
-                    var complexity = ComplexityCalculator.Calculate(method);
+                    var bodies = ScoredBodies(member);
+                    if (bodies.Count == 0)
+                        continue;
+
+                    // Max across a property's accessors, per metric: the property is one row and
+                    // the worst accessor is what a reader has to deal with.
+                    var complexity = bodies.Max(ComplexityCalculator.Calculate);
+                    var cognitive = 0;
+                    var maxNesting = 0;
+                    foreach (var body in bodies)
+                    {
+                        var analysis = CognitiveComplexityCalculator.Analyze(body);
+                        cognitive = Math.Max(cognitive, analysis.Cognitive);
+                        maxNesting = Math.Max(maxNesting, analysis.MaxNesting);
+                    }
 
                     if (complexity < threshold)
                         continue;
 
-                    var symbol = semanticModel.GetDeclaredSymbol(method);
-                    var methodName = symbol?.Name ?? method.Identifier.Text;
-                    var typeName = symbol?.ContainingType?.Name ?? "Unknown";
-                    var lineSpan = method.GetLocation().GetLineSpan();
-                    var file = lineSpan.Path ?? "";
-                    var line = lineSpan.StartLinePosition.Line + 1;
+                    var symbol = semanticModel.GetDeclaredSymbol(member);
+                    var lineSpan = member.GetLocation().GetLineSpan();
 
-                    results.Add(new ComplexityMetric(methodName, typeName, complexity, file, line, projectName));
+                    results.Add(new ComplexityMetric(
+                        MemberName(member, symbol),
+                        symbol?.ContainingType?.Name ?? "Unknown",
+                        complexity,
+                        cognitive,
+                        maxNesting,
+                        lineSpan.Path ?? "",
+                        lineSpan.StartLinePosition.Line + 1,
+                        projectName));
                 }
             }
         }
 
         return results.OrderByDescending(r => r.Complexity).ToList();
     }
+
+    /// <summary>
+    /// The syntax to score for a member, or an empty list for members that hold no code (fields,
+    /// type declarations, using directives...). Lambdas and local functions are not members, so
+    /// they are scored as part of the member that contains them rather than becoming their own
+    /// rows — the question this tool answers is "which member do I refactor".
+    /// </summary>
+    private static IReadOnlyList<SyntaxNode> ScoredBodies(MemberDeclarationSyntax member) => member switch
+    {
+        MethodDeclarationSyntax
+            or ConstructorDeclarationSyntax
+            or DestructorDeclarationSyntax
+            or OperatorDeclarationSyntax
+            or ConversionOperatorDeclarationSyntax => [member],
+
+        // A property or indexer is one row scored by its worst accessor. Accessors without a body
+        // (an auto-property) hold no code, so such a member yields nothing rather than a row of 1.
+        PropertyDeclarationSyntax { ExpressionBody: { } body } => [body],
+        IndexerDeclarationSyntax { ExpressionBody: { } body } => [body],
+        BasePropertyDeclarationSyntax { AccessorList: { } accessors } and (PropertyDeclarationSyntax or IndexerDeclarationSyntax) =>
+            [.. accessors.Accessors.Where(a => a.Body is not null || a.ExpressionBody is not null)],
+
+        _ => [],
+    };
+
+    /// <summary>
+    /// A constructor's symbol is named <c>.ctor</c>, which is not what a caller wants to read; the
+    /// other tools render one as its type name, so this does too.
+    /// </summary>
+    private static string MemberName(MemberDeclarationSyntax member, ISymbol? symbol) => member switch
+    {
+        ConstructorDeclarationSyntax ctor => ctor.Identifier.Text,
+        DestructorDeclarationSyntax dtor => $"~{dtor.Identifier.Text}",
+        _ => symbol?.Name ?? (member as MethodDeclarationSyntax)?.Identifier.Text ?? "Unknown",
+    };
 }

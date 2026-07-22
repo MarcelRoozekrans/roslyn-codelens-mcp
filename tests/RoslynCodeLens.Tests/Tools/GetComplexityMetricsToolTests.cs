@@ -40,13 +40,38 @@ public class GetComplexityMetricsToolTests
     }
 
     [Fact]
+    public void Execute_ReportsConstructorsAndProperties()
+    {
+        // Only MethodDeclarationSyntax was visited, so a complex constructor or property
+        // was invisible however bad it was.
+        var results = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 0);
+
+        // A constructor is named after its type, matching how the other tools render one.
+        Assert.Contains(results, r => r.MethodName == "OrderService" && r.TypeName == "OrderService");
+        Assert.Contains(results, r => r.MethodName == "FormalNameLength");
+    }
+
+    [Fact]
+    public void Execute_ReportsCognitiveAndMaxNestingAlongsideCyclomatic()
+    {
+        var results = GetComplexityMetricsLogic.Execute(_loaded, _resolver, null, 0);
+
+        var classify = results.Single(r => r.MethodName == "ClassifyName");
+        // Four flat guard clauses: cyclomatic 1 + 4, cognitive 0 + 4, deepest nesting 1.
+        // The three numbers disagree, so this cannot pass with the fields cross-wired.
+        Assert.Equal(5, classify.Complexity);
+        Assert.Equal(4, classify.Cognitive);
+        Assert.Equal(1, classify.MaxNesting);
+    }
+
+    [Fact]
     public void Sort_OrdersByComplexityDesc()
     {
         var input = new List<ComplexityMetric>
         {
-            new("low",  "T", 3,  "a.cs", 1, "P"),
-            new("high", "T", 20, "b.cs", 1, "P"),
-            new("mid",  "T", 10, "c.cs", 1, "P"),
+            new("low",  "T", 3,  2, 1, "a.cs", 1, "P"),
+            new("high", "T", 20, 19, 4, "b.cs", 1, "P"),
+            new("mid",  "T", 10, 9, 2, "c.cs", 1, "P"),
         };
 
         var sorted = GetComplexityMetricsTool.Sort(input);
@@ -62,9 +87,9 @@ public class GetComplexityMetricsToolTests
     {
         var input = new List<ComplexityMetric>
         {
-            new("a", "T", 5,  "a.cs", 1, "P"),
-            new("b", "T", 15, "a.cs", 2, "P"),
-            new("c", "T", 25, "a.cs", 3, "P"),
+            new("a", "T", 5,  4, 1, "a.cs", 1, "P"),
+            new("b", "T", 15, 14, 3, "a.cs", 2, "P"),
+            new("c", "T", 25, 24, 5, "a.cs", 3, "P"),
         };
 
         var summary = GetComplexityMetricsTool.BuildSummary(input, threshold: 10);
