@@ -16,6 +16,12 @@
       "groupName": "Roslyn packages",
       "matchPackagePatterns": ["^Microsoft\\.CodeAnalysis"],
       "groupSlug": "roslyn"
+    },
+    {
+      "description": "brace-expansion must stay on 1.x. It is an OVERRIDE, so its version is forced on every consumer regardless of what they declare — and its only consumer, minimatch@3 (via serve-handler), declares ^1.1.7 and calls the module as a function. v2+ export { EXPANSION_MAX, expand } instead of a callable, so brace patterns throw 'expand is not a function' at runtime. 1.1.16 already carries the DoS fix, so there is nothing to gain from a major here.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["brace-expansion"],
+      "allowedVersions": "<2.0.0"
     }
   ]
 }
