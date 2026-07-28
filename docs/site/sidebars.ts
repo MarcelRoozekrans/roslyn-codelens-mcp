@@ -11,6 +11,7 @@ const sidebars: SidebarsConfig = {
         'getting-started/marketplace',
         'getting-started/configuration',
         'getting-started/first-use',
+        'getting-started/docker',
       ],
     },
     {

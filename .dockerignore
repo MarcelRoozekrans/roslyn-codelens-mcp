@@ -1,0 +1,25 @@
+# Everything the image does not need. Keeping bin/ and obj/ out matters most:
+# host build output leaking into the build context breaks the container restore.
+**/bin/
+**/obj/
+.git/
+.github/
+.worktrees/
+.vs/
+.vscode/
+.config/
+BenchmarkDotNet.Artifacts/
+TestResults/
+artifacts/
+
+benchmarks/
+tests/
+tools/
+docs/
+plugins/
+npm/
+scripts/
+samples/
+
+*.md
+!README.md
