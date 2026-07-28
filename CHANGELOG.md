@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.16.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.15.0...v2.16.0) (2026-07-28)
+
+
+### Features
+
+* Docker support and glama.json for Glama indexing ([#348](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/348)) ([ece420e](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/ece420e2f8e430724389808e1a37a44275977c3f))
+
+
+### Bug Fixes
+
+* **docs:** document the solution arguments the server actually accepts ([#350](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/350)) ([dd695d8](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/dd695d8db7f274d8fddef1467a0e1c62cf4dd04c))
+
 ## [2.15.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.14.0...v2.15.0) (2026-07-28)
 
 
