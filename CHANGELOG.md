@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.16.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.0...v2.16.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* **ci:** re-authenticate on every MCP Registry publish attempt ([#352](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/352)) ([831db6e](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/831db6e6c19dbe81fcbed45274475d9f11b707ad))
+
 ## [2.16.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.15.0...v2.16.0) (2026-07-28)
 
 
