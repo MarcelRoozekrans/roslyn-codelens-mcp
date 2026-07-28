@@ -8,6 +8,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      # Required for npm publish --provenance
+      id-token: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -18,6 +23,13 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          # npm >= 11.5.1 is required for trusted publishing (OIDC); Node 24 ships it.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
 
       - name: Restore tools
         run: dotnet tool restore
@@ -48,3 +60,13 @@ jobs:
 
       - name: Push to NuGet
         run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+
+      # The npm package is a launcher that installs the NuGet tool at a matching
+      # version, so it must be published after the NuGet push, never before.
+      - name: Publish to npm
+        # Trusted publishing (OIDC) — no NODE_AUTH_TOKEN, same as LongtermMemory-MCP.
+        # Requires the job-level `id-token: write` permission above.
+        working-directory: npm
+        run: |
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+          npm publish --provenance --access public

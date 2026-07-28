@@ -17,6 +17,16 @@
         },
         {
           "type": "json",
+          "path": "server.json",
+          "jsonpath": "$.packages[1].version"
+        },
+        {
+          "type": "json",
+          "path": "npm/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
           "path": ".claude-plugin/marketplace.json",
           "jsonpath": "$.version"
         },

@@ -28,6 +28,13 @@ BenchmarkDotNet.Artifacts/
 # Git worktrees
 .worktrees/
 
+# npm launcher package. The `bin/` rule above is meant for .NET build output; npm/bin
+# holds the launcher script and must be tracked. Git cannot re-include a file whose
+# parent directory is excluded, so the directory itself has to be negated first.
+!npm/bin/
+npm/node_modules/
+npm/*.tgz
+
 # Docusaurus
 docs/site/node_modules/
 docs/site/build/
