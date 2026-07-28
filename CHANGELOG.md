@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.14.0...v2.15.0) (2026-07-28)
+
+
+### Features
+
+* publish an npm launcher package for npx installs ([#345](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/345)) ([57d1012](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/57d10124475190009cc8dd8ab35bff17582f7d09))
+
 ## [2.14.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.13.0...v2.14.0) (2026-07-22)
 
 

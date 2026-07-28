@@ -1,6 +1,6 @@
 {
   "name": "roslyn-codelens-mcp",
-  "version": "2.14.0",
+  "version": "2.15.0",
   "description": "Roslyn-based MCP server that gives AI agents deep semantic understanding of .NET codebases — navigation, call graphs, diagnostics, refactoring, code-quality auditing, test intelligence, and IL inspection.",
   "bin": {
     "roslyn-codelens-mcp": "./bin/roslyn-codelens-mcp.js"
