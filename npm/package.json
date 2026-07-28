@@ -1,0 +1,38 @@
+{
+  "name": "roslyn-codelens-mcp",
+  "version": "2.14.0",
+  "description": "Roslyn-based MCP server that gives AI agents deep semantic understanding of .NET codebases — navigation, call graphs, diagnostics, refactoring, code-quality auditing, test intelligence, and IL inspection.",
+  "bin": {
+    "roslyn-codelens-mcp": "./bin/roslyn-codelens-mcp.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "modelcontextprotocol",
+    "roslyn",
+    "csharp",
+    "dotnet",
+    "code-analysis",
+    "code-intelligence",
+    "static-analysis",
+    "refactoring"
+  ],
+  "license": "MIT",
+  "author": "Marcel Roozekrans",
+  "homepage": "https://marcelroozekrans.github.io/roslyn-codelens-mcp/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarcelRoozekrans/roslyn-codelens-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues"
+  },
+  "mcpName": "io.github.MarcelRoozekrans/roslyn-codelens",
+  "engines": {
+    "node": ">=18"
+  }
+}

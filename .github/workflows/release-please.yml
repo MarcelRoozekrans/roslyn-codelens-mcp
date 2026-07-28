@@ -34,6 +34,12 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - uses: actions/setup-node@v7
+        with:
+          # npm >= 11.5.1 is required for trusted publishing (OIDC); Node 24 ships it.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
       - name: Build
         run: dotnet build -c Release -p:Version=${{ needs.release-please.outputs.version }}
 
@@ -51,6 +57,14 @@ jobs:
         # No --skip-duplicate: if the release version already exists on NuGet, fail loudly
         # rather than silently masking a version collision (see #225).
         run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+
+      # The npm package is a launcher that installs the NuGet tool at a matching
+      # version, so it must be published after the NuGet push, never before.
+      # Trusted publishing (OIDC) — no NODE_AUTH_TOKEN; uses the workflow-level
+      # `id-token: write` permission.
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --provenance --access public
 
       - name: Upload to GitHub Release
         run: gh release upload ${{ needs.release-please.outputs.tag_name }} ./nupkg/*.nupkg

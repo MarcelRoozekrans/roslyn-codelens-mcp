@@ -2,6 +2,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/RoslynCodeLens.Mcp?style=flat-square&logo=nuget&color=blue)](https://www.nuget.org/packages/RoslynCodeLens.Mcp)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/RoslynCodeLens.Mcp?style=flat-square&color=green)](https://www.nuget.org/packages/RoslynCodeLens.Mcp)
+[![npm](https://img.shields.io/npm/v/roslyn-codelens-mcp?style=flat-square&logo=npm&color=cb3837)](https://www.npmjs.com/package/roslyn-codelens-mcp)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/MarcelRoozekrans/roslyn-codelens-mcp/ci.yml?branch=main&style=flat-square&logo=github)](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/actions)
 [![License](https://img.shields.io/github/license/MarcelRoozekrans/roslyn-codelens-mcp?style=flat-square)](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue?style=flat-square)](https://marcelroozekrans.github.io/roslyn-codelens-mcp/)
@@ -170,6 +171,24 @@ Use the `list_trusted_paths` and `revoke_trust` tools to inspect and manage trus
 See [SECURITY.md](SECURITY.md) for the full threat model.
 
 ## Quick Start
+
+### npx (any MCP client)
+
+```json
+{
+  "mcpServers": {
+    "roslyn-codelens": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "roslyn-codelens-mcp"]
+    }
+  }
+}
+```
+
+The npm package ships no server code — it is a launcher that installs the `RoslynCodeLens.Mcp`
+.NET global tool at a matching version and execs it, so the **.NET 10 SDK must be on `PATH`**.
+Subsequent starts skip the install entirely and work offline.
 
 ### VS Code / Visual Studio (via dnx)
 
