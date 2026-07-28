@@ -9,26 +9,30 @@ sidebar_position: 3
 
 The server needs to know which `.sln` or `.slnx` file to load.
 
-**Option 1: CLI argument**
+**Option 1: arguments** — solution paths are passed bare, not behind a flag.
 ```json
-"args": ["--solution", "/path/to/Solution.sln"]
+"args": ["/path/to/Solution.sln"]
 ```
 
-**Option 2: Environment variable**
-```json
-"env": {"ROSLYN_CODELENS_SOLUTION": "/path/to/Solution.sln"}
-```
+**Option 2: automatic discovery** — pass no arguments and the server searches its
+working directory for a `.sln`/`.slnx`.
 
-**Option 3: At runtime** — call `set_active_solution` after the server starts. Useful for multi-solution workflows.
+**Option 3: at runtime** — call `load_solution` after the server starts.
 
 ## Multiple solutions
 
-`roslyn-codelens-mcp` has a built-in solution manager. Load and switch between solutions at runtime:
+`roslyn-codelens-mcp` has a built-in solution manager. Pass several paths at
+startup, or load more at runtime:
 
 ```
+Use load_solution with path /path/to/OtherSolution.sln
 Use list_solutions to see what's loaded
-Use set_active_solution with path /path/to/OtherSolution.sln
+Use set_active_solution with name OtherSolution
 ```
+
+The two tools are not interchangeable: `load_solution` takes a **path** and opens
+a solution the server has not seen; `set_active_solution` takes a partial,
+case-insensitive **name** and only switches between solutions already loaded.
 
 Only one solution is "active" at a time. All tool calls operate on the active solution.
 
