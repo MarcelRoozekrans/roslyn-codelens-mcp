@@ -21,18 +21,22 @@ jobs:
           tar xzf mcp-publisher.tar.gz
           chmod +x mcp-publisher
 
-      - name: Authenticate via OIDC
-        run: ./mcp-publisher login github-oidc
-
       - name: Publish to MCP Registry
         # Retry with backoff in case NuGet is still indexing the version the registry
         # validates against (~25 min window). Safe to run any time: succeeds on the
         # first attempt once the version is indexed.
+        #
+        # Authentication happens INSIDE the loop because the registry JWT expires a few
+        # minutes after it is minted, well inside this window. A token taken once up
+        # front made every later attempt a guaranteed 401 that the loop then blamed on
+        # NuGet indexing lag.
         run: |
           max_attempts=15
           delay=30
           for attempt in $(seq 1 "$max_attempts"); do
-            if ./mcp-publisher publish; then
+            if ! ./mcp-publisher login github-oidc; then
+              echo "::warning::OIDC login failed on attempt $attempt/$max_attempts."
+            elif ./mcp-publisher publish; then
               echo "Published to MCP Registry on attempt $attempt."
               exit 0
             fi
