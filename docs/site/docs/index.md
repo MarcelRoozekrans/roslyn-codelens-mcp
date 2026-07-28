@@ -33,7 +33,7 @@ Then add to your `.mcp.json`:
   "mcpServers": {
     "roslyn-codelens": {
       "command": "roslyn-codelens-mcp",
-      "args": ["--solution", "/path/to/your/Solution.sln"]
+      "args": ["/path/to/your/Solution.sln"]
     }
   }
 }

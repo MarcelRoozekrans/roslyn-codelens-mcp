@@ -17,8 +17,13 @@ The plugin configures the server command and loads the `SKILL.md` that teaches C
 
 ## After install
 
-Set your solution path. Either set `ROSLYN_CODELENS_SOLUTION` in your environment, or call `set_active_solution` once the server is running:
+Point the server at your solution. If the plugin starts it in your project
+directory it discovers the `.sln`/`.slnx` on its own; otherwise call
+`load_solution` once the server is running:
 
 ```
-Use set_active_solution with path /path/to/YourSolution.sln
+Use load_solution with path /path/to/YourSolution.sln
 ```
+
+Use `set_active_solution` only to switch between solutions that are already
+loaded — it matches on name, not path, and will not open a new one.

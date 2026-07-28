@@ -31,26 +31,32 @@ Add the server to your project's `.mcp.json` (or `~/.claude/.mcp.json` for globa
   "mcpServers": {
     "roslyn-codelens": {
       "command": "roslyn-codelens-mcp",
-      "args": ["--solution", "/absolute/path/to/YourSolution.sln"]
+      "args": ["/absolute/path/to/YourSolution.sln"]
     }
   }
 }
 ```
 
-The `--solution` argument is required on first start. Alternatively, use the `ROSLYN_CODELENS_SOLUTION` environment variable:
+Solution paths are passed as bare arguments — there is no `--solution` flag. Pass
+several to load them all at once and switch with `set_active_solution`:
 
 ```json
 {
   "mcpServers": {
     "roslyn-codelens": {
       "command": "roslyn-codelens-mcp",
-      "env": {
-        "ROSLYN_CODELENS_SOLUTION": "/absolute/path/to/YourSolution.sln"
-      }
+      "args": [
+        "/absolute/path/to/First.slnx",
+        "/absolute/path/to/Second.slnx"
+      ]
     }
   }
 }
 ```
+
+Arguments are optional. With none, the server searches the working directory for
+a `.sln`/`.slnx`; if it finds nothing it still starts, prints a notice to stderr,
+and tools return errors until you call `load_solution`.
 
 ## Verify the server starts
 
