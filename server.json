@@ -7,13 +7,13 @@
     "url": "https://github.com/MarcelRoozekrans/roslyn-codelens-mcp",
     "source": "github"
   },
-  "version": "2.15.0",
+  "version": "2.16.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "roslyn-codelens-mcp",
-      "version": "2.15.0",
+      "version": "2.16.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -25,7 +25,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "RoslynCodeLens.Mcp",
-      "version": "2.15.0",
+      "version": "2.16.0",
       "runtimeHint": "dnx",
       "transport": {
         "type": "stdio"
