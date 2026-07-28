@@ -232,6 +232,19 @@ Then add to your MCP client config:
 }
 ```
 
+### Docker
+
+Runs without a .NET SDK on the host; the solution is bind-mounted at `/workspace`.
+
+```bash
+docker build -t roslyn-codelens-mcp .
+docker run -i --rm -v "$PWD:/workspace" roslyn-codelens-mcp
+```
+
+The mounted solution must be restored for `MSBuildWorkspace` to resolve its
+references, and tool output reports container paths rather than host paths — see
+[docs/site/docs/getting-started/docker.md](docs/site/docs/getting-started/docker.md).
+
 ## Usage
 
 The server automatically discovers `.sln` files by walking up from the current directory. You can also pass one or more solution paths directly:
