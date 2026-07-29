@@ -1,5 +1,7 @@
 # Roslyn CodeLens MCP Server
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.MarcelRoozekrans%2Froslyn-codelens.svg)](https://mcptoplist.com/server/io.github.MarcelRoozekrans%2Froslyn-codelens)
+
 [![NuGet](https://img.shields.io/nuget/v/RoslynCodeLens.Mcp?style=flat-square&logo=nuget&color=blue)](https://www.nuget.org/packages/RoslynCodeLens.Mcp)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/RoslynCodeLens.Mcp?style=flat-square&color=green)](https://www.nuget.org/packages/RoslynCodeLens.Mcp)
 [![npm](https://img.shields.io/npm/v/roslyn-codelens-mcp?style=flat-square&logo=npm&color=cb3837)](https://www.npmjs.com/package/roslyn-codelens-mcp)
