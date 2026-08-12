@@ -58,6 +58,17 @@ dotnet test
 
 Tests use xUnit with `IAsyncLifetime` for solution loading. The test fixture at `tests/RoslynCodeLens.Tests/Fixtures/TestSolution/` provides a multi-project solution for integration tests.
 
+## Building on Windows 11 with Smart App Control
+
+[Smart App Control](https://support.microsoft.com/en-US/Windows/Security/Threat-Malware-Protection/smart-app-control-has-blocked-part-of-this-app) blocks binaries that are both unsigned and low-reputation. The `ZeroAlloc.Analyzers` package currently meets both criteria, so SAC may block it during a build. If you hit this, opt out of that analyzer:
+
+```bash
+dotnet build -p:EnableZeroAllocAnalyzers=false
+dotnet test -p:EnableZeroAllocAnalyzers=false
+```
+
+Only the analyzer is skipped; nothing else about the build changes. The single suppression that depends on its rules (`ZA0601` in `src/RoslynCodeLens/SolutionLoader.cs`) is inert without it.
+
 ## Releasing
 
 Releases are automatic on merge to `main`:
