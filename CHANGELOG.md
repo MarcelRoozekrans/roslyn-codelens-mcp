@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.16.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.1...v2.16.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **build:** let contributors opt out of ZeroAlloc.Analyzers ([#376](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/376)) ([77502c2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/77502c24ee014b74e933207ab2de3d334da6c80c)), closes [#369](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/369)
+
 ## [2.16.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.0...v2.16.1) (2026-07-28)
 
 
