@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="10.0.10" />
-    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.302" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.400" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>
