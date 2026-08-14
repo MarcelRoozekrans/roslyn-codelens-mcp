@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.2...v2.17.0) (2026-08-14)
+
+
+### Features
+
+* add streamable HTTP transport behind --http flag ([#381](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/381)) ([0e9fa50](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/0e9fa50de596b465b6695a1152a02269df72578f))
+
 ## [2.16.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.1...v2.16.2) (2026-08-12)
 
 
