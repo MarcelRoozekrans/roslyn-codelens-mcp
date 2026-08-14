@@ -261,6 +261,34 @@ roslyn-codelens-mcp /path/to/A.sln /path/to/B.sln
 
 When multiple solutions are loaded, use `list_solutions` to see what's available and `set_active_solution("B")` to switch context. The first path is active by default.
 
+### HTTP transport
+
+By default the server speaks stdio. Pass `--http` to expose the same tools over
+[streamable HTTP](https://modelcontextprotocol.io/docs/concepts/transports) instead — useful for
+one long-lived server (warm Roslyn workspace, no per-client startup cost) shared by several
+local MCP clients:
+
+```bash
+roslyn-codelens-mcp /path/to/MySolution.sln --http            # http://127.0.0.1:3001
+roslyn-codelens-mcp /path/to/MySolution.sln --http --port 8080
+```
+
+```json
+{
+  "mcpServers": {
+    "roslyn-codelens": {
+      "type": "http",
+      "url": "http://127.0.0.1:3001"
+    }
+  }
+}
+```
+
+The HTTP endpoint binds to `127.0.0.1` only and is intended for **single-user, local use**: all
+connected clients share the same solution state (`set_active_solution` affects everyone), and
+there is no authentication. `--host` can widen the binding, but the server will warn — its tools
+can read and modify source files, so only do this on networks you fully trust.
+
 ## Performance
 
 All type lookups use pre-built reverse inheritance maps, member indexes, and attribute indexes for O(1) access. Benchmarked on an i9-12900HK with .NET 10.0.7:
