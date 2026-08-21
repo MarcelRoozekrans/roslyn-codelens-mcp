@@ -1,0 +1,11 @@
+@* NavMenu is referenced ONLY from markup here. Before the #399 fix, find_references on
+   NavMenu returned zero hits because the Razor generator never ran. *@
+<div class="page">
+    <NavMenu />
+    <main>@ChildContent</main>
+</div>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}
