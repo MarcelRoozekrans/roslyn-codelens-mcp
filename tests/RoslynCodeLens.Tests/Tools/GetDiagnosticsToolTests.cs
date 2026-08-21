@@ -246,6 +246,31 @@ public class GetDiagnosticsToolTests
         Assert.Contains("\"hidden\":0", json, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BuildSummary_OmitsUnreliableBlock_WhenLoadIsHealthy()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            GetDiagnosticsTool.BuildSummary(Array.Empty<DiagnosticInfo>(), Array.Empty<string>()));
+
+        Assert.DoesNotContain("unreliable", json, StringComparison.Ordinal);
+    }
+
+    // Issue #399: a degraded load (e.g. the SDK's Razor generator skipped because it targets a
+    // newer Roslyn) makes get_diagnostics report errors that do not exist in a real build. The
+    // response must say so — silently confident output is what makes an agent "fix" working code.
+    [Fact]
+    public void BuildSummary_FlagsDiagnosticsAsUnreliable_WhenLoadIsDegraded()
+    {
+        var loadDiagnostics = new[] { "Microsoft.CodeAnalysis.Razor.Compiler: built against Roslyn 5.9.0.0" };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            GetDiagnosticsTool.BuildSummary(Array.Empty<DiagnosticInfo>(), loadDiagnostics));
+
+        Assert.Contains("unreliable", json, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.CodeAnalysis.Razor.Compiler", json, StringComparison.Ordinal);
+        Assert.Contains("dotnet build", json, StringComparison.Ordinal);
+    }
+
     private sealed class TempTrustFile : IDisposable
     {
         public string Path { get; }
