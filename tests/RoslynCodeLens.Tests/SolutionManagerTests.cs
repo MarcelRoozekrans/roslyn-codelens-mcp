@@ -45,6 +45,58 @@ public class SolutionManagerTests : IAsyncLifetime
         manager.Dispose();
     }
 
+    // Issue #399: an empty workspace has two causes that need different messages. Reporting
+    // "No .sln file found" for a solution that WAS found but whose projects all failed to open
+    // sends the reader hunting for a missing file instead of at the actual load failure.
+    [Fact]
+    public void DescribeEmptyWorkspace_SaysNoSolution_WhenNonePassedOrDiscovered()
+    {
+        var message = SolutionManager.DescribeEmptyWorkspace(null, Array.Empty<SkippedProject>());
+
+        Assert.Contains("No solution found", message, StringComparison.Ordinal);
+        Assert.Contains(".slnx", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeEmptyWorkspace_NamesTheSolution_WhenItLoadedWithNoProjects()
+    {
+        var message = SolutionManager.DescribeEmptyWorkspace(
+            @"C:/code/MyApp.slnx", Array.Empty<SkippedProject>());
+
+        Assert.Contains("MyApp.slnx", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("No solution found", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeEmptyWorkspace_ReportsSkipReasons_WhenEveryProjectWasSkipped()
+    {
+        var skipped = new[]
+        {
+            new SkippedProject(@"C:/code/A.csproj", "A", "Legacy", "non-SDK project"),
+            new SkippedProject(@"C:/code/B.csproj", "B", "Failed", "design-time build failed"),
+        };
+
+        var message = SolutionManager.DescribeEmptyWorkspace(@"C:/code/MyApp.slnx", skipped);
+
+        Assert.Contains("MyApp.slnx", message, StringComparison.Ordinal);
+        Assert.Contains("all 2 project(s) were skipped", message, StringComparison.Ordinal);
+        Assert.Contains("A: non-SDK project", message, StringComparison.Ordinal);
+        Assert.Contains("B: design-time build failed", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DescribeEmptyWorkspace_TruncatesLongSkipLists()
+    {
+        var skipped = Enumerable.Range(0, 8)
+            .Select(i => new SkippedProject($"C:/code/P{i}.csproj", $"P{i}", "Failed", "boom"))
+            .ToArray();
+
+        var message = SolutionManager.DescribeEmptyWorkspace(@"C:/code/MyApp.slnx", skipped);
+
+        Assert.Contains("all 8 project(s) were skipped", message, StringComparison.Ordinal);
+        Assert.Contains("(and 3 more)", message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task CreateAsync_ReturnsBeforeCompilationCompletes()
     {

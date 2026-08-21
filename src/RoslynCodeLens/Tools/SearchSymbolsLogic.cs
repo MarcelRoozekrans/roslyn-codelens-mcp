@@ -50,7 +50,7 @@ public static class SearchSymbolsLogic
                 var project = resolver.GetProjectName(type);
                 results.Add(new SymbolLocation(
                     kind, type.ToDisplayString(), file, line, project,
-                    IsGenerated: false,
+                    IsGenerated: resolver.IsGenerated(file),
                     Origin: MetadataSymbolResolver.SourceOrigin));
 
                 if (results.Count >= MaxResults)
@@ -89,7 +89,7 @@ public static class SearchSymbolsLogic
                 results.Add(new SymbolLocation(
                     kind, member.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                     file, line, project,
-                    IsGenerated: false,
+                    IsGenerated: resolver.IsGenerated(file),
                     Origin: MetadataSymbolResolver.SourceOrigin));
 
                 if (results.Count >= MaxResults)

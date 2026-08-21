@@ -111,6 +111,20 @@ public class SymbolResolver
                 if (doc.FilePath != null)
                     fileToProject[doc.FilePath] = project.Name;
             }
+
+            // Source-generated documents are not in project.Documents, but their symbols are
+            // real and get returned by search_symbols/find_references. Indexing only the
+            // on-disk documents left every generated symbol reporting an empty project name
+            // — which is most symbols in a Blazor project, where components live in
+            // generator output. The compilation is the only place both kinds appear together.
+            if (loaded.Compilations.TryGetValue(project.Id, out var compilation))
+            {
+                foreach (var tree in compilation.SyntaxTrees)
+                {
+                    if (!string.IsNullOrEmpty(tree.FilePath))
+                        fileToProject[tree.FilePath] = project.Name;
+                }
+            }
         }
 
         return (fileToProject, idToName);

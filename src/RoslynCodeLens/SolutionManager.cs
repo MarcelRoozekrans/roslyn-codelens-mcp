@@ -182,8 +182,31 @@ public sealed class SolutionManager : IDisposable
             throw new InvalidOperationException("Solution warmup failed.", _warmupException);
         if (_loaded.IsEmpty)
             throw new InvalidOperationException(
-                "No .sln file found. Either run from a directory containing a .sln/.slnx file, " +
-                "or pass the solution path as argument: roslyn-codelens-mcp /path/to/Solution.sln");
+                DescribeEmptyWorkspace(_solutionPath, _loaded.SkippedProjects));
+    }
+
+    /// <summary>
+    /// An empty workspace has two very different causes and they need different messages. Saying
+    /// "No .sln file found" when a solution WAS found but every project failed to open sends the
+    /// reader off hunting for a missing file instead of at the load failure that actually happened
+    /// (issue #399 was reported partly on the strength of this message).
+    /// </summary>
+    internal static string DescribeEmptyWorkspace(string? solutionPath, IReadOnlyList<SkippedProject> skipped)
+    {
+        if (solutionPath is null)
+        {
+            return "No solution found. Either run from a directory containing a .sln/.slnx file, " +
+                   "or pass the solution path as argument: roslyn-codelens-mcp /path/to/Solution.sln";
+        }
+
+        var name = Path.GetFileName(solutionPath);
+        if (skipped.Count == 0)
+            return $"Solution '{name}' loaded but contains no projects that could be compiled.";
+
+        var reasons = string.Join("; ", skipped.Take(5).Select(p => $"{p.Name}: {p.Reason}"));
+        var more = skipped.Count > 5 ? $" (and {skipped.Count - 5} more)" : "";
+        return $"Solution '{name}' loaded but all {skipped.Count} project(s) were skipped, so there is " +
+               $"nothing to query. Reasons: {reasons}{more}";
     }
 
     private void ThrowIfLoadFailed()
