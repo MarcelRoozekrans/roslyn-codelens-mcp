@@ -301,9 +301,9 @@ public class CodeGraphBenchmarks
     }
 
     [Benchmark(Description = "get_source_generators: all")]
-    public object GetSourceGenerators()
+    public async Task<object> GetSourceGenerators()
     {
-        return GetSourceGeneratorsLogic.Execute(_loaded, _resolver, null);
+        return await GetSourceGeneratorsLogic.ExecuteAsync(_loaded, null).ConfigureAwait(false);
     }
 
     [Benchmark(Description = "get_generated_code: all")]
