@@ -189,7 +189,7 @@ public class SolutionLoader
                 bestWorkspace?.Dispose();
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
-                return new SolutionOpen(solution, workspace, [], []);
+                return await WithAnalyzerSkewAsync(new SolutionOpen(solution, workspace, [], [])).ConfigureAwait(false);
             }
 
             // Degraded: retain the attempt with the fewest dropped projects.
@@ -218,7 +218,8 @@ public class SolutionLoader
         var finalSolution = analyzerLoader is not null
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
-        return new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped);
+        return await WithAnalyzerSkewAsync(
+            new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -238,6 +239,27 @@ public class SolutionLoader
                     $"{project.Name}: no metadata references resolved (design-time build dropped references)");
         }
         return (IReadOnlyList<string>?)dropped ?? Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Appends analyzer/generator compiler-version skew to a load's diagnostics (issue #399).
+    /// Kept out of <see cref="FindProjectsWithDroppedReferences"/> on purpose: dropped references
+    /// are a contention artefact a retry can clear, whereas skew is deterministic — folding it
+    /// into the retry predicate would buy nothing and cost two extra full solution loads.
+    /// </summary>
+    private static async Task<SolutionOpen> WithAnalyzerSkewAsync(SolutionOpen open)
+    {
+        var skew = AnalyzerCompilerVersionCheck.FindSkewedAnalyzers(open.Solution);
+        if (skew.Count == 0)
+            return open;
+
+        foreach (var message in skew)
+            await Console.Error.WriteLineAsync($"[roslyn-codelens] {message}").ConfigureAwait(false);
+
+        var combined = new List<string>(open.LoadDiagnostics.Count + skew.Count);
+        combined.AddRange(open.LoadDiagnostics);
+        combined.AddRange(skew);
+        return open with { LoadDiagnostics = combined };
     }
 
     private static Solution RemapSolutionAnalyzers(Solution solution, ShadowCopyAnalyzerAssemblyLoader loader)
@@ -436,7 +458,8 @@ public class SolutionLoader
         workspace.AddSolution(solutionInfo);
 
         var dropped = FindProjectsWithDroppedReferences(workspace.CurrentSolution);
-        return new SolutionOpen(workspace.CurrentSolution, workspace, skipped, dropped);
+        return await WithAnalyzerSkewAsync(
+            new SolutionOpen(workspace.CurrentSolution, workspace, skipped, dropped)).ConfigureAwait(false);
     }
 
     /// <summary>

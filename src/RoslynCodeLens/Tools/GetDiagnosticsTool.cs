@@ -33,7 +33,7 @@ public static class GetDiagnosticsTool
 
         // Sort severity-first so truncated top-N keeps the most important diagnostics.
         var sorted = SortBySeverityFileLine(raw);
-        var summary = BuildSummary(raw);
+        var summary = BuildSummary(raw, context.Loaded.LoadDiagnostics);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit, summary);
     }
 
@@ -55,7 +55,16 @@ public static class GetDiagnosticsTool
         _ => 4,
     };
 
-    internal static object BuildSummary(IReadOnlyList<DiagnosticInfo> items)
+    /// <summary>
+    /// Severity tallies, plus an explicit <c>unreliable</c> block when the solution loaded
+    /// degraded. get_diagnostics is the tool where a degraded load does the most damage: it
+    /// reports phantom errors with the same confidence as real ones, and an agent acting on that
+    /// output "fixes" code that was never broken (issue #399). Callers must be able to see that
+    /// from the response itself rather than having to call load_solution separately.
+    /// </summary>
+    internal static object BuildSummary(
+        IReadOnlyList<DiagnosticInfo> items,
+        IReadOnlyList<string>? loadDiagnostics = null)
     {
         var error = 0;
         var warning = 0;
@@ -71,6 +80,21 @@ public static class GetDiagnosticsTool
                 case "Hidden": hidden++; break;
             }
         }
-        return new { error, warning, info, hidden };
+        if (loadDiagnostics is null || loadDiagnostics.Count == 0)
+            return new { error, warning, info, hidden };
+
+        return new
+        {
+            error,
+            warning,
+            info,
+            hidden,
+            unreliable = new
+            {
+                reason = "The solution loaded degraded, so these diagnostics may include errors that "
+                       + "do not exist in a real build. Verify against 'dotnet build' before acting on them.",
+                loadDiagnostics,
+            },
+        };
     }
 }
