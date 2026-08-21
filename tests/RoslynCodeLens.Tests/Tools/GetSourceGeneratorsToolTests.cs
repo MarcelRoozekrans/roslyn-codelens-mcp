@@ -17,19 +17,47 @@ public class GetSourceGeneratorsToolTests
     }
 
     [Fact]
-    public void Execute_ReturnsEmptyList_WhenNoGenerators()
+    public async Task Execute_ReturnsEmptyList_WhenNoGenerators()
     {
-        var results = GetSourceGeneratorsLogic.Execute(_loaded, _resolver, null);
+        var results = await GetSourceGeneratorsLogic.ExecuteAsync(_loaded, null);
         Assert.NotNull(results);
     }
 
     [Fact]
-    public void Execute_FiltersByProject_WhenProjectSpecified()
+    public async Task Execute_FiltersByProject_WhenProjectSpecified()
     {
         var projectName = _loaded.Solution.Projects.First().Name;
-        var results = GetSourceGeneratorsLogic.Execute(_loaded, _resolver, projectName);
+        var results = await GetSourceGeneratorsLogic.ExecuteAsync(_loaded, projectName);
         Assert.NotNull(results);
         Assert.All(results, r => Assert.Equal(projectName, r.Project));
+    }
+
+    // Issue #399: the old implementation sniffed syntax-tree paths for an obj/ segment and named
+    // the generator after the first dot-free path segment. For the Razor generator that produced
+    // "Components" — a directory inside the hint name, not a generator.
+    [Theory]
+    [InlineData(
+        @"C:/proj/obj/Debug/net10.0/Microsoft.CodeAnalysis.Razor.Compiler/Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator/Components/Pages/Counter_razor.g.cs",
+        "Components/Pages/Counter_razor.g.cs",
+        "Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator")]
+    [InlineData(
+        @"C:/proj/obj/Debug/net10.0/Microsoft.AspNetCore.App.SourceGenerators/Microsoft.AspNetCore.SourceGenerators.PublicProgramSourceGenerator/PublicTopLevelProgram.Generated.g.cs",
+        "PublicTopLevelProgram.Generated.g.cs",
+        "Microsoft.AspNetCore.SourceGenerators.PublicProgramSourceGenerator")]
+    public void InferGeneratorName_RecoversGeneratorTypeName(string filePath, string hintName, string expected)
+    {
+        Assert.Equal(expected, GetSourceGeneratorsLogic.InferGeneratorName(filePath, hintName));
+    }
+
+    [Theory]
+    [InlineData(null, "Some.g.cs")]
+    [InlineData("C:/proj/Some.g.cs", "")]
+    [InlineData("C:/completely-unrelated.cs", "Some.g.cs")]
+    [InlineData("Some.g.cs", "Some.g.cs")]
+    public void InferGeneratorName_FallsBackToUnknown_WhenPathShapeIsUnexpected(string? filePath, string hintName)
+    {
+        Assert.Equal(GetSourceGeneratorsLogic.UnknownGenerator,
+            GetSourceGeneratorsLogic.InferGeneratorName(filePath, hintName));
     }
 
     [Fact]

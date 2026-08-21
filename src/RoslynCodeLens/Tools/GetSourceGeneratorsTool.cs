@@ -12,15 +12,16 @@ public static class GetSourceGeneratorsTool
     [McpServerTool(Name = "get_source_generators"),
      Description("List source generators and their output per project. " +
                  "Returns an envelope with items sorted by project then generator name, totalCount, truncated, and limit (default 100).")]
-    public static ToolListResult<SourceGeneratorInfo> Execute(
+    public static async Task<ToolListResult<SourceGeneratorInfo>> Execute(
         MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null,
         [Description("Maximum number of items to return (default: 100). Items are sorted by project, then generator name.")]
-            int? limit = null)
+            int? limit = null,
+        CancellationToken ct = default)
     {
         manager.EnsureLoaded();
         var context = manager.GetAnalysisContext();
-        var raw = GetSourceGeneratorsLogic.Execute(context.Loaded, context.Resolver, project);
+        var raw = await GetSourceGeneratorsLogic.ExecuteAsync(context.Loaded, project, ct).ConfigureAwait(false);
 
         var sorted = Sort(raw);
         return ToolListResult.Create(sorted, limit ?? DefaultLimit);
