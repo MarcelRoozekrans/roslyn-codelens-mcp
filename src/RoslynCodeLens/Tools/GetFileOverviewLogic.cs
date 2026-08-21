@@ -89,10 +89,10 @@ public static class GetFileOverviewLogic
 
             var generated = (await project.GetSourceGeneratedDocumentsAsync(ct).ConfigureAwait(false)).ToList();
 
-            var expectedHint = ExpectedHintName(additional);
+            var expectedHint = Analysis.MarkupDocumentMap.ExpectedHintName(additional);
             foreach (var candidate in generated)
             {
-                if (NormalizeHint(candidate.HintName).Equals(expectedHint, StringComparison.OrdinalIgnoreCase))
+                if (NormalizeHint(candidate.HintName).Equals(NormalizeHint(expectedHint), StringComparison.OrdinalIgnoreCase))
                     return (project, candidate);
             }
 
@@ -110,14 +110,6 @@ public static class GetFileOverviewLogic
         }
 
         return (null, null);
-    }
-
-    internal static string ExpectedHintName(TextDocument additional)
-    {
-        var fileName = additional.Name.Replace('.', '_') + ".g.cs";
-        return additional.Folders.Count == 0
-            ? fileName
-            : string.Join('/', additional.Folders) + "/" + fileName;
     }
 
     private static string NormalizeHint(string hintName) => hintName.Replace('\\', '/');

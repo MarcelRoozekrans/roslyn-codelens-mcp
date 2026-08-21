@@ -17,6 +17,7 @@ public class SymbolResolver
     private readonly Dictionary<string, List<ISymbol>> _membersBySimpleName;
     private readonly Dictionary<string, List<(ISymbol Symbol, AttributeData Attribute)>> _attributeIndex;
     private readonly HashSet<string> _generatedFilePaths;
+    private readonly Dictionary<string, string> _generatedToMarkup;
 
     public SymbolResolver(LoadedSolution loaded)
     {
@@ -30,6 +31,7 @@ public class SymbolResolver
         BuildMemberAndAttributeIndexes();
 
         _generatedFilePaths = BuildGeneratedFileIndex(loaded);
+        _generatedToMarkup = Analysis.MarkupDocumentMap.BuildGeneratedToMarkup(loaded);
     }
 
     private static List<INamedTypeSymbol> CollectAllTypes(LoadedSolution loaded)
@@ -390,6 +392,14 @@ public class SymbolResolver
     {
         return _derivedTypes.TryGetValue(baseType, out var list) ? list : [];
     }
+
+    /// <summary>
+    /// The markup file (.razor/.cshtml) a generated document was produced from, or null when the
+    /// file is not generator output from markup. Lets results that necessarily point into obj/
+    /// name the file the user can actually edit.
+    /// </summary>
+    public string? GetMarkupSource(string? filePath) =>
+        filePath is not null && _generatedToMarkup.TryGetValue(filePath, out var markup) ? markup : null;
 
     public bool IsGenerated(string? filePath)
     {

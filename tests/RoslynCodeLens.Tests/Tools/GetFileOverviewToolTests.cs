@@ -64,6 +64,6 @@ public class GetFileOverviewToolTests
 
         var additional = solution.GetAdditionalDocument(documentId)!;
 
-        Assert.Equal(expected, GetFileOverviewLogic.ExpectedHintName(additional));
+        Assert.Equal(expected, RoslynCodeLens.Analysis.MarkupDocumentMap.ExpectedHintName(additional));
     }
 }
