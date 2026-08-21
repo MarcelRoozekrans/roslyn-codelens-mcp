@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!--
+    Razor class library, not a web app: the Razor source generator is what these tests are
+    about, and a component library exercises it without an ASP.NET host. Microsoft.AspNetCore.App
+    comes in as a FrameworkReference (a targeting pack shipped with the SDK) rather than a
+    PackageReference, so the fixture needs no NuGet download and cannot flake on a restore.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AddRazorSupportForMvc>false</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>
