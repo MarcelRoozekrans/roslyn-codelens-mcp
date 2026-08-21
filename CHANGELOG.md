@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.18.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.17.0...v2.18.0) (2026-08-21)
+
+
+### Features
+
+* attribute generated-code results to their authored markup ([#404](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/404)) ([e4199f3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/e4199f3da830f2a6ee293044560ce87ca69499e0))
+
+
+### Bug Fixes
+
+* resolve generated-code blind spots surfaced by [#399](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/399) ([#402](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/402)) ([054fe93](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/054fe9377b7980eeec69399b5cfdb36c7c92619b))
+* run the SDK's source generators by matching its Roslyn version ([#399](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/399)) ([#400](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/400)) ([a0eaee9](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/a0eaee975ad249b9f6dea3a573ede92886a8817c))
+
 ## [2.17.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.16.2...v2.17.0) (2026-08-14)
 
 
