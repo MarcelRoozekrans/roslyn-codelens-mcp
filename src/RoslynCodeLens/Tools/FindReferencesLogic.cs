@@ -75,7 +75,8 @@ public static class FindReferencesLogic
                     var projectName = resolver.GetProjectName(location.Document.Project.Id);
 
                     results.Add(new SymbolReference(
-                        kind, file, line, column, snippet, projectName, resolver.IsGenerated(file)));
+                        kind, file, line, column, snippet, projectName, resolver.IsGenerated(file),
+                        resolver.GetMarkupSource(file)));
                 }
             }
         }

@@ -51,7 +51,8 @@ public static class SearchSymbolsLogic
                 results.Add(new SymbolLocation(
                     kind, type.ToDisplayString(), file, line, project,
                     IsGenerated: resolver.IsGenerated(file),
-                    Origin: MetadataSymbolResolver.SourceOrigin));
+                    Origin: MetadataSymbolResolver.SourceOrigin,
+                    GeneratedFrom: resolver.GetMarkupSource(file)));
 
                 if (results.Count >= MaxResults)
                     return;
@@ -90,7 +91,8 @@ public static class SearchSymbolsLogic
                     kind, member.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                     file, line, project,
                     IsGenerated: resolver.IsGenerated(file),
-                    Origin: MetadataSymbolResolver.SourceOrigin));
+                    Origin: MetadataSymbolResolver.SourceOrigin,
+                    GeneratedFrom: resolver.GetMarkupSource(file)));
 
                 if (results.Count >= MaxResults)
                     return;
