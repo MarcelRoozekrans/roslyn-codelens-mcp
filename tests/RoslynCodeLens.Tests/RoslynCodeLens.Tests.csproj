@@ -25,12 +25,14 @@
     <Compile Remove="Fixtures\GraphReader\**" />
     <Compile Remove="Fixtures\FilterableSolution\**" />
     <Compile Remove="Fixtures\RazorFixture\**" />
+    <Compile Remove="Fixtures\PropsFixture\**" />
     <None Include="Fixtures\TestSolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\TestSolutionAlt\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\LegacySolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\GraphReader\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures\FilterableSolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\RazorFixture\**" CopyToOutputDirectory="Never" />
+    <None Include="Fixtures\PropsFixture\**" CopyToOutputDirectory="Never" />
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
