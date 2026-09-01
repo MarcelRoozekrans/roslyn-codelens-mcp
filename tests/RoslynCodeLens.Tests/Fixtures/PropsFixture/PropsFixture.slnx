@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="PropsLib/PropsLib.csproj" />
+  <Project Path="tests/PropsDrivenTests/PropsDrivenTests.csproj" />
+</Solution>
