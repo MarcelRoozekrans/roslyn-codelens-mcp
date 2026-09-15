@@ -1,0 +1,10 @@
+<!--
+  The whole point of this fixture: the test-framework package is declared HERE, shared by
+  every project under tests/, and never appears as literal text in any csproj. Guards #406 —
+  detection must follow MSBuild evaluation, not csproj text.
+-->
+<Project>
+  <ItemGroup>
+    <PackageReference Include="xunit" Version="2.9.3" />
+  </ItemGroup>
+</Project>

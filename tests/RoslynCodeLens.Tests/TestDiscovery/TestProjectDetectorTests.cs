@@ -40,4 +40,25 @@ public class TestProjectDetectorTests
         Assert.DoesNotContain("TestLib", names);
         Assert.DoesNotContain("TestLib2", names);
     }
+
+    [Theory]
+    [InlineData("xunit.core")] // xUnit v2
+    [InlineData("xunit.assert")]
+    [InlineData("xunit.v3.core")] // xUnit v3
+    [InlineData("nunit.framework")]
+    [InlineData("Microsoft.VisualStudio.TestPlatform.TestFramework")] // MSTest
+    public void IsTestFrameworkAssembly_RecognizesFrameworkAssemblyNames(string assemblyName)
+    {
+        Assert.True(TestProjectDetector.IsTestFrameworkAssembly(assemblyName));
+    }
+
+    [Theory]
+    [InlineData("System.Runtime")]
+    [InlineData("Microsoft.Extensions.DependencyInjection")]
+    [InlineData("Microsoft.VisualStudio.Threading")]
+    [InlineData("FluentAssertions")]
+    public void IsTestFrameworkAssembly_IgnoresNonFrameworkAssemblyNames(string assemblyName)
+    {
+        Assert.False(TestProjectDetector.IsTestFrameworkAssembly(assemblyName));
+    }
 }
