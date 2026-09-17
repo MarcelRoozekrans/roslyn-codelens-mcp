@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.0...v2.18.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* detect test projects from MSBuild-evaluated metadata references ([#407](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/407)) ([091e63d](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/091e63de7375cf4d775a1d6145557678e86c3d0e))
+
 ## [2.18.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.17.0...v2.18.0) (2026-08-21)
 
 
