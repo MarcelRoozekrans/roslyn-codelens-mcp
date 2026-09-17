@@ -12,7 +12,7 @@
 # See docs/docker.md for MCP client configuration and the NuGet cache mount.
 
 # ---------------------------------------------------------------- build -------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 
 WORKDIR /src
 
@@ -32,7 +32,7 @@ RUN dotnet publish src/RoslynCodeLens/RoslynCodeLens.csproj \
 # Must be the SDK image, not dotnet/runtime: MSBuildLocator.RegisterDefaults()
 # resolves a real MSBuild installation at startup, and MSBuildWorkspace needs it
 # to evaluate the mounted solution's project files.
-FROM mcr.microsoft.com/dotnet/sdk:10.0
+FROM mcr.microsoft.com/dotnet/sdk:11.0
 
 # The SDK's first-run banner and telemetry notice write to stdout, which would
 # corrupt the MCP framing on the stdio transport.
