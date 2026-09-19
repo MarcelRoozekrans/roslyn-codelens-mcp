@@ -1,0 +1,131 @@
+name: Stalled PR Alert
+
+# Why this exists: a fork PR from a first-time contributor parks its workflows at
+# "action_required". An unrun check is invisible in a way a failing one is not — empty status
+# rollup, no red X, no notification — so the PR reads as idle rather than blocked. Issue #406
+# was reported and fixed within half an hour, then sat for three weeks because nobody could see
+# that PR #407 was waiting on approval. This job makes that state visible.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  issues: write
+
+jobs:
+  detect:
+    name: Detect PRs awaiting approval
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      ISSUE_TITLE: 'Pull requests are waiting on workflow approval'
+      # Grace period so a PR opened moments ago is not reported before its checks register.
+      MIN_AGE_MINUTES: '60'
+
+    steps:
+      - name: Find stalled pull requests
+        id: scan
+        run: |
+          set -euo pipefail
+
+          report=''
+          count=0
+          now=$(date -u +%s)
+
+          for pr in $(gh pr list --repo "$REPO" --state open --limit 100 --json number --jq '.[].number'); do
+            data=$(gh pr view "$pr" --repo "$REPO" \
+              --json number,title,headRefOid,createdAt,isCrossRepository,author,url)
+
+            created=$(printf '%s' "$data" | jq -r '.createdAt')
+            age=$(( (now - $(date -u -d "$created" +%s)) / 60 ))
+            if [ "$age" -lt "$MIN_AGE_MINUTES" ]; then
+              continue
+            fi
+
+            sha=$(printf '%s' "$data" | jq -r '.headRefOid')
+            runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --paginate \
+              --jq '[.check_runs[] | {name: .name, conclusion: .conclusion}]' || echo '[]')
+
+            gated=$(printf '%s' "$runs" | jq '[.[] | select(.conclusion == "action_required")] | length')
+            total=$(printf '%s' "$runs" | jq 'length')
+
+            reason=''
+            if [ "$gated" -gt 0 ]; then
+              names=$(printf '%s' "$runs" \
+                | jq -r '[.[] | select(.conclusion == "action_required") | .name] | join(", ")')
+              reason="**awaiting approval** — $gated check(s) gated: $names"
+            elif [ "$total" -eq 0 ]; then
+              reason='**no checks ran at all** — workflows never started'
+            fi
+
+            if [ -n "$reason" ]; then
+              title=$(printf '%s' "$data" | jq -r '.title')
+              url=$(printf '%s' "$data" | jq -r '.url')
+              author=$(printf '%s' "$data" | jq -r '.author.login')
+              fork=$(printf '%s' "$data" | jq -r 'if .isCrossRepository then " (fork)" else "" end')
+              days=$(( age / 1440 ))
+              report="${report}- [#${pr}](${url}) by @${author}${fork}, open ${days}d — ${reason}"$'\n'
+              report="${report}  - ${title}"$'\n'
+              count=$((count + 1))
+            fi
+          done
+
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          {
+            echo 'report<<REPORT_EOF'
+            printf '%s' "$report"
+            echo 'REPORT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Found $count stalled pull request(s)."
+
+      - name: Sync tracking issue
+        env:
+          COUNT: ${{ steps.scan.outputs.count }}
+          REPORT: ${{ steps.scan.outputs.report }}
+        run: |
+          set -euo pipefail
+
+          existing=$(gh issue list --repo "$REPO" --state open \
+            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')
+
+          if [ "$COUNT" -eq 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --repo "$REPO" \
+                --comment 'All pull requests now have checks running. Closing automatically.'
+              echo "Closed #$existing — nothing stalled."
+            else
+              echo 'Nothing stalled, no open tracking issue. Done.'
+            fi
+            exit 0
+          fi
+
+          body=$(cat <<BODY
+          $COUNT open pull request(s) have checks that never ran. Contributors cannot see or fix
+          this themselves — it needs a maintainer to approve the workflow runs.
+
+          $REPORT
+
+          Approve from the [Actions tab](https://github.com/$REPO/actions), or with:
+
+          \`\`\`
+          gh api -X POST repos/$REPO/actions/runs/<run-id>/approve
+          \`\`\`
+
+          This issue is maintained automatically and closes itself once every PR has checks
+          running. See the header comment in \`.github/workflows/stalled-pr-alert.yml\`.
+          BODY
+          )
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$REPO" --body "$body"
+            echo "Updated #$existing."
+          else
+            gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$body"
+          fi
