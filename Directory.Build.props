@@ -16,10 +16,6 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="NetFabric.Hyperlinq.Analyzer" Version="2.3.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-    </PackageReference>
     <!--
       Windows 11 Smart App Control blocks this analyzer: its assemblies are unsigned and the
       package has too few downloads to carry a reputation in Microsoft's Intelligent Security

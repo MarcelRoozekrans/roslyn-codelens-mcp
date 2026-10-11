@@ -1,8 +1,7 @@
 // EPC12: Reflection-based provider loading — intentionally catches all exceptions and reports ex.Message to stderr
 // EPS06: ImmutableArray.Where — acceptable allocation in non-hot-path diagnostic filtering
-// HLQ012: foreach on List<Assembly> — CollectionsMarshal.AsSpan not applicable (async context / conditional break)
 // MA0051: CollectRawActionsAsync and provider-loader methods naturally exceed 60 lines; splitting would obscure the algorithm
-#pragma warning disable EPC12, EPS06, HLQ012, MA0051
+#pragma warning disable EPC12, EPS06, MA0051
 using System.Collections.Immutable;
 using System.Reflection;
 using Microsoft.CodeAnalysis;

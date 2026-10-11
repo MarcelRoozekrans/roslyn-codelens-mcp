@@ -623,7 +623,7 @@ public class SolutionLoader
         var totalProjects = levels.Sum(l => l.Count);
         var compiled = 0;
 
-#pragma warning disable HLQ012, ZA0601 // async method — cannot use CollectionsMarshal.AsSpan across await; Select in loop is required for parallel task projection
+#pragma warning disable ZA0601 // async method; Select in loop is required for parallel task projection
         foreach (var level in levels)
         {
             var tasks = level.Select(async project =>
@@ -641,7 +641,7 @@ public class SolutionLoader
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
         }
-#pragma warning restore HLQ012, ZA0601
+#pragma warning restore ZA0601
 
         return compilations;
     }
