@@ -214,6 +214,9 @@ Add to your MCP settings (`.vscode/mcp.json` or VS settings):
 claude install gh:MarcelRoozekrans/roslyn-codelens-mcp
 ```
 
+The plugin needs only the .NET 10 SDK: it runs the server through `dnx`, pinned to the
+plugin's version, so there is no global tool to install or keep up to date.
+
 ### .NET Global Tool
 
 ```bash
