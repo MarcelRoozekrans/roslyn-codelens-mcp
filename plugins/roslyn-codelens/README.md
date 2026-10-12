@@ -4,12 +4,11 @@
 
 Before installing this plugin, ensure you have:
 
-1. **.NET 10 SDK** — [Download](https://dotnet.microsoft.com/download)
-2. **roslyn-codelens-mcp global tool** — Install with:
+- **.NET 10 SDK** on `PATH` — [Download](https://dotnet.microsoft.com/download)
 
-```bash
-dotnet tool install -g RoslynCodeLens.Mcp
-```
+No separate tool install is needed: the plugin starts the server with
+`dnx --yes --version <plugin version> RoslynCodeLens.Mcp`, which downloads the matching
+`RoslynCodeLens.Mcp` package on first use and runs it from the NuGet cache afterwards.
 
 ## Install
 

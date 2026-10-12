@@ -34,6 +34,11 @@
           "type": "json",
           "path": ".claude-plugin/marketplace.json",
           "jsonpath": "$.plugins[0].version"
+        },
+        {
+          "type": "json",
+          "path": "plugins/roslyn-codelens/.claude-plugin/plugin.json",
+          "jsonpath": "$.mcpServers['roslyn-codelens'].args[2]"
         }
       ]
     }
