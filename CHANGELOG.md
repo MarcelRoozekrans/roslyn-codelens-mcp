@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.1...v2.18.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **plugin:** launch the MCP server through dnx instead of a global tool ([#498](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/498)) ([9f75ce2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/9f75ce236cfb05be6cb63fcf0973cf7529154b9f))
+
 ## [2.18.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.0...v2.18.1) (2026-09-17)
 
 
