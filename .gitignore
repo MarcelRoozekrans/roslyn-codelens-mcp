@@ -40,3 +40,6 @@ docs/site/node_modules/
 docs/site/build/
 docs/site/.docusaurus/
 docs/site/docs/tools/
+
+# Screenshots and page snapshots the Playwright MCP server writes into the working directory.
+.playwright-mcp/
