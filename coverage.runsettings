@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Code coverage for CI: pass this file to dotnet test with the settings option. The Cobertura report goes to Codecov. -->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <!-- Generated and compiler-generated code says nothing about test quality. -->
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute,ObsoleteAttribute</ExcludeByAttribute>
+          <ExcludeByFile>**/obj/**/*.cs,**/*.g.cs</ExcludeByFile>
+          <Exclude>[*.Tests]*,[*.Benchmarks]*</Exclude>
+          <SkipAutoProps>true</SkipAutoProps>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>
