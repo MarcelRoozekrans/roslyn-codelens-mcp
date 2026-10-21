@@ -35,7 +35,7 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="2.3.0" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.9.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.9.0" />
