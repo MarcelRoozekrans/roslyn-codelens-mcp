@@ -21,7 +21,7 @@
       package has too few downloads to carry a reputation in Microsoft's Intelligent Security
       Graph. Build with -p:EnableZeroAllocAnalyzers=false to opt out. See issue #369.
     -->
-    <PackageReference Include="ZeroAlloc.Analyzers" Version="1.11.2"
+    <PackageReference Include="ZeroAlloc.Analyzers" Version="1.11.3"
                       Condition="'$(EnableZeroAllocAnalyzers)' != 'false'">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
