@@ -376,6 +376,21 @@ dotnet run --project benchmarks/RoslynCodeLens.Benchmarks -c Release
 
 - [ICSharpCode.Decompiler](https://github.com/icsharpcode/ILSpy) — MIT license (v8+). Used for IL disassembly in the `peek_il` tool.
 
+## Family
+
+Roslyn CodeLens MCP is part of a small family of .NET projects for AI work:
+
+- [AI.Sentinel](https://marcelroozekrans.github.io/AI.Sentinel/): Security monitoring middleware for `IChatClient`: prompt injection, hallucination and PII detection with an audit trail.
+- [Minos.NET](https://marcelroozekrans.github.io/Minos.NET): Typed, source-generated decision questions with calibrated answers.
+- [Rag.NET](https://marcelroozekrans.github.io/Rag.NET/): A modular retrieval-augmented generation pipeline on Microsoft.Extensions.AI.
+- [MemoryLens MCP](https://github.com/MarcelRoozekrans/memorylens-mcp): On-demand .NET memory profiling with AI-actionable fixes over MCP.
+
+## Built on ZeroAlloc
+
+Roslyn CodeLens MCP uses these [ZeroAlloc](https://zeroalloc.net) libraries, which are source generators and analyzers with no reflection at runtime:
+
+- [ZeroAlloc.Analyzers](https://analyzers.zeroalloc.net)
+
 ## License
 
 MIT
