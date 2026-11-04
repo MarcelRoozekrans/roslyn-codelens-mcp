@@ -1,0 +1,20 @@
+name: baseline-checks
+
+# Shared security and quality baseline from ci-baseline: gitleaks, CodeQL, NuGetAudit. Pinned to the moving v1 tag.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: MarcelRoozekrans/ci-baseline/.github/workflows/baseline.yml@v1
+    with:
+      solution: RoslynCodeLens.slnx

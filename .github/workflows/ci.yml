@@ -40,6 +40,13 @@ jobs:
       - name: Test
         run: dotnet test --no-build -c Release --verbosity normal --settings coverage.runsettings --results-directory TestResults
 
+      # Merges the Cobertura reports and fails below the line-coverage floor, or when codecov.yml would let a drop in
+      # coverage pass quietly.
+      - name: Coverage gate
+        uses: MarcelRoozekrans/ci-baseline/actions/coverage-gate@v1
+        with:
+          reports: TestResults/**/coverage.cobertura.xml
+
       - name: Upload coverage to Codecov
         if: '!cancelled()'
         uses: codecov/codecov-action@v7
