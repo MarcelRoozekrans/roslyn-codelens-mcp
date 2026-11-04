@@ -1,0 +1,13 @@
+name: history-scan
+
+# Full-history secret scan over every ref, run by hand. Reads the optional GITLEAKS_CONFIG secret.
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  history-scan:
+    uses: MarcelRoozekrans/ci-baseline/.github/workflows/history-scan.yml@v1
+    secrets:
+      GITLEAKS_CONFIG: ${{ secrets.GITLEAKS_CONFIG }}

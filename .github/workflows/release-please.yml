@@ -84,6 +84,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # A CycloneDX SBOM of the solution, attached to the release that release-please just created.
+      - name: Attach the SBOM to the GitHub release
+        uses: MarcelRoozekrans/ci-baseline/actions/sbom@v1
+        with:
+          solution: RoslynCodeLens.slnx
+          tag: ${{ needs.release-please.outputs.tag_name }}
+
   publish-mcp-registry:
     name: Publish to MCP Registry
     needs: [release-please, publish]
