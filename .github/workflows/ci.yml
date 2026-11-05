@@ -37,8 +37,12 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 
+      # --collect "XPlat Code Coverage" makes vstest load coverlet's in-proc collector,
+      # which writes every module's hits when the test session ends. With the runsettings
+      # file alone, hits are written only by ProcessExit handlers, and vstest kills a test
+      # host that has not exited 100 ms after the run, so a module can read 0 at random.
       - name: Test
-        run: dotnet test --no-build -c Release --verbosity normal --settings coverage.runsettings --results-directory TestResults
+        run: dotnet test --no-build -c Release --verbosity normal --collect "XPlat Code Coverage" --settings coverage.runsettings --results-directory TestResults
 
       # Merges the Cobertura reports and fails below the line-coverage floor, or when codecov.yml would let a drop in
       # coverage pass quietly.
