@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Code coverage for CI: pass this file to dotnet test with the settings option. The Cobertura report goes to Codecov. -->
+<!-- Code coverage for CI: dotnet test collect "XPlat Code Coverage" settings coverage.runsettings.
+     Pass both. The collect option adds coverlet's in-proc collector, which writes the hits
+     when the test session ends; without it, hits of modules not yet written when vstest
+     kills the test host are lost. The Cobertura report goes to Codecov. -->
 <RunSettings>
   <DataCollectionRunSettings>
     <DataCollectors>
