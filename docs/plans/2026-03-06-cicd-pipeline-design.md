@@ -78,7 +78,7 @@ branches:
 11. Create GitHub Release with tag, attach `.nupkg`
 
 **Runner:** `ubuntu-latest`
-**Secrets:** `NUGET_API_KEY`
+**Secrets:** `NUGET_API_KEY` (historical: the release workflow now publishes with NuGet trusted publishing and the `NUGET_USER` repo variable, see `.github/workflows/release-please.yml`)
 
 ### 3. Branch Protection (manual setup)
 
