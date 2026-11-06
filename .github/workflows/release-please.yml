@@ -40,6 +40,10 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -66,10 +70,19 @@ jobs:
         run: |
           dotnet pack src/RoslynCodeLens/RoslynCodeLens.csproj -c Release --no-build -p:PackageVersion=${{ needs.release-please.outputs.version }} -o ./nupkg
 
+      # Trusted publishing: nuget.org holds a policy for this repository and workflow file, and
+      # NuGet/login swaps this job's OIDC token for an API key that lasts about an hour.
+      # NUGET_USER is the nuget.org profile name.
+      - name: Log in to NuGet
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Push to NuGet
         # No --skip-duplicate: if the release version already exists on NuGet, fail loudly
         # rather than silently masking a version collision (see #225).
-        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
       # The npm package is a launcher that installs the NuGet tool at a matching
       # version, so it must be published after the NuGet push, never before.
