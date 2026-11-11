@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using RoslynCodeLens;
 using RoslynCodeLens.Symbols;
 
@@ -83,35 +82,11 @@ public class PropsSolutionFixture : IAsyncLifetime
         return true;
     }
 
-    private async Task EnsureRestoredAsync()
+    private Task EnsureRestoredAsync()
     {
         var assets = Path.Combine(
             Path.GetDirectoryName(SolutionPath)!, "tests", "PropsDrivenTests", "obj", "project.assets.json");
-        if (File.Exists(assets))
-            return;
-
-        var psi = new ProcessStartInfo("dotnet", $"restore \"{SolutionPath}\"")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start 'dotnet restore' for the Props fixture.");
-
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"'dotnet restore' for the Props fixture failed (exit {process.ExitCode}):\n" +
-                $"{await stdout.ConfigureAwait(false)}\n{await stderr.ConfigureAwait(false)}");
-        }
+        return FixtureRestore.EnsureAsync(SolutionPath, "Props fixture", () => File.Exists(assets));
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

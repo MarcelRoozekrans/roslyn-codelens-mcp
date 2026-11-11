@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using RoslynCodeLens;
 using RoslynCodeLens.Symbols;
@@ -79,35 +78,11 @@ public class RazorSolutionFixture : IAsyncLifetime
         return true;
     }
 
-    private async Task EnsureRestoredAsync()
+    private Task EnsureRestoredAsync()
     {
         var assets = Path.Combine(
             Path.GetDirectoryName(SolutionPath)!, "RazorLib", "obj", "project.assets.json");
-        if (File.Exists(assets))
-            return;
-
-        var psi = new ProcessStartInfo("dotnet", $"restore \"{SolutionPath}\"")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start 'dotnet restore' for the Razor fixture.");
-
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"'dotnet restore' for the Razor fixture failed (exit {process.ExitCode}):\n" +
-                $"{await stdout.ConfigureAwait(false)}\n{await stderr.ConfigureAwait(false)}");
-        }
+        return FixtureRestore.EnsureAsync(SolutionPath, "Razor fixture", () => File.Exists(assets));
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
