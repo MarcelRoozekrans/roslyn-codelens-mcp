@@ -5,7 +5,7 @@
     <NuGetAuditLevel>moderate</NuGetAuditLevel>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Meziantou.Analyzer" Version="3.0.324">
+    <PackageReference Include="Meziantou.Analyzer" Version="3.0.325">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
