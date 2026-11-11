@@ -18,21 +18,6 @@ public class RazorGeneratedCodeTests
 
     public RazorGeneratedCodeTests(RazorSolutionFixture fixture) => _fixture = fixture;
 
-    /// <summary>
-    /// True when the MSBuild host's Razor generator was built against a newer Microsoft.CodeAnalysis
-    /// than the one this tool ships. Roslyn then refuses it by design (ReferencesNewerCompiler), so no
-    /// generator output can exist and the generator-dependent assertions below cannot hold. The
-    /// shipping contract for that case, reported skew instead of silent wrong answers, is asserted
-    /// by <see cref="HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent"/>. This happens when
-    /// the host is a .NET SDK whose Roslyn is not yet published on NuGet, for example a .NET 11 SDK
-    /// next to Microsoft.CodeAnalysis 5.9.
-    /// </summary>
-    private bool HostSkewsRazorGenerator(out string message)
-    {
-        message = RazorSkewMessage(_fixture) ?? string.Empty;
-        return message.Length > 0;
-    }
-
     private static string? RazorSkewMessage(RazorSolutionFixture fixture) =>
         RoslynCodeLens.Analyzers.AnalyzerCompilerVersionCheck.FindSkewedAnalyzers(fixture.Loaded.Solution)
             .FirstOrDefault(m => m.StartsWith("Microsoft.CodeAnalysis.Razor.Compiler:", StringComparison.Ordinal));
@@ -71,9 +56,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void GetDiagnostics_ReportsNoErrors_OnACleanRazorProject()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var errors = GetDiagnosticsLogic.Execute(_fixture.Loaded, _fixture.Resolver, project: null, severity: "error");
 
         Assert.Empty(errors);
@@ -83,9 +65,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void SearchSymbols_FindsAComponentThatHasNoCodeBehind()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var results = SearchSymbolsLogic.Execute(_fixture.Resolver, _fixture.Metadata, "NavMenu");
 
         var navMenu = Assert.Single(results, r => r.FullName.Contains("NavMenu", StringComparison.Ordinal));
@@ -101,9 +80,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void FindReferences_FindsAComponentUsedOnlyFromMarkup()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var references = FindReferencesLogic.Execute(
             _fixture.Loaded, _fixture.Resolver, _fixture.Metadata, "RazorLib.Components.NavMenu");
 
@@ -115,9 +91,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public async Task GetFileOverview_ResolvesMarkupToItsGeneratedDocument()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var overview = await GetFileOverviewLogic.ExecuteAsync(
             _fixture.Loaded, _fixture.Resolver,
             _fixture.PathTo("Components", "Counter.razor"), CancellationToken.None);
@@ -129,9 +102,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public async Task GetSourceGenerators_NamesTheRazorGenerator_AndCountsItsOutput()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var generators = await GetSourceGeneratorsLogic.ExecuteAsync(_fixture.Loaded, project: null);
 
         var razor = Assert.Single(generators, g =>
@@ -154,9 +124,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void FindReferences_AttributesGeneratedHitsToTheMarkupTheyCameFrom()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var references = FindReferencesLogic.Execute(
             _fixture.Loaded, _fixture.Resolver, _fixture.Metadata, "RazorLib.Components.NavMenu");
 
@@ -168,9 +135,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void SearchSymbols_AttributesAGeneratedDeclarationToItsMarkup()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var results = SearchSymbolsLogic.Execute(_fixture.Resolver, _fixture.Metadata, "NavMenu");
 
         var navMenu = Assert.Single(results, r => r.FullName.Contains("NavMenu", StringComparison.Ordinal));
@@ -199,9 +163,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void FindUnusedSymbols_ReportsComponentsWithNoConsumer_AndNotOnesThatAreRendered()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var (items, _) = FindUnusedSymbolsLogic.Execute(
             _fixture.Loaded, _fixture.Resolver, project: null, includeInternal: false);
 
@@ -215,9 +176,6 @@ public class RazorGeneratedCodeTests
     [Fact]
     public void FindUnusedSymbols_PointsAtTheMarkupFileToDelete()
     {
-        if (HostSkewsRazorGenerator(out _))
-            return; // asserted by HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent
-
         var (items, _) = FindUnusedSymbolsLogic.Execute(
             _fixture.Loaded, _fixture.Resolver, project: null, includeInternal: false);
 
