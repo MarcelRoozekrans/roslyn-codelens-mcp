@@ -67,6 +67,7 @@ jobs:
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/FilterableSolution/FilterableSolution.slnx
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/RazorFixture/RazorFixture.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/PropsFixture/PropsFixture.slnx
 
       - name: Test
         run: dotnet test -c Release --no-build
