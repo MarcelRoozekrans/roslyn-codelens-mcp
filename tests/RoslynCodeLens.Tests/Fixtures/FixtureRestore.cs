@@ -18,9 +18,8 @@ internal static class FixtureRestore
 
     public static async Task EnsureAsync(string solutionPath, string label, Func<bool> isRestored)
     {
-        if (isRestored())
-            return;
-
+        // Checked only under the lock: a multi-project fixture can show one project's assets while
+        // another host is still restoring the rest.
         await using var gate = await AcquireAsync(solutionPath).ConfigureAwait(false);
 
         // Another host may have restored while this one waited for the lock.
@@ -41,7 +40,16 @@ internal static class FixtureRestore
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         using var cts = new CancellationTokenSource(s_timeout);
-        await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+        try
+        {
+            await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Kill it before the lock is released, or the next host restores next to a live restore.
+            try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+            throw new TimeoutException($"'dotnet restore' for the {label} did not finish within {s_timeout}.");
+        }
 
         if (process.ExitCode != 0)
         {
