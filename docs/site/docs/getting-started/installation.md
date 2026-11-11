@@ -7,7 +7,7 @@ sidebar_position: 1
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or later (.NET 11 SDK also works)
 - A .NET solution (`.sln` or `.slnx` file)
 
 ## Install the tool

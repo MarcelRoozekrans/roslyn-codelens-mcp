@@ -23,7 +23,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore tools
         run: dotnet tool restore
@@ -31,8 +33,22 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # TEMPORARY, tracked by issue 560 (it lists the unpin steps): the fixtures are restored and
+      # analysed with the .NET 10 SDK. The .NET 11 SDK ships Roslyn 5.12, whose Razor generator
+      # Microsoft.CodeAnalysis 5.9 (latest on NuGet) refuses, so the Razor generator tests could not
+      # run. The tests still build and run on net10.0 and net11.0. This hides analysis of net11
+      # Razor projects on a host with only SDK 11. Remove once Microsoft.CodeAnalysis 5.12 or newer
+      # is on NuGet.
+      - name: Pin the SDK for the test fixtures
+        run: |
+          echo '{ "sdk": { "version": "10.0.100", "rollForward": "latestFeature" } }' > tests/RoslynCodeLens.Tests/Fixtures/global.json
+
       - name: Restore test fixtures
-        run: dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+        run: |
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/FilterableSolution/FilterableSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/RazorFixture/RazorFixture.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/PropsFixture/PropsFixture.slnx
 
       - name: Build
         run: dotnet build --no-restore -c Release

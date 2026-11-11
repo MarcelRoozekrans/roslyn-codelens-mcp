@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using RoslynCodeLens;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.TestDiscovery;
@@ -129,13 +128,8 @@ public class TestSolutionFixture : IAsyncLifetime
         return true;
     }
 
-    private async Task EnsureFixturesRestoredAsync(bool force)
-    {
-        if (!force && FixturesRestored())
-            return;
-
-        await RunDotnetRestoreAsync(SolutionPath).ConfigureAwait(false);
-    }
+    private Task EnsureFixturesRestoredAsync(bool force) =>
+        FixtureRestore.EnsureAsync(SolutionPath, "test fixtures", () => !force && FixturesRestored());
 
     private bool FixturesRestored()
     {
@@ -146,32 +140,6 @@ public class TestSolutionFixture : IAsyncLifetime
                 return false;
         }
         return true;
-    }
-
-    private static async Task RunDotnetRestoreAsync(string solutionPath)
-    {
-        var psi = new ProcessStartInfo("dotnet", $"restore \"{solutionPath}\"")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start 'dotnet restore' for the test fixtures.");
-
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException(
-                $"'dotnet restore' for the test fixtures failed (exit {process.ExitCode}):\n" +
-                $"{await stdout.ConfigureAwait(false)}\n{await stderr.ConfigureAwait(false)}");
-        }
     }
 
     public Task DisposeAsync() => Task.CompletedTask;

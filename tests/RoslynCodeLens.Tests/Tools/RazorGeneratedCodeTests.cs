@@ -18,6 +18,35 @@ public class RazorGeneratedCodeTests
 
     public RazorGeneratedCodeTests(RazorSolutionFixture fixture) => _fixture = fixture;
 
+    private static string? RazorSkewMessage(RazorSolutionFixture fixture) =>
+        RoslynCodeLens.Analyzers.AnalyzerCompilerVersionCheck.FindSkewedAnalyzers(fixture.Loaded.Solution)
+            .FirstOrDefault(m => m.StartsWith("Microsoft.CodeAnalysis.Razor.Compiler:", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Holds on every host: either the Razor generator runs, or the tool says plainly that it was
+    /// skipped and why. Never both silent and empty.
+    /// </summary>
+    [Fact]
+    public async Task HostWithNewerRoslyn_ReportsTheSkew_InsteadOfGoingSilent()
+    {
+        var skew = RazorSkewMessage(_fixture);
+        var generators = await GetSourceGeneratorsLogic.ExecuteAsync(_fixture.Loaded, project: null);
+        var razorRan = generators.Any(g =>
+            g.GeneratorName.Equals("Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator", StringComparison.Ordinal));
+
+        if (skew is null)
+        {
+            Assert.True(razorRan, "no skew is reported, so the Razor generator must have run");
+            return;
+        }
+
+        Assert.False(razorRan, "a skewed generator is refused by Roslyn and must not appear as having run");
+        Assert.Contains("ReferencesNewerCompiler", skew, StringComparison.Ordinal);
+        Assert.Contains(
+            RoslynCodeLens.Analyzers.AnalyzerCompilerVersionCheck.RunningCompilerVersion.ToString(),
+            skew, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The headline symptom. Counter.razor.cs overrides OnInitialized, which only compiles
     /// against the ComponentBase-derived half that the generator emits. Without the generator

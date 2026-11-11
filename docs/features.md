@@ -17,7 +17,7 @@
 | Multi-solution | Env var only | Built-in manager with `list_solutions` / `set_active_solution` |
 | Hot reload | Manual `sync_documents` tool | `FileChangeTracker` — automatic on file change |
 | Roslyn version | 5.0.0 | 4.14.0 |
-| .NET target | net8.0 | net10.0 |
+| .NET target | net8.0 | net10.0, net11.0 |
 | Benchmarks | None | BenchmarkDotNet suite (31 benchmarks) |
 | Tests | Unknown | xUnit suite per tool |
 
@@ -28,7 +28,7 @@ The two projects have fundamentally different API paradigms:
 - **sharplens-mcp** requires `(filePath, line, column)` coordinates — you must already know where a symbol appears in source before calling any tool.
 - **roslyn-codelens-mcp** takes symbol names (`"IGreeter"`, `"Greeter.Greet"`) — the server resolves them via pre-built indexes.
 
-This means the tools serve different workflows and cannot be given identical inputs. Additionally, sharplens-mcp targets .NET 8 while this project targets .NET 10, so any raw latency delta would conflate runtime differences with implementation differences. A qualitative feature comparison (below) is the honest comparison.
+This means the tools serve different workflows and cannot be given identical inputs. Additionally, sharplens-mcp targets .NET 8 while this project targets .NET 10 and .NET 11, so any raw latency delta would conflate runtime differences with implementation differences. A qualitative feature comparison (below) is the honest comparison.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "roslyn-codelens",
-  "description": "Roslyn-based code graph intelligence for .NET codebases. Requires the .NET 10 SDK; the server is fetched and run on demand via dnx.",
+  "description": "Roslyn-based code graph intelligence for .NET codebases. Requires the .NET 10 or 11 SDK; the server is fetched and run on demand via dnx.",
   "author": {
     "name": "Marcel Roozekrans"
   },

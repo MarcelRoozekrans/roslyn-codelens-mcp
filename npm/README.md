@@ -8,7 +8,7 @@ npx -y roslyn-codelens-mcp
 
 This package contains no server code. It is a thin shim that ensures the
 [`RoslynCodeLens.Mcp`](https://www.nuget.org/packages/RoslynCodeLens.Mcp) .NET global tool is
-installed at the matching version, then execs it. **The .NET 10 SDK must be on `PATH`.**
+installed at the matching version, then execs it. **The .NET 10 or 11 SDK must be on `PATH`.**
 
 ## MCP client config
 

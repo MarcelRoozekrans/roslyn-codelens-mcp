@@ -4,7 +4,7 @@
 
 Before installing this plugin, ensure you have:
 
-- **.NET 10 SDK** on `PATH` — [Download](https://dotnet.microsoft.com/download)
+- **.NET 10 or 11 SDK** on `PATH` — [Download](https://dotnet.microsoft.com/download)
 
 No separate tool install is needed: the plugin starts the server with
 `dnx --yes --version <plugin version> RoslynCodeLens.Mcp`, which downloads the matching
