@@ -23,7 +23,9 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore tools
         run: dotnet tool restore
@@ -32,7 +34,9 @@ jobs:
         run: dotnet restore
 
       - name: Restore test fixtures
-        run: dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+        run: |
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/FilterableSolution/FilterableSolution.slnx
 
       - name: Build
         run: dotnet build --no-restore -c Release

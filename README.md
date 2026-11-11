@@ -190,7 +190,7 @@ See [SECURITY.md](SECURITY.md) for the full threat model.
 ```
 
 The npm package ships no server code — it is a launcher that installs the `RoslynCodeLens.Mcp`
-.NET global tool at a matching version and execs it, so the **.NET 10 SDK must be on `PATH`**.
+.NET global tool at a matching version and execs it, so the **.NET 10 or 11 SDK must be on `PATH`**.
 Subsequent starts skip the install entirely and work offline.
 
 ### VS Code / Visual Studio (via dnx)
@@ -215,7 +215,7 @@ Add to your MCP settings (`.vscode/mcp.json` or VS settings):
 claude install gh:MarcelRoozekrans/roslyn-codelens-mcp
 ```
 
-The plugin needs only the .NET 10 SDK: it runs the server through `dnx`, pinned to the
+The plugin needs only the .NET 10 or 11 SDK: it runs the server through `dnx`, pinned to the
 plugin's version, so there is no global tool to install or keep up to date.
 
 ### .NET Global Tool
@@ -345,7 +345,7 @@ Location-returning tools include an `IsGenerated` flag to distinguish source-gen
 
 ## Requirements
 
-- .NET 10 SDK
+- .NET 10 or 11 SDK
 - A .NET solution with compilable projects
 
 ## Project compatibility

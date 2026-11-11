@@ -25,6 +25,7 @@ RUN dotnet restore src/RoslynCodeLens/RoslynCodeLens.csproj
 COPY src/ src/
 RUN dotnet publish src/RoslynCodeLens/RoslynCodeLens.csproj \
       --configuration Release \
+      --framework net11.0 \
       --no-restore \
       --output /app
 

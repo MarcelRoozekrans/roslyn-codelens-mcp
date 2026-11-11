@@ -76,7 +76,7 @@ instead and let the container read the result.
 
 ## Why the image is SDK-based
 
-The runtime stage uses `mcr.microsoft.com/dotnet/sdk:10.0` rather than the
+The runtime stage uses `mcr.microsoft.com/dotnet/sdk:11.0` rather than the
 smaller `dotnet/runtime` image. `MSBuildLocator.RegisterDefaults()` resolves a
 real MSBuild installation at startup, and `MSBuildWorkspace` needs it to
 evaluate the mounted solution's project files. The runtime-only image has

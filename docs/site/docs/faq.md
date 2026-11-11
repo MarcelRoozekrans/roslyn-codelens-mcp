@@ -35,7 +35,7 @@ Full benchmark results are in the [repository](https://github.com/MarcelRoozekra
 
 ## What .NET versions are supported?
 
-The server targets .NET 10 and can analyse solutions targeting any .NET version (net48, net6.0, net8.0, net10.0, etc.) — **as long as the projects use the SDK-style csproj format** (`<Project Sdk="...">`).
+The server targets .NET 10 and .NET 11 and can analyse solutions targeting any .NET version (net48, net6.0, net8.0, net10.0, etc.) — **as long as the projects use the SDK-style csproj format** (`<Project Sdk="...">`).
 
 ## Are legacy (non-SDK-style) .NET Framework projects supported?
 
