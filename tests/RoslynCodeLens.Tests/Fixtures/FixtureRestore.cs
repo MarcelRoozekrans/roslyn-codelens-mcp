@@ -48,6 +48,12 @@ internal static class FixtureRestore
         {
             // Kill it before the lock is released, or the next host restores next to a live restore.
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+
+            // Kill returns before the process is gone, so wait for it before the lock is released.
+            using var reaped = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try { await process.WaitForExitAsync(reaped.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+
             throw new TimeoutException($"'dotnet restore' for the {label} did not finish within {s_timeout}.");
         }
 
