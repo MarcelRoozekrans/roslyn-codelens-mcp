@@ -63,7 +63,10 @@ jobs:
         run: dotnet build -c Release -p:Version=${{ needs.release-please.outputs.version }}
 
       - name: Restore test fixtures
-        run: dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+        run: |
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/FilterableSolution/FilterableSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/RazorFixture/RazorFixture.slnx
 
       - name: Test
         run: dotnet test -c Release --no-build
