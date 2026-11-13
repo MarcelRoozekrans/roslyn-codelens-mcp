@@ -10,7 +10,7 @@ public static class StartBackgroundTaskTool
 {
     [McpServerTool(Name = "start_background_task"),
      Description("Queue a long-running tool to run in the background. Returns a taskId; " +
-                 "poll with get_task_status. Allowed tools: rebuild_solution.")]
+                 "wait with get_task_status and waitSeconds. Allowed tools: rebuild_solution.")]
     public static BackgroundTaskInfo Execute(
         MultiSolutionManager manager,
         BackgroundTaskStore store,

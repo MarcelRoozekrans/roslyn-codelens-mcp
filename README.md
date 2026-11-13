@@ -79,7 +79,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **unload_solution** — Unload a loaded solution to free memory
 - **rebuild_solution** — Force a full reload of the analyzed solution
 - **start_background_task** — Queue a long-running tool (currently `rebuild_solution`) to run in the background; returns a `taskId` to poll
-- **get_task_status** — Get the current status, result, or error of a background task by its `taskId`
+- **get_task_status** — Get the current status, result, or error of a background task by its `taskId`. Optional `waitSeconds` (default 0, capped at 50) waits on the server until the task finishes instead of polling
 - **list_running_tasks** — List background tasks running or completed within the last 5 minutes
 - **trust_solution** — Authorize a solution to run Roslyn analyzers (required before `get_diagnostics` with `includeAnalyzers: true`)
 - **list_trusted_paths** — Inspect the persistent trust store + session-trusted solutions
