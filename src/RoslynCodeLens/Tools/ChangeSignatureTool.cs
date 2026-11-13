@@ -8,8 +8,15 @@ namespace RoslynCodeLens.Tools;
 public static class ChangeSignatureTool
 {
     [McpServerTool(Name = "change_signature"),
-     Description("Add, remove, or reorder a method's parameters and update every call site " +
-                 "(Roslyn's own change-signature engine). Cascades to overrides and interface " +
+     Description("Add, remove, or reorder a method's or constructor's parameters and update every call site " +
+                 "(Roslyn's own change-signature engine). A type name or `Type.Type` targets the " +
+                 "type's primary constructor (positional record, record struct, or C# 12 class/struct " +
+                 "parameter list), else its only constructor declared in source; several constructors " +
+                 "and no primary one is ambiguous. For a positional record, `Warnings` lists what the " +
+                 "engine does not rewrite: removed generated properties with their references, " +
+                 "deconstructions and positional patterns that bind by position (a reorder of two " +
+                 "same-typed parameters still compiles but binds the other value), and string literals " +
+                 "or serialized names; read it before applying. Cascades to overrides and interface " +
                  "implementations, rewrites named and optional arguments, and preserves an " +
                  "extension method's `this` parameter; the overrides and implementations it also " +
                  "rewrote are listed in `CascadedTo`. Operations apply in order: " +
@@ -27,10 +34,11 @@ public static class ChangeSignatureTool
                  + "Defaults to preview mode (returns edits without writing files); " +
                  "set `preview=false` to apply. New compiler errors the change would introduce are " +
                  "reported as Conflicts, and apply mode refuses to write them unless `force=true`. " +
-                 "Source-defined methods only; overloaded names must be disambiguated.")]
+                 "Source-defined methods and constructors only; overloaded names must be disambiguated.")]
     public static async Task<ChangeSignatureResult> Execute(
         MultiSolutionManager manager,
-        [Description("Method to change: `MyClass.MyMethod` or fully qualified `Namespace.MyClass.MyMethod`")] string method,
+        [Description("Method to change: `MyClass.MyMethod` or fully qualified `Namespace.MyClass.MyMethod`. " +
+                     "For a constructor, the type name (`MyRecord`, `Namespace.MyRecord`) or `MyRecord.MyRecord`")] string method,
         [Description("Parameter edits applied in order. Each has `kind` (`remove`, `reorder` or `add`) plus: `parameter` for `remove`; `order` for `reorder`; `name`, `type`, `callSiteValue` and optional `defaultValue` for `add`")] SignatureOperation[] operations,
         [Description("Preview only — return edits without writing to disk (default: true)")] bool preview = true,
         [Description("Apply even when Conflicts are reported (default: false)")] bool force = false,
