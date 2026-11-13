@@ -39,12 +39,18 @@ public class GetTaskStatusToolTests
     public async Task Execute_WaitSeconds_ReturnsTerminalInfo_WhenTaskCompletesDuringWait()
     {
         using var store = new BackgroundTaskStore();
-        var started = store.Start("test_tool", async _ =>
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = store.Start("test_tool", async ct =>
         {
-            await Task.Delay(150).ConfigureAwait(false);
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
             return "done";
         });
-        var info = await GetTaskStatusTool.Execute(store, started.TaskId, waitSeconds: 30);
+
+        var pending = GetTaskStatusTool.Execute(store, started.TaskId, waitSeconds: 30);
+        Assert.False(pending.IsCompleted, "Execute should wait while the task is still running.");
+
+        gate.SetResult();
+        var info = await pending.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         Assert.Equal(BackgroundTaskStatus.Succeeded, info.Status);
         Assert.Equal("done", info.Result);
     }

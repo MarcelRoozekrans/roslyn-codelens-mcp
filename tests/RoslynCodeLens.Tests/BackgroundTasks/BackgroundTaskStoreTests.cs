@@ -10,21 +10,22 @@ public class BackgroundTaskStoreTests
     public async Task WaitAsync_ReturnsEarly_WhenTaskCompletes()
     {
         using var store = new BackgroundTaskStore();
-        var info = store.Start("test_tool", async _ =>
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var info = store.Start("test_tool", async ct =>
         {
-            await Task.Delay(150).ConfigureAwait(false);
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
             return "payload";
         });
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var result = await store.WaitAsync(info.TaskId, TimeSpan.FromSeconds(30), CancellationToken.None)
-            .ConfigureAwait(false);
-        sw.Stop();
+        var pending = store.WaitAsync(info.TaskId, TimeSpan.FromSeconds(30), CancellationToken.None);
+        Assert.False(pending.IsCompleted, "WaitAsync should wait while the task is still running.");
+
+        gate.SetResult();
+        var result = await pending.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
 
         Assert.NotNull(result);
         Assert.Equal(BackgroundTaskStatus.Succeeded, result!.Status);
         Assert.NotNull(result.CompletedAt);
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"waited {sw.Elapsed}");
     }
 
     [Fact]
