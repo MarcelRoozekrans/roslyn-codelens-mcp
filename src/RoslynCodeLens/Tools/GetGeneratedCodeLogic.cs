@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 
 namespace RoslynCodeLens.Tools;
@@ -13,6 +14,8 @@ public static class GetGeneratedCodeLogic
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
             var projectName = resolver.GetProjectName(projectId);
+            var project = loaded.Solution.GetProject(projectId);
+            var identities = project is null ? Array.Empty<GeneratorIdentity>() : GeneratorNames.GetIdentities(project);
 
             foreach (var tree in compilation.SyntaxTrees)
             {
@@ -22,7 +25,7 @@ public static class GetGeneratedCodeLogic
                 if (file != null && !tree.FilePath.Contains(file, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                var genName = InferGeneratorName(tree.FilePath);
+                var genName = GeneratorNames.Resolve(identities, tree.FilePath, hintName: null);
                 if (generator != null && !genName.Equals(generator, StringComparison.OrdinalIgnoreCase))
                     continue;
 
@@ -51,26 +54,5 @@ public static class GetGeneratedCodeLogic
         }
 
         return results;
-    }
-
-    private static string InferGeneratorName(string filePath)
-    {
-        var parts = filePath.Replace('\\', '/').Split('/');
-        var objIndex = Array.FindIndex(parts, p => p.Equals("obj", StringComparison.OrdinalIgnoreCase));
-
-        if (objIndex >= 0 && objIndex + 3 < parts.Length)
-        {
-            for (var i = objIndex + 3; i < parts.Length - 1; i++)
-            {
-                var segment = parts[i];
-                if (!segment.Equals("generated", StringComparison.OrdinalIgnoreCase)
-                    && !segment.Contains('.', StringComparison.Ordinal))
-                {
-                    return segment;
-                }
-            }
-        }
-
-        return "Unknown";
     }
 }

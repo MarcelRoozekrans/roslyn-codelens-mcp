@@ -1,3 +1,4 @@
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -46,7 +47,7 @@ public class GetSourceGeneratorsToolTests
         "Microsoft.AspNetCore.SourceGenerators.PublicProgramSourceGenerator")]
     public void InferGeneratorName_RecoversGeneratorTypeName(string filePath, string hintName, string expected)
     {
-        Assert.Equal(expected, GetSourceGeneratorsLogic.InferGeneratorName(filePath, hintName));
+        Assert.Equal(expected, GeneratorNames.InferFromPath(filePath, hintName));
     }
 
     [Theory]
@@ -57,7 +58,49 @@ public class GetSourceGeneratorsToolTests
     public void InferGeneratorName_FallsBackToUnknown_WhenPathShapeIsUnexpected(string? filePath, string hintName)
     {
         Assert.Equal(GetSourceGeneratorsLogic.UnknownGenerator,
-            GetSourceGeneratorsLogic.InferGeneratorName(filePath, hintName));
+            GeneratorNames.InferFromPath(filePath, hintName));
+    }
+
+    [Theory]
+    [InlineData(
+        @"C:/proj/obj/Debug/net10.0/System.Text.RegularExpressions.Generator/System.Text.RegularExpressions.Generator.RegexGenerator/RegexGenerator.g.cs",
+        "System.Text.RegularExpressions.Generator.RegexGenerator")]
+    [InlineData(
+        @"C:\proj\obj\Debug\net10.0\Riok.Mapperly\Riok.Mapperly.MapperGenerator\Mappers.Mapper.g.cs",
+        "Riok.Mapperly.MapperGenerator")]
+    [InlineData(
+        @"C:/proj/obj/Debug/net10.0/Microsoft.CodeAnalysis.Razor.Compiler/Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator/Components/Pages/Counter_razor.g.cs",
+        "Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator")]
+    public void Resolve_MatchesTheGeneratorIdentity_NotAPathSegmentGuess(string filePath, string expected)
+    {
+        var identities = new[]
+        {
+            new GeneratorIdentity("System.Text.RegularExpressions.Generator", "System.Text.RegularExpressions.Generator.RegexGenerator"),
+            new GeneratorIdentity("Riok.Mapperly", "Riok.Mapperly.MapperGenerator"),
+            new GeneratorIdentity("Microsoft.CodeAnalysis.Razor.Compiler", "Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator"),
+        };
+
+        Assert.Equal(expected, GeneratorNames.Resolve(identities, filePath, hintName: null));
+    }
+
+    [Fact]
+    public void Resolve_FallsBackToHintNameInference_WhenNoIdentityMatches()
+    {
+        var name = GeneratorNames.Resolve(
+            Array.Empty<GeneratorIdentity>(),
+            "C:/proj/obj/Debug/net10.0/Some.Asm/Some.Asm.Gen/Components/X.g.cs",
+            "Components/X.g.cs");
+
+        Assert.Equal("Some.Asm.Gen", name);
+    }
+
+    [Fact]
+    public void Resolve_StaysUnknown_ForAFileNoGeneratorProduced()
+    {
+        var identities = new[] { new GeneratorIdentity("Riok.Mapperly", "Riok.Mapperly.MapperGenerator") };
+
+        Assert.Equal(GeneratorNames.Unknown,
+            GeneratorNames.Resolve(identities, "C:/proj/obj/Debug/net10.0/Proj.AssemblyInfo.cs", hintName: null));
     }
 
     [Fact]
