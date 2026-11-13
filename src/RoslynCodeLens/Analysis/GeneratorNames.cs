@@ -32,42 +32,67 @@ internal static class GeneratorNames
     }
 
     /// <summary>
-    /// Matches the file path against <c>/&lt;assembly&gt;/&lt;type&gt;/</c> for each known
-    /// generator. The generator's own segments precede the hint name, and a hint name may contain
-    /// directories that spell another generator's identity, so the leftmost match wins; when the
-    /// hint name is known it is cut off before matching. The path is matched with a leading
-    /// separator so a relative path that starts with the assembly name still matches. Falls back
-    /// to <see cref="InferFromPath"/> when no identity matches.
+    /// The directory Roslyn puts generated documents under for this project: the configured
+    /// generated-files directory, else the directory of the compilation output. Empty when neither
+    /// is known, in which case Roslyn gives generated documents a relative path.
+    /// </summary>
+    internal static string GetGeneratedFilesBase(Project project)
+    {
+        var info = project.CompilationOutputInfo;
+        return info.GeneratedFilesOutputDirectory
+            ?? (info.AssemblyPath is { } assemblyPath ? Path.GetDirectoryName(assemblyPath) : null)
+            ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Names the generator that produced a generated document. Roslyn builds the path as
+    /// <c>&lt;base&gt;/&lt;assembly&gt;/&lt;type&gt;/&lt;hintName&gt;</c>, and both the base and the
+    /// hint name may contain directories that spell some other generator's identity, so the identity
+    /// is matched only at the position Roslyn puts it: right after <paramref name="baseDirectory"/>,
+    /// or right before <paramref name="hintName"/>. Falls back to <see cref="InferFromPath"/> when
+    /// no identity sits at either position.
     /// </summary>
     internal static string Resolve(
-        IReadOnlyList<GeneratorIdentity> identities, string? filePath, string? hintName)
+        IReadOnlyList<GeneratorIdentity> identities, string? filePath, string? hintName, string? baseDirectory)
     {
-        if (!string.IsNullOrEmpty(filePath))
-        {
-            var path = "/" + filePath.Replace('\\', '/');
-            if (!string.IsNullOrEmpty(hintName))
-            {
-                var hint = hintName.Replace('\\', '/');
-                if (path.EndsWith("/" + hint, StringComparison.OrdinalIgnoreCase))
-                    path = path[..(path.Length - hint.Length)];
-            }
+        if (string.IsNullOrEmpty(filePath))
+            return InferFromPath(filePath, hintName);
 
-            string? best = null;
-            var bestIndex = int.MaxValue;
+        var path = Normalize(filePath);
+
+        if (!string.IsNullOrEmpty(hintName))
+        {
+            var hint = Normalize(hintName);
             foreach (var id in identities)
             {
-                var index = path.IndexOf($"/{id.AssemblyName}/{id.TypeName}/", StringComparison.OrdinalIgnoreCase);
-                if (index >= 0 && (index < bestIndex || (index == bestIndex && id.TypeName.Length > best!.Length)))
+                if (("/" + path).EndsWith($"/{id.AssemblyName}/{id.TypeName}/{hint}", StringComparison.OrdinalIgnoreCase))
+                    return id.TypeName;
+            }
+        }
+
+        if (baseDirectory is not null)
+        {
+            var root = Normalize(baseDirectory);
+            string? remainder = null;
+            if (root.Length == 0)
+                remainder = path;
+            else if (path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
+                remainder = path[(root.Length + 1)..];
+
+            if (remainder is not null)
+            {
+                foreach (var id in identities)
                 {
-                    best = id.TypeName;
-                    bestIndex = index;
+                    if (remainder.StartsWith($"{id.AssemblyName}/{id.TypeName}/", StringComparison.OrdinalIgnoreCase))
+                        return id.TypeName;
                 }
             }
-            if (best is not null)
-                return best;
         }
+
         return InferFromPath(filePath, hintName);
     }
+
+    private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
 
     /// <summary>
     /// Recovers the generator's type name from the synthetic path Roslyn gives a source-generated

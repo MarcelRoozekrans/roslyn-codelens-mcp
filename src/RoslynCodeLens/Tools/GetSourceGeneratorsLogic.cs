@@ -31,10 +31,11 @@ public static class GetSourceGeneratorsLogic
             var generated = await proj.GetSourceGeneratedDocumentsAsync(ct).ConfigureAwait(false);
 
             var identities = GeneratorNames.GetIdentities(proj);
+            var generatedBase = GeneratorNames.GetGeneratedFilesBase(proj);
             var byGenerator = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var document in generated)
             {
-                var generatorName = GeneratorNames.Resolve(identities, document.FilePath, document.HintName);
+                var generatorName = GeneratorNames.Resolve(identities, document.FilePath, document.HintName, generatedBase);
                 if (!byGenerator.TryGetValue(generatorName, out var files))
                 {
                     files = new List<string>();

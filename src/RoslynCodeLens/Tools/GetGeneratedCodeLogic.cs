@@ -16,6 +16,7 @@ public static class GetGeneratedCodeLogic
             var projectName = resolver.GetProjectName(projectId);
             var project = loaded.Solution.GetProject(projectId);
             var identities = project is null ? Array.Empty<GeneratorIdentity>() : GeneratorNames.GetIdentities(project);
+            var generatedBase = project is null ? null : GeneratorNames.GetGeneratedFilesBase(project);
 
             foreach (var tree in compilation.SyntaxTrees)
             {
@@ -25,7 +26,7 @@ public static class GetGeneratedCodeLogic
                 if (file != null && !tree.FilePath.Contains(file, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                var genName = GeneratorNames.Resolve(identities, tree.FilePath, hintName: null);
+                var genName = GeneratorNames.Resolve(identities, tree.FilePath, hintName: null, generatedBase);
                 if (generator != null && !genName.Equals(generator, StringComparison.OrdinalIgnoreCase))
                     continue;
 

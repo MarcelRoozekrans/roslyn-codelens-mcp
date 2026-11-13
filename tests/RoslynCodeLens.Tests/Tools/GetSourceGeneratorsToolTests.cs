@@ -80,34 +80,45 @@ public class GetSourceGeneratorsToolTests
             new GeneratorIdentity("Microsoft.CodeAnalysis.Razor.Compiler", "Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator"),
         };
 
-        Assert.Equal(expected, GeneratorNames.Resolve(identities, filePath, hintName: null));
+        Assert.Equal(expected, GeneratorNames.Resolve(identities, filePath, hintName: null, @"C:\proj\obj\Debug\net10.0"));
+    }
+
+    private static readonly GeneratorIdentity[] LookalikeIdentities =
+    {
+        new("A", "Ns.Gen"),
+        new("B", "Ns.LongerGenerator"),
+    };
+
+    [Theory]
+    [InlineData(null, "C:/obj")]
+    [InlineData("B/Ns.LongerGenerator/X.g.cs", null)]
+    public void Resolve_IgnoresAnIdentitySpelledInsideTheHintName(string? hintName, string? baseDirectory)
+    {
+        // Ns.Gen emitted a hint name that happens to spell another generator's identity.
+        Assert.Equal("Ns.Gen", GeneratorNames.Resolve(
+            LookalikeIdentities, "C:/obj/A/Ns.Gen/B/Ns.LongerGenerator/X.g.cs", hintName, baseDirectory));
     }
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("B/Ns.LongerGenerator/X.g.cs")]
-    public void Resolve_PicksTheGeneratorThatOwnsThePath_NotOneNamedInsideTheHintName(string? hintName)
+    [InlineData(null, "C:/A/Ns.Gen/obj")]
+    [InlineData("X.g.cs", null)]
+    public void Resolve_IgnoresAnIdentitySpelledInsideTheBaseDirectory(string? hintName, string? baseDirectory)
     {
-        // Ns.Gen emitted a hint name that happens to spell another generator's identity.
-        var identities = new[]
-        {
-            new GeneratorIdentity("A", "Ns.Gen"),
-            new GeneratorIdentity("B", "Ns.LongerGenerator"),
-        };
-
-        Assert.Equal("Ns.Gen", GeneratorNames.Resolve(
-            identities, "C:/proj/obj/Debug/net10.0/A/Ns.Gen/B/Ns.LongerGenerator/X.g.cs", hintName));
+        // The project lives under directories that happen to spell another generator's identity.
+        Assert.Equal("Ns.LongerGenerator", GeneratorNames.Resolve(
+            LookalikeIdentities, "C:/A/Ns.Gen/obj/B/Ns.LongerGenerator/X.g.cs", hintName, baseDirectory));
     }
 
     [Theory]
     [InlineData("Riok.Mapperly/Riok.Mapperly.MapperGenerator/Mappers.Mapper.g.cs")]
     [InlineData(@"Riok.Mapperly\Riok.Mapperly.MapperGenerator\Mappers.Mapper.g.cs")]
-    public void Resolve_MatchesAnIdentityAtTheStartOfARelativePath(string filePath)
+    public void Resolve_MatchesARelativePath_WhenTheProjectHasNoOutputDirectory(string filePath)
     {
         // Per-project loads without an output directory give generated documents a relative path.
         var identities = new[] { new GeneratorIdentity("Riok.Mapperly", "Riok.Mapperly.MapperGenerator") };
 
-        Assert.Equal("Riok.Mapperly.MapperGenerator", GeneratorNames.Resolve(identities, filePath, hintName: null));
+        Assert.Equal("Riok.Mapperly.MapperGenerator",
+            GeneratorNames.Resolve(identities, filePath, hintName: null, baseDirectory: string.Empty));
     }
 
     [Fact]
@@ -116,7 +127,8 @@ public class GetSourceGeneratorsToolTests
         var name = GeneratorNames.Resolve(
             Array.Empty<GeneratorIdentity>(),
             "C:/proj/obj/Debug/net10.0/Some.Asm/Some.Asm.Gen/Components/X.g.cs",
-            "Components/X.g.cs");
+            "Components/X.g.cs",
+            "C:/proj/obj/Debug/net10.0");
 
         Assert.Equal("Some.Asm.Gen", name);
     }
@@ -127,7 +139,7 @@ public class GetSourceGeneratorsToolTests
         var identities = new[] { new GeneratorIdentity("Riok.Mapperly", "Riok.Mapperly.MapperGenerator") };
 
         Assert.Equal(GeneratorNames.Unknown,
-            GeneratorNames.Resolve(identities, "C:/proj/obj/Debug/net10.0/Proj.AssemblyInfo.cs", hintName: null));
+            GeneratorNames.Resolve(identities, "C:/proj/obj/Debug/net10.0/Proj.AssemblyInfo.cs", hintName: null, "C:/proj/obj/Debug/net10.0"));
     }
 
     [Fact]
