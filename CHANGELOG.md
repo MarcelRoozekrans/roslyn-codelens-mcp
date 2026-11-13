@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.19.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.2...v2.19.0) (2026-11-13)
+
+
+### Features
+
+* **get_task_status:** wait on the server for a running task (waitSeconds) ([1b5147a](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/1b5147a335cc5d7fd6f1371a040ec109fdbdbbe4)), closes [#550](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/550)
+* support net11.0 ([#558](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/558)) ([2ef948f](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/2ef948fb569ab25c2989ebc56f4d77bed639b991))
+
+
+### Bug Fixes
+
+* **get_generated_code:** name the generator from its identity, shared with get_source_generators ([19ca8c6](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/19ca8c69e9897cbe85943dfb2af49b7f38ad0f24)), closes [#549](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/549)
+
 ## [2.18.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.1...v2.18.2) (2026-10-13)
 
 
