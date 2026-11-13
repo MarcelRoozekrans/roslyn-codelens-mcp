@@ -214,4 +214,22 @@ public class RazorGeneratedCodeTests
         Assert.DoesNotContain(generators, g =>
             g.GeneratorName.Equals(GetSourceGeneratorsLogic.UnknownGenerator, StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// Issue #549: get_generated_code named Razor output after "Components", a folder inside the
+    /// hint name, and its generator filter could not take the name get_source_generators reports.
+    /// </summary>
+    [Fact]
+    public void GetGeneratedCode_NamesTheRazorGenerator_AndFiltersByThatName()
+    {
+        const string razorGenerator = "Microsoft.NET.Sdk.Razor.SourceGenerators.RazorSourceGenerator";
+
+        var all = GetGeneratedCodeLogic.Execute(_fixture.Loaded, _fixture.Resolver, generator: null, file: "Counter_razor");
+        var counter = Assert.Single(all);
+        Assert.Equal(razorGenerator, counter.GeneratorName);
+
+        var filtered = GetGeneratedCodeLogic.Execute(_fixture.Loaded, _fixture.Resolver, razorGenerator, file: null);
+        Assert.NotEmpty(filtered);
+        Assert.All(filtered, f => Assert.Equal(razorGenerator, f.GeneratorName));
+    }
 }
