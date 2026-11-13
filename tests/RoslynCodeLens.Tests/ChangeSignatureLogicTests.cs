@@ -1266,6 +1266,39 @@ public class ChangeSignatureLogicTests
     }
 
     [Fact]
+    public async Task Record_SameTypedReorder_WarnsAboutConditionalAndUnqualifiedDeconstructCalls()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Shipment(int Id, int Weight)
+            {
+                public int Diff()
+                {
+                    Deconstruct(out var id, out var weight);
+                    return id - weight;
+                }
+            }
+            public class Use
+            {
+                public void Split(Shipment? s)
+                {
+                    s?.Deconstruct(out var id, out var weight);
+                }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Shipment",
+            [new SignatureOperation("reorder", Order: ["Weight", "Id"])]);
+
+        Assert.True(result.Success, result.Message);
+        var unqualified = Assert.Single(result.Warnings, w => w.Contains("Shipment.cs:6", StringComparison.Ordinal));
+        Assert.Contains("Deconstruct call", unqualified, StringComparison.Ordinal);
+        var conditional = Assert.Single(result.Warnings, w => w.Contains("Shipment.cs:14", StringComparison.Ordinal));
+        Assert.Contains("Deconstruct call", conditional, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Record_Add_WarnsThatDeconstructionsChangeArity()
     {
         const string source = """
@@ -1313,6 +1346,118 @@ public class ChangeSignatureLogicTests
 
         Assert.True(result.Success, result.Message);
         Assert.Contains(result.Warnings, w => w.Contains("Use.cs:4", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Record_SameTypedReorder_WarnsAboutForEachDeconstructions()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Shipment(int Id, int Weight);
+            public class Use
+            {
+                public int Sum(System.Collections.Generic.List<Shipment> all)
+                {
+                    var total = 0;
+                    foreach (var (id, weight) in all)
+                        total += id - weight;
+                    return total;
+                }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Shipment",
+            [new SignatureOperation("reorder", Order: ["Weight", "Id"])]);
+
+        Assert.True(result.Success, result.Message);
+        var loop = Assert.Single(result.Warnings, w => w.Contains("Shipment.cs:8", StringComparison.Ordinal));
+        Assert.Contains("deconstruction", loop, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Record_MixedTypeReorder_NamesOnlyTheMovedPositions()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Parcel(int Id, string Label, int Weight);
+            public class Use
+            {
+                public string Show(Parcel p)
+                {
+                    var (id, label, weight) = p;
+                    return label + id + weight;
+                }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Parcel.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Parcel",
+            [new SignatureOperation("reorder", Order: ["Label", "Id", "Weight"])]);
+
+        Assert.True(result.Success, result.Message);
+        var deconstruction = Assert.Single(result.Warnings, w => w.Contains("Parcel.cs:7", StringComparison.Ordinal));
+        Assert.Contains("position 1 now holds 'Label' (string) instead of 'Id' (int)", deconstruction, StringComparison.Ordinal);
+        Assert.Contains("position 2 now holds 'Id'", deconstruction, StringComparison.Ordinal);
+        Assert.DoesNotContain("position 3", deconstruction, StringComparison.Ordinal);
+        Assert.Contains("compiles only through", deconstruction, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Record_RemovingAParameterWithAHandDeclaredProperty_DoesNotWarnThePropertyGoes()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Shipment(int Id, int Weight)
+            {
+                public int Weight { get; init; } = Weight;
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Shipment",
+            [new SignatureOperation("remove", Parameter: "Weight")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("generated property", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ConstructorForm_MatchingTypesInTwoNamespaces_ThrowsAmbiguousMatch()
+    {
+        const string source = """
+            namespace A { public record Shipment(int Id); }
+            namespace B { public record Shipment(int Id); }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Shipment.Shipment",
+                [new SignatureOperation("remove", Parameter: "Id")]));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Contains("A.Shipment", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("B.Shipment", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Property_ThrowsInvalidArgument_NamingMethodsAndConstructors()
+    {
+        const string source = """
+            namespace SigDemo;
+            public class Svc
+            {
+                public int Count { get; set; }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", source));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Svc.Count",
+                [new SignatureOperation("remove", Parameter: "x")]));
+
+        Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
+        Assert.Contains("methods and constructors", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

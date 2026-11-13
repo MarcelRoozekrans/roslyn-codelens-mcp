@@ -179,6 +179,12 @@ internal static class PositionalRecordImpact
             Expression: MemberAccessExpressionSyntax
             {
                 Name.Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
+            } or MemberBindingExpressionSyntax
+            {
+                Name.Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
+            } or IdentifierNameSyntax
+            {
+                Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
             },
         } => "Deconstruct call",
         _ => null,
