@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
@@ -30,12 +31,12 @@ public static class ChangeSignatureLogic
         var target = ResolveMethod(resolver, method);
         var document = GetDeclaringDocument(loaded, target, method);
 
-        var oldSignature = FormatSignature(target.Name,
-            target.Parameters.Select(p => p.ToDisplayString()));
+        var oldSignature = FormatSignature(target, target.Parameters.Select(p => p.ToDisplayString()));
         var resolvedName = target.ToDisplayString();
 
         var desired = BuildDesiredParameters(loaded, resolver, document, target, operations);
-        var newSignature = FormatSignature(target.Name, desired.Select(DescribeParameter));
+        var newSignature = FormatSignature(target, desired.Select(DescribeParameter));
+        var warnings = await PositionalRecordImpact.AnalyzeAsync(loaded, target, desired, ct).ConfigureAwait(false);
 
         var degradedRefusal = preview
             ? null
@@ -43,7 +44,7 @@ public static class ChangeSignatureLogic
         if (degradedRefusal != null)
         {
             return new ChangeSignatureResult(false, resolvedName, oldSignature, newSignature,
-                Applied: false, [], 0, [], [], degradedRefusal);
+                Applied: false, [], 0, [], [], degradedRefusal, warnings);
         }
 
         var bridge = await ChangeSignatureBridge.ChangeSignatureAsync(
@@ -52,8 +53,7 @@ public static class ChangeSignatureLogic
         {
             // Roslyn's own verdict, surfaced verbatim. Nothing is written.
             return new ChangeSignatureResult(false, resolvedName, oldSignature, newSignature,
-                Applied: false, [], 0, [], [],
-                bridge.FailureMessage ?? "Roslyn refused the signature change.");
+                Applied: false, [], 0, [], [], DescribeRefusal(target, bridge.FailureMessage), warnings);
         }
 
         var updated = bridge.UpdatedSolution;
@@ -74,7 +74,27 @@ public static class ChangeSignatureLogic
 
         return new ChangeSignatureResult(
             outcome.Success, resolvedName, oldSignature, newSignature, outcome.Applied,
-            outcome.Edits, outcome.FilesChanged, cascadedTo, outcome.Conflicts, outcome.Message);
+            outcome.Edits, outcome.FilesChanged, cascadedTo, outcome.Conflicts, outcome.Message,
+            warnings);
+    }
+
+    /// <summary>
+    /// Roslyn's refusal, verbatim. For a primary constructor it also names the manual route, since
+    /// the parameter list there declares more than a signature.
+    /// </summary>
+    private static string DescribeRefusal(IMethodSymbol target, string? failureMessage)
+    {
+        var refusal = failureMessage ?? "Roslyn refused the signature change.";
+        if (!IsPrimaryConstructor(target))
+            return refusal;
+
+        var kind = target.ContainingType.IsRecord
+            ? "the primary constructor of a positional record"
+            : "a primary constructor";
+        return refusal
+            + $" '{target.ContainingType.Name}' is {kind}: change its parameter list by hand, then "
+            + "use find_references on the type to update every construction site, and search for "
+            + "string literals that name its members.";
     }
 
     // ------------------------------------------------------------------ resolution
@@ -82,6 +102,9 @@ public static class ChangeSignatureLogic
     internal static IMethodSymbol ResolveMethod(SymbolResolver resolver, string method)
     {
         var matches = resolver.FindSymbols(method);
+        if (matches.Count == 0 && TryResolveConstructorForm(resolver, method) is { } ctorType)
+            return ResolveConstructor(ctorType, method);
+
         if (matches.Count == 0)
         {
             throw new McpToolException(ToolErrorCode.SymbolNotFound,
@@ -110,15 +133,101 @@ public static class ChangeSignatureLogic
                 new { overloads = signatures });
         }
 
+        if (group[0] is INamedTypeSymbol type)
+            return ResolveConstructor(type, method);
+
         if (group[0] is not IMethodSymbol target)
         {
             throw new McpToolException(ToolErrorCode.InvalidArgument,
-                $"'{method}' is a {group[0].Kind} — change_signature only applies to methods.",
+                $"'{method}' is a {group[0].Kind} — change_signature only applies to methods "
+                    + "and constructors.",
                 new { method });
         }
 
         return target;
     }
+
+    /// <summary>
+    /// The `Type.Type` spelling get_method_source and get_overloads accept for a constructor.
+    /// Constructors are named ".ctor", so the member index never matches them under the type's
+    /// name; the type is looked up instead. Null when the request is not of that form or names
+    /// no type, so the caller reports the usual not-found.
+    /// </summary>
+    private static INamedTypeSymbol? TryResolveConstructorForm(SymbolResolver resolver, string method)
+    {
+        var lastDot = method.LastIndexOf('.');
+        if (lastDot <= 0)
+            return null;
+
+        var typePart = method[..lastDot];
+        var memberPart = method[(lastDot + 1)..];
+        if (!string.Equals(typePart.Split('.')[^1], memberPart, StringComparison.Ordinal))
+            return null;
+
+        var types = resolver.FindNamedTypes(typePart)
+            .Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
+            .ToList();
+        if (types.Count > 1)
+        {
+            var names = types.Select(t => t.ToDisplayString())
+                .OrderBy(n => n, StringComparer.Ordinal).ToList();
+            throw new McpToolException(ToolErrorCode.AmbiguousMatch,
+                $"'{method}' matched {types.Count} types: {string.Join(", ", names)}. "
+                    + "Use a more qualified name.",
+                new { matches = names });
+        }
+
+        return types.Count == 1 ? types[0] : null;
+    }
+
+    /// <summary>
+    /// A type stands for its constructor: the primary constructor when it has one (positional
+    /// record, record struct, or a C# 12 class or struct with a parameter list), else the only
+    /// constructor declared in source. Several declared constructors and no primary one is the
+    /// same ambiguity as method overloads.
+    /// </summary>
+    private static IMethodSymbol ResolveConstructor(INamedTypeSymbol type, string method)
+    {
+        var primary = type.InstanceConstructors.FirstOrDefault(IsPrimaryConstructor);
+        if (primary != null)
+            return primary;
+
+        var declared = type.InstanceConstructors
+            .Where(c => c.DeclaringSyntaxReferences.Any(
+                r => r.GetSyntax() is ConstructorDeclarationSyntax))
+            .ToList();
+
+        if (declared.Count == 1)
+            return declared[0];
+
+        if (declared.Count == 0)
+        {
+            throw new McpToolException(ToolErrorCode.InvalidArgument,
+                $"'{method}' is a {type.TypeKind} with no constructor declared in source — "
+                    + "change_signature applies to methods and to constructors written in source, "
+                    + "not to an implicit default constructor.",
+                new { method });
+        }
+
+        var signatures = declared.Select(c => c.ToDisplayString())
+            .OrderBy(s => s, StringComparer.Ordinal).ToList();
+        throw new McpToolException(ToolErrorCode.AmbiguousMatch,
+            $"'{method}' has {declared.Count} constructors: {string.Join(", ", signatures)}. "
+                + "change_signature edits one constructor, and a type without a primary "
+                + "constructor does not say which one is meant.",
+            new { overloads = signatures });
+    }
+
+    /// <summary>
+    /// The constructor declared by a type's own parameter list. A record's synthesized copy
+    /// constructor can also point its declaration at the type, so every parameter must come from
+    /// source as well: the copy constructor's `original` parameter does not.
+    /// </summary>
+    internal static bool IsPrimaryConstructor(IMethodSymbol method)
+        => method.MethodKind == MethodKind.Constructor
+            && method.DeclaringSyntaxReferences.Any(
+                r => r.GetSyntax() is TypeDeclarationSyntax { ParameterList: not null })
+            && method.Parameters.All(p => p.DeclaringSyntaxReferences.Length > 0);
 
     /// <summary>
     /// The document holding the declaration Roslyn will rewrite. A method with no source
@@ -505,8 +614,12 @@ public static class ChangeSignatureLogic
         return names.Count == 0 ? "(none)" : string.Join(", ", names);
     }
 
-    private static string FormatSignature(string name, IEnumerable<string> parameters)
-        => $"{name}({string.Join(", ", parameters)})";
+    /// <summary>A constructor is named ".ctor"; callers know it by its type's name.</summary>
+    private static string FormatSignature(IMethodSymbol target, IEnumerable<string> parameters)
+    {
+        var name = target.MethodKind == MethodKind.Constructor ? target.ContainingType.Name : target.Name;
+        return $"{name}({string.Join(", ", parameters)})";
+    }
 
     private static string DescribeParameter(DesiredParameter parameter)
     {

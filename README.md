@@ -72,7 +72,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **get_code_actions** — Discover available refactorings and fixes at any position (extract method, rename, inline variable, and more)
 - **apply_code_action** — Execute any Roslyn refactoring by title, with preview mode (returns a diff before writing to disk)
 - **rename_symbol** — Solution-wide safe rename of a type or member via Roslyn's Renamer, with preview mode, conflict reporting, and a freshness check against on-disk edits
-- **change_signature** — Add, remove, and reorder a method's parameters and rewrite every call site; handles named/optional arguments, `params` and extension methods, and reports the overrides and interface implementations it cascaded to
+- **change_signature** — Add, remove, and reorder the parameters of a method or constructor, a positional record's primary constructor included, and rewrite every call site; handles named/optional arguments, `params` and extension methods, reports the overrides and interface implementations it cascaded to, and warns about record properties, deconstructions and positional patterns the rewrite does not reach
 - **list_solutions** — List all loaded solutions and which one is currently active
 - **set_active_solution** — Switch the active solution by partial name (all subsequent tools operate on it)
 - **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution

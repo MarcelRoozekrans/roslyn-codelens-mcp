@@ -50,6 +50,63 @@ public class ChangeSignatureFixtureTests
         Assert.Contains(result.CascadedTo, s => s.Contains("FancyGreeter.Greet", StringComparison.Ordinal));
     }
 
+    // ShipmentRecord(int Id, int Weight) lives in PublicApiSamples.cs beside ShipmentRecordUsage,
+    // which constructs it, uses `with` on Weight, and deconstructs it.
+
+    [Fact]
+    public async Task PreviewAddParameterToRecord_RewritesConstructionSites()
+    {
+        var result = await ChangeSignatureLogic.ExecuteAsync(
+            _fixture.Loaded, _fixture.Resolver, "TestLib.ShipmentRecord",
+            [new SignatureOperation("add",
+                Name: "Carrier", Type: "string", CallSiteValue: "\"none\"")],
+            preview: true, force: false, commitToMemory: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("ShipmentRecord(int Id, int Weight)", result.OldSignature);
+        Assert.Equal("ShipmentRecord(int Id, int Weight, string Carrier)", result.NewSignature);
+        Assert.Contains(result.Edits, e => e.NewText.Contains("\"none\"", StringComparison.Ordinal));
+        // The deconstruction gains an element it does not bind: reported both as a warning and,
+        // by the compiler, as a conflict.
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("PublicApiSamples.cs", StringComparison.Ordinal)
+            && w.Contains("from 2 to 3", StringComparison.Ordinal));
+        Assert.NotEmpty(result.Conflicts);
+    }
+
+    [Fact]
+    public async Task PreviewRemoveRecordParameter_WarnsAboutThePropertyUses()
+    {
+        var result = await ChangeSignatureLogic.ExecuteAsync(
+            _fixture.Loaded, _fixture.Resolver, "TestLib.ShipmentRecord.ShipmentRecord",
+            [new SignatureOperation("remove", Parameter: "Weight")],
+            preview: true, force: false, commitToMemory: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("ShipmentRecord.Weight", StringComparison.Ordinal)
+            && w.Contains("PublicApiSamples.cs:", StringComparison.Ordinal));
+        Assert.NotEmpty(result.Conflicts);
+    }
+
+    [Fact]
+    public async Task PreviewReorderSameTypedRecordParameters_WarnsAboutTheSilentDeconstruction()
+    {
+        var result = await ChangeSignatureLogic.ExecuteAsync(
+            _fixture.Loaded, _fixture.Resolver, "TestLib.ShipmentRecord",
+            [new SignatureOperation("reorder", Order: ["Weight", "Id"])],
+            preview: true, force: false, commitToMemory: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("ShipmentRecord(int Weight, int Id)", result.NewSignature);
+        Assert.NotEmpty(result.Edits);
+        // Swapping two ints compiles: the warning is the only signal.
+        Assert.Empty(result.Conflicts);
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("deconstruction", StringComparison.Ordinal)
+            && w.Contains("same type", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task PreviewLeavesFixtureFilesPristine()
     {

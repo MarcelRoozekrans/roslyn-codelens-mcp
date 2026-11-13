@@ -3,6 +3,24 @@ namespace TestLib;
 // Public record class — kind: Record, plus its positional properties (Id, Name) as kind: Property
 public record OrderRecord(int Id, string Name);
 
+// Positional record with two same-typed parameters, a construction site, a `with` and a
+// deconstruction: the change_signature fixture for primary constructors.
+public record ShipmentRecord(int Id, int Weight);
+
+public static class ShipmentRecordUsage
+{
+    public static ShipmentRecord Create() => new ShipmentRecord(1, 2);
+
+    public static ShipmentRecord Heavier(ShipmentRecord shipment)
+        => shipment with { Weight = shipment.Weight + 1 };
+
+    public static int Total(ShipmentRecord shipment)
+    {
+        var (id, weight) = shipment;
+        return id + weight;
+    }
+}
+
 // Public record struct — kind: RecordStruct, plus positional properties (X, Y)
 public record struct PointStruct(int X, int Y);
 
