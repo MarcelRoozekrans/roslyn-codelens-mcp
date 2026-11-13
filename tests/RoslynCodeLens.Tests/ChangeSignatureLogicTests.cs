@@ -1239,6 +1239,33 @@ public class ChangeSignatureLogicTests
     }
 
     [Fact]
+    public async Task Record_SameTypedReorder_WarnsAboutDirectDeconstructCalls()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Shipment(int Id, int Weight);
+            public class Use
+            {
+                public int Split(Shipment s)
+                {
+                    s.Deconstruct(out var id, out var weight);
+                    return id - weight;
+                }
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Shipment",
+            [new SignatureOperation("reorder", Order: ["Weight", "Id"])]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Empty(result.Conflicts);
+        var call = Assert.Single(result.Warnings, w => w.Contains("Shipment.cs:7", StringComparison.Ordinal));
+        Assert.Contains("Deconstruct call", call, StringComparison.Ordinal);
+        Assert.Contains("same type", call, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Record_Add_WarnsThatDeconstructionsChangeArity()
     {
         const string source = """

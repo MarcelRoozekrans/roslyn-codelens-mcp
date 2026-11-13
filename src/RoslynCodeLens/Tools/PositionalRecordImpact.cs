@@ -18,7 +18,8 @@ namespace RoslynCodeLens.Tools;
 /// compiles and silently binds the other value, which no conflict check can catch;</item>
 /// <item>string literals and serialized names are text, so nothing rewrites them.</item>
 /// </list>
-/// Find-references on <c>Deconstruct</c> misses positional patterns, so the sites come from a
+/// Direct <c>Deconstruct(out ...)</c> calls bind by position too. Find-references on
+/// <c>Deconstruct</c> misses positional patterns, so all of these sites come from a
 /// syntax walk over the record's project and every project that depends on it.
 /// </summary>
 internal static class PositionalRecordImpact
@@ -144,14 +145,7 @@ internal static class PositionalRecordImpact
 
                 foreach (var node in root.DescendantNodes())
                 {
-                    var kind = node switch
-                    {
-                        RecursivePatternSyntax { PositionalPatternClause: not null } => "positional pattern",
-                        AssignmentExpressionSyntax { Left: TupleExpressionSyntax or DeclarationExpressionSyntax }
-                            => "deconstruction",
-                        ForEachVariableStatementSyntax => "deconstruction",
-                        _ => null,
-                    };
+                    var kind = ClassifySite(node);
                     if (kind == null)
                         continue;
 
@@ -170,6 +164,26 @@ internal static class PositionalRecordImpact
             .ToList();
     }
 
+    /// <summary>
+    /// The syntax that can bind a record by position, named for the warning. Only these nodes
+    /// reach the semantic model, which confirms they bind the record's generated Deconstruct.
+    /// </summary>
+    private static string? ClassifySite(SyntaxNode node) => node switch
+    {
+        RecursivePatternSyntax { PositionalPatternClause: not null } => "positional pattern",
+        AssignmentExpressionSyntax { Left: TupleExpressionSyntax or DeclarationExpressionSyntax }
+            => "deconstruction",
+        ForEachVariableStatementSyntax => "deconstruction",
+        InvocationExpressionSyntax
+        {
+            Expression: MemberAccessExpressionSyntax
+            {
+                Name.Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
+            },
+        } => "Deconstruct call",
+        _ => null,
+    };
+
     private static bool Deconstructs(
         SemanticModel model, SyntaxNode node, IMethodSymbol deconstruct, CancellationToken ct)
     {
@@ -182,6 +196,8 @@ internal static class PositionalRecordImpact
                 return Uses(model.GetDeconstructionInfo(assignment), deconstruct);
             case ForEachVariableStatementSyntax forEach:
                 return Uses(model.GetDeconstructionInfo(forEach), deconstruct);
+            case InvocationExpressionSyntax invocation:
+                return IsSame(model.GetSymbolInfo(invocation, ct).Symbol, deconstruct);
             default:
                 return false;
         }

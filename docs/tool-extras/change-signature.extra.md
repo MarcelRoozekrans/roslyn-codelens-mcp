@@ -24,7 +24,7 @@ A type with several declared constructors and no primary one is reported as ambi
 A record's parameter list also declares its generated properties and its `Deconstruct`. Roslyn rewrites the construction sites, but not what depends on those members, so the result's `Warnings` names:
 
 - each **removed generated property** with its references, `with` initializers included, at `file:line`;
-- each **deconstruction and positional pattern** that binds the record by position, at `file:line`. After an add or remove they stop compiling. After a **reorder of two parameters of the same type** they still compile, but bind the other value, so no conflict check can catch them;
+- each **deconstruction, positional pattern and direct `Deconstruct` call** that binds the record by position, at `file:line`. After an add or remove they stop compiling. After a **reorder of two parameters of the same type** they still compile, but bind the other value, so no conflict check can catch them;
 - the **text** the change leaves alone: string literals, JSON or other serialized property names, and comments.
 
 Read `Warnings` in preview before applying. `Warnings` is empty for methods and for non-record constructors.
