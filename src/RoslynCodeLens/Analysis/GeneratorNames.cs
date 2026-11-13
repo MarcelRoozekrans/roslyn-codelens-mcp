@@ -33,20 +33,38 @@ internal static class GeneratorNames
 
     /// <summary>
     /// Matches the file path against <c>/&lt;assembly&gt;/&lt;type&gt;/</c> for each known
-    /// generator, longest type name first so a generator whose name is a prefix of another does not
-    /// shadow it. Falls back to <see cref="InferFromPath"/> when no identity matches.
+    /// generator. The generator's own segments precede the hint name, and a hint name may contain
+    /// directories that spell another generator's identity, so the leftmost match wins; when the
+    /// hint name is known it is cut off before matching. The path is matched with a leading
+    /// separator so a relative path that starts with the assembly name still matches. Falls back
+    /// to <see cref="InferFromPath"/> when no identity matches.
     /// </summary>
     internal static string Resolve(
         IReadOnlyList<GeneratorIdentity> identities, string? filePath, string? hintName)
     {
         if (!string.IsNullOrEmpty(filePath))
         {
-            var path = filePath.Replace('\\', '/');
-            foreach (var id in identities.OrderByDescending(i => i.TypeName.Length))
+            var path = "/" + filePath.Replace('\\', '/');
+            if (!string.IsNullOrEmpty(hintName))
             {
-                if (path.Contains($"/{id.AssemblyName}/{id.TypeName}/", StringComparison.OrdinalIgnoreCase))
-                    return id.TypeName;
+                var hint = hintName.Replace('\\', '/');
+                if (path.EndsWith("/" + hint, StringComparison.OrdinalIgnoreCase))
+                    path = path[..(path.Length - hint.Length)];
             }
+
+            string? best = null;
+            var bestIndex = int.MaxValue;
+            foreach (var id in identities)
+            {
+                var index = path.IndexOf($"/{id.AssemblyName}/{id.TypeName}/", StringComparison.OrdinalIgnoreCase);
+                if (index >= 0 && (index < bestIndex || (index == bestIndex && id.TypeName.Length > best!.Length)))
+                {
+                    best = id.TypeName;
+                    bestIndex = index;
+                }
+            }
+            if (best is not null)
+                return best;
         }
         return InferFromPath(filePath, hintName);
     }

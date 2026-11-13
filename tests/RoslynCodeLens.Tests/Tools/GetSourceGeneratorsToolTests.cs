@@ -83,6 +83,33 @@ public class GetSourceGeneratorsToolTests
         Assert.Equal(expected, GeneratorNames.Resolve(identities, filePath, hintName: null));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("B/Ns.LongerGenerator/X.g.cs")]
+    public void Resolve_PicksTheGeneratorThatOwnsThePath_NotOneNamedInsideTheHintName(string? hintName)
+    {
+        // Ns.Gen emitted a hint name that happens to spell another generator's identity.
+        var identities = new[]
+        {
+            new GeneratorIdentity("A", "Ns.Gen"),
+            new GeneratorIdentity("B", "Ns.LongerGenerator"),
+        };
+
+        Assert.Equal("Ns.Gen", GeneratorNames.Resolve(
+            identities, "C:/proj/obj/Debug/net10.0/A/Ns.Gen/B/Ns.LongerGenerator/X.g.cs", hintName));
+    }
+
+    [Theory]
+    [InlineData("Riok.Mapperly/Riok.Mapperly.MapperGenerator/Mappers.Mapper.g.cs")]
+    [InlineData(@"Riok.Mapperly\Riok.Mapperly.MapperGenerator\Mappers.Mapper.g.cs")]
+    public void Resolve_MatchesAnIdentityAtTheStartOfARelativePath(string filePath)
+    {
+        // Per-project loads without an output directory give generated documents a relative path.
+        var identities = new[] { new GeneratorIdentity("Riok.Mapperly", "Riok.Mapperly.MapperGenerator") };
+
+        Assert.Equal("Riok.Mapperly.MapperGenerator", GeneratorNames.Resolve(identities, filePath, hintName: null));
+    }
+
     [Fact]
     public void Resolve_FallsBackToHintNameInference_WhenNoIdentityMatches()
     {
