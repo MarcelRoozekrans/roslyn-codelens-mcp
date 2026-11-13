@@ -14,7 +14,7 @@ public static class GetGeneratedCodeTool
                  "Returns an envelope with items sorted by project then file path, totalCount, truncated, and limit (default 200).")]
     public static ToolListResult<GeneratedFileInfo> Execute(
         MultiSolutionManager manager,
-        [Description("Generator name to filter by")] string? generator = null,
+        [Description("Generator full type name to filter by, as reported by get_source_generators (e.g. System.Text.RegularExpressions.Generator.RegexGenerator)")] string? generator = null,
         [Description("File path (or partial match) to filter by")] string? file = null,
         [Description("Maximum number of items to return (default: 200). Items are sorted by project, then file path.")]
             int? limit = null)

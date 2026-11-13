@@ -22,8 +22,8 @@ public static class LoadSolutionTool
                  "If the solution is already loaded with no filter, it simply activates it (~instant). " +
                  "New solutions take ~3 seconds to load and compile. " +
                  "For very large solutions (hundreds of projects) that take minutes to open, pass " +
-                 "`background: true` to return a taskId immediately instead of blocking; poll it with " +
-                 "get_task_status until it succeeds (its result carries the loaded/skipped counts). " +
+                 "`background: true` to return a taskId immediately instead of blocking; wait on it with " +
+                 "get_task_status and waitSeconds until it succeeds (its result carries the loaded/skipped counts). " +
                  "The new solution only becomes active once the background load finishes, so other " +
                  "tools keep working against the current solution meanwhile.")]
     public static async Task<object> Execute(
@@ -32,7 +32,7 @@ public static class LoadSolutionTool
         [Description("Full path to the .sln or .slnx file to load")] string path,
         [Description("Optional case-insensitive glob patterns against project file name without extension (e.g. 'MyApp.*')")] string[]? include = null,
         [Description("Optional exact project file names without extension; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null,
-        [Description("If true, load on a background task and return a taskId immediately (poll with get_task_status) instead of blocking until the solution is ready. Default false.")] bool background = false)
+        [Description("If true, load on a background task and return a taskId immediately (wait with get_task_status and waitSeconds) instead of blocking until the solution is ready. Default false.")] bool background = false)
     {
         // Validate up front in both modes so a bad path fails fast rather than
         // surfacing only when the caller polls the background task.

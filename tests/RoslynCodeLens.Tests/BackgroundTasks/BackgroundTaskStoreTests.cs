@@ -7,6 +7,106 @@ namespace RoslynCodeLens.Tests.BackgroundTasks;
 public class BackgroundTaskStoreTests
 {
     [Fact]
+    public async Task WaitAsync_ReturnsEarly_WhenTaskCompletes()
+    {
+        using var store = new BackgroundTaskStore();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var info = store.Start("test_tool", async ct =>
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+            return "payload";
+        });
+
+        var pending = store.WaitAsync(info.TaskId, TimeSpan.FromSeconds(30), CancellationToken.None);
+        Assert.False(pending.IsCompleted, "WaitAsync should wait while the task is still running.");
+
+        gate.SetResult();
+        var result = await pending.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+
+        Assert.NotNull(result);
+        Assert.Equal(BackgroundTaskStatus.Succeeded, result!.Status);
+        Assert.NotNull(result.CompletedAt);
+    }
+
+    [Fact]
+    public async Task WaitAsync_ReturnsRunning_AfterTimeout()
+    {
+        using var store = new BackgroundTaskStore();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var info = store.Start("test_tool", async ct =>
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+            return null;
+        });
+
+        var result = await store.WaitAsync(info.TaskId, TimeSpan.FromMilliseconds(100), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.Equal(BackgroundTaskStatus.Running, result!.Status);
+        gate.SetResult();
+        await WaitForTerminal(store, info.TaskId).ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task WaitAsync_ZeroTimeout_ReturnsImmediately()
+    {
+        using var store = new BackgroundTaskStore();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var info = store.Start("test_tool", async ct =>
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+            return null;
+        });
+
+        var result = await store.WaitAsync(info.TaskId, TimeSpan.Zero, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.Equal(BackgroundTaskStatus.Running, result!.Status);
+        gate.SetResult();
+        await WaitForTerminal(store, info.TaskId).ConfigureAwait(false);
+    }
+
+    [Fact]
+    public async Task WaitAsync_UnknownTaskId_ReturnsNull()
+    {
+        using var store = new BackgroundTaskStore();
+        var result = await store.WaitAsync("bg-nope-foo-bar", TimeSpan.FromSeconds(1), CancellationToken.None)
+            .ConfigureAwait(false);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task WaitAsync_Cancellation_EndsTheWait()
+    {
+        using var store = new BackgroundTaskStore();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var info = store.Start("test_tool", async ct =>
+        {
+            await gate.Task.WaitAsync(ct).ConfigureAwait(false);
+            return null;
+        });
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.WaitAsync(info.TaskId, TimeSpan.FromSeconds(30), cts.Token));
+
+        gate.SetResult();
+        await WaitForTerminal(store, info.TaskId).ConfigureAwait(false);
+    }
+
+    [Theory]
+    [InlineData(-5, 0)]
+    [InlineData(0, 0)]
+    [InlineData(10, 10)]
+    [InlineData(50, 50)]
+    [InlineData(51, 50)]
+    [InlineData(int.MaxValue, 50)]
+    public void ClampWait_ClampsToZeroAndCap(int requested, int expectedSeconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), BackgroundTaskStore.ClampWait(requested));
+    }
+
+    [Fact]
     public async Task Start_AssignsHumanReadableTaskId()
     {
         using var store = new BackgroundTaskStore();

@@ -14,6 +14,10 @@ internal sealed class BackgroundTask : IDisposable
     public string? ErrorCode { get; set; }
     public CancellationTokenSource Cts { get; }
 
+    /// <summary>Completed (once) when the task reaches a terminal state; lets callers wait without polling.</summary>
+    public TaskCompletionSource Completion { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public BackgroundTask(string taskId, string toolName)
     {
         TaskId = taskId;

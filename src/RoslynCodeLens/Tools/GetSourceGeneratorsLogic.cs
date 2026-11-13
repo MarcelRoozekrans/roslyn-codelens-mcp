@@ -1,11 +1,12 @@
 using Microsoft.CodeAnalysis;
+using RoslynCodeLens.Analysis;
 using RoslynCodeLens.Models;
 
 namespace RoslynCodeLens.Tools;
 
 public static class GetSourceGeneratorsLogic
 {
-    internal const string UnknownGenerator = "Unknown";
+    internal const string UnknownGenerator = GeneratorNames.Unknown;
 
     /// <summary>
     /// Groups a project's real source-generator output by the generator that produced it.
@@ -29,10 +30,12 @@ public static class GetSourceGeneratorsLogic
 
             var generated = await proj.GetSourceGeneratedDocumentsAsync(ct).ConfigureAwait(false);
 
+            var identities = GeneratorNames.GetIdentities(proj);
+            var generatedBase = GeneratorNames.GetGeneratedFilesBase(proj);
             var byGenerator = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var document in generated)
             {
-                var generatorName = InferGeneratorName(document.FilePath, document.HintName);
+                var generatorName = GeneratorNames.Resolve(identities, document.FilePath, document.HintName, generatedBase);
                 if (!byGenerator.TryGetValue(generatorName, out var files))
                 {
                     files = new List<string>();
@@ -49,30 +52,5 @@ public static class GetSourceGeneratorsLogic
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// Recovers the generator's type name from the synthetic path Roslyn gives a source-generated
-    /// document: <c>&lt;intermediateOutput&gt;/&lt;analyzerAssembly&gt;/&lt;generatorType&gt;/&lt;hintName&gt;</c>.
-    /// The hint name may itself contain directory separators (the Razor generator uses the
-    /// component's relative path), so it is stripped by length rather than by taking a fixed
-    /// number of trailing segments.
-    /// </summary>
-    internal static string InferGeneratorName(string? filePath, string hintName)
-    {
-        if (string.IsNullOrEmpty(filePath) || string.IsNullOrEmpty(hintName))
-            return UnknownGenerator;
-
-        var path = filePath.Replace('\\', '/');
-        var hint = hintName.Replace('\\', '/');
-        if (!path.EndsWith(hint, StringComparison.OrdinalIgnoreCase))
-            return UnknownGenerator;
-
-        var directory = path[..^hint.Length].TrimEnd('/');
-        var lastSeparator = directory.LastIndexOf('/');
-        if (lastSeparator < 0 || lastSeparator == directory.Length - 1)
-            return UnknownGenerator;
-
-        return directory[(lastSeparator + 1)..];
     }
 }
