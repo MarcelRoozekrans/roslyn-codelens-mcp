@@ -5,6 +5,12 @@ namespace RoslynCodeLens.BackgroundTasks;
 
 public sealed class BackgroundTaskStore : IDisposable
 {
+    /// <summary>
+    /// Longest server-side wait <c>get_task_status</c> honours. Kept under the 60 s default
+    /// request timeout of common MCP clients so a wait never turns into a client timeout.
+    /// </summary>
+    public const int MaxWaitSeconds = 50;
+
     private static readonly TimeSpan EvictionAge = TimeSpan.FromMinutes(60);
     private static readonly TimeSpan ListWindow = TimeSpan.FromMinutes(5);
     private static readonly string[] s_adjectives =
@@ -59,6 +65,7 @@ public sealed class BackgroundTaskStore : IDisposable
             finally
             {
                 task.CompletedAt = DateTimeOffset.UtcNow;
+                task.Completion.TrySetResult();
             }
         });
 
@@ -67,6 +74,34 @@ public sealed class BackgroundTaskStore : IDisposable
 
     public BackgroundTaskInfo? Get(string taskId) =>
         _tasks.TryGetValue(taskId, out var task) ? task.ToInfo() : null;
+
+    /// <summary>Clamps a requested wait to [0, <see cref="MaxWaitSeconds"/>] seconds.</summary>
+    public static TimeSpan ClampWait(int waitSeconds) =>
+        TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, MaxWaitSeconds));
+
+    /// <summary>
+    /// Returns the task's info, waiting up to <paramref name="timeout"/> for a running task to finish.
+    /// Returns null for an unknown or evicted id. Throws <see cref="OperationCanceledException"/>
+    /// when <paramref name="ct"/> is cancelled during the wait.
+    /// </summary>
+    public async Task<BackgroundTaskInfo?> WaitAsync(string taskId, TimeSpan timeout, CancellationToken ct)
+    {
+        if (!_tasks.TryGetValue(taskId, out var task)) return null;
+
+        if (timeout > TimeSpan.Zero && !task.Completion.Task.IsCompleted)
+        {
+            try
+            {
+                await task.Completion.Task.WaitAsync(timeout, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Timed out while still running: fall through and report current state.
+            }
+        }
+
+        return task.ToInfo();
+    }
 
     public IReadOnlyList<BackgroundTaskInfo> ListRunning()
     {

@@ -308,7 +308,7 @@ Limitations: abstract methods, interface instance members, and properties-as-who
 ### Solution Management
 - `list_solutions` — loaded solutions, which is active. Includes a `SkippedProjects` array per solution: projects MSBuildWorkspace could not load (legacy non-SDK-style csproj, missing files), with `Kind` and `Reason`.
 - `set_active_solution` — switch active solution by partial name.
-- `load_solution` — load a `.sln`/`.slnx` at runtime. Returns a confirmation; when projects were skipped, the message summarises them and points to `list_solutions` for per-project reasons. For very large solutions (hundreds of projects) that take minutes to open, pass `background: true` to get a `taskId` back immediately and poll `get_task_status` instead of blocking — the new solution becomes active only once that task succeeds, so other tools keep working against the current solution meanwhile.
+- `load_solution` — load a `.sln`/`.slnx` at runtime. Returns a confirmation; when projects were skipped, the message summarises them and points to `list_solutions` for per-project reasons. For very large solutions (hundreds of projects) that take minutes to open, pass `background: true` to get a `taskId` back immediately and wait with one `get_task_status` call and `waitSeconds: 50` (it returns as soon as the task finishes; repeat only if it is still Running) instead of blocking or polling — the new solution becomes active only once that task succeeds, so other tools keep working against the current solution meanwhile.
 - `unload_solution` — free memory.
 - `rebuild_solution` — full reload (after `Directory.Build.props` changes, new analyzers/packages, or stale diagnostics).
 
@@ -383,7 +383,7 @@ Reference concrete types, interfaces, and call sites in your analysis. Not *"the
 | `set_active_solution` | "Switch to project B" |
 | `rebuild_solution` | "Reload the solution" / "Diagnostics are stale" |
 | `start_background_task` | "Kick off a long rebuild without blocking" |
-| `get_task_status` | "Check on a queued background task" |
+| `get_task_status` | "Check on or wait for a background task (waitSeconds, max 50)" |
 | `list_running_tasks` | "What background work is in flight?" |
 | `analyze_data_flow` | "What variables are read/written here?" |
 | `analyze_control_flow` | "Is this code reachable?" |

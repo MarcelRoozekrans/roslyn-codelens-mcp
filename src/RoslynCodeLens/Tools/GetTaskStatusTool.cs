@@ -9,12 +9,18 @@ namespace RoslynCodeLens.Tools;
 public static class GetTaskStatusTool
 {
     [McpServerTool(Name = "get_task_status"),
-     Description("Get the current status of a background task by its taskId.")]
-    public static BackgroundTaskInfo Execute(
+     Description("Get the current status of a background task by its taskId. " +
+                 "Pass waitSeconds to wait on the server while the task is Running: the call returns as soon as " +
+                 "the task finishes, or after waitSeconds with the task still Running. Prefer one call with a " +
+                 "generous waitSeconds (the 50 second cap) over polling. Values above 50 are clamped to 50.")]
+    public static async Task<BackgroundTaskInfo> Execute(
         BackgroundTaskStore store,
-        [Description("The taskId returned by start_background_task")] string taskId)
+        [Description("The taskId returned by start_background_task")] string taskId,
+        [Description("Seconds to wait for a running task to finish. Default 0 returns immediately; negative is treated as 0; values above 50 are clamped to 50.")] int waitSeconds = 0,
+        CancellationToken ct = default)
     {
-        var info = store.Get(taskId);
+        var info = await store.WaitAsync(taskId, BackgroundTaskStore.ClampWait(waitSeconds), ct)
+            .ConfigureAwait(false);
         if (info is null)
         {
             throw new McpToolException(
