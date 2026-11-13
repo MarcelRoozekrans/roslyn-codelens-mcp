@@ -1349,6 +1349,31 @@ public class ChangeSignatureLogicTests
     }
 
     [Fact]
+    public async Task Record_SameTypedReorder_WarnsAboutDeconstructMethodGroups()
+    {
+        const string source = """
+            namespace SigDemo;
+            public record Shipment(int Id, int Weight);
+            public delegate void Split(out int id, out int weight);
+            public class Use
+            {
+                public Split Splitter(Shipment s) => s.Deconstruct;
+                public string Name() => nameof(Shipment.Deconstruct);
+            }
+            """;
+        var (loaded, resolver) = RenameTestWorkspace.Create(("Shipment.cs", source));
+
+        var result = await RunAsync(loaded, resolver, "Shipment",
+            [new SignatureOperation("reorder", Order: ["Weight", "Id"])]);
+
+        Assert.True(result.Success, result.Message);
+        var group = Assert.Single(result.Warnings, w => w.Contains("Shipment.cs:6", StringComparison.Ordinal));
+        Assert.Contains("Deconstruct method group", group, StringComparison.Ordinal);
+        // nameof binds no values, so it is not a positional site.
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("Shipment.cs:7", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Record_SameTypedReorder_WarnsAboutForEachDeconstructions()
     {
         const string source = """

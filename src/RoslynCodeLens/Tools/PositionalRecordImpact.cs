@@ -174,21 +174,25 @@ internal static class PositionalRecordImpact
         AssignmentExpressionSyntax { Left: TupleExpressionSyntax or DeclarationExpressionSyntax }
             => "deconstruction",
         ForEachVariableStatementSyntax => "deconstruction",
-        InvocationExpressionSyntax
-        {
-            Expression: MemberAccessExpressionSyntax
-            {
-                Name.Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
-            } or MemberBindingExpressionSyntax
-            {
-                Name.Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
-            } or IdentifierNameSyntax
-            {
-                Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName,
-            },
-        } => "Deconstruct call",
+        IdentifierNameSyntax { Identifier.ValueText: WellKnownMemberNames.DeconstructMethodName } name
+            => IsInvoked(name) ? "Deconstruct call" : "Deconstruct method group",
         _ => null,
     };
+
+    /// <summary>
+    /// Whether a `Deconstruct` name is the callee of an invocation, written as `Deconstruct(...)`,
+    /// `s.Deconstruct(...)` or `s?.Deconstruct(...)`, rather than a method group such as one
+    /// converted to a delegate.
+    /// </summary>
+    private static bool IsInvoked(IdentifierNameSyntax name)
+    {
+        SyntaxNode callee = name.Parent is MemberAccessExpressionSyntax access && access.Name == name
+            ? access
+            : name.Parent is MemberBindingExpressionSyntax binding && binding.Name == name
+                ? binding
+                : name;
+        return callee.Parent is InvocationExpressionSyntax invocation && invocation.Expression == callee;
+    }
 
     private static bool Deconstructs(
         SemanticModel model, SyntaxNode node, IMethodSymbol deconstruct, CancellationToken ct)
@@ -202,8 +206,8 @@ internal static class PositionalRecordImpact
                 return Uses(model.GetDeconstructionInfo(assignment), deconstruct);
             case ForEachVariableStatementSyntax forEach:
                 return Uses(model.GetDeconstructionInfo(forEach), deconstruct);
-            case InvocationExpressionSyntax invocation:
-                return IsSame(model.GetSymbolInfo(invocation, ct).Symbol, deconstruct);
+            case IdentifierNameSyntax name:
+                return IsSame(model.GetSymbolInfo(name, ct).Symbol, deconstruct);
             default:
                 return false;
         }
