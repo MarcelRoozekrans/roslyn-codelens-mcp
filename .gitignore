@@ -43,3 +43,6 @@ docs/site/docs/tools/
 
 # Screenshots and page snapshots the Playwright MCP server writes into the working directory.
 .playwright-mcp/
+
+# Written by CI (and by hand before a local test run) to pin the fixtures to the .NET 10 SDK, issue #560.
+tests/RoslynCodeLens.Tests/Fixtures/global.json
