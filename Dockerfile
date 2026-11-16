@@ -9,7 +9,7 @@
 #   docker build -t roslyn-codelens-mcp .
 #   docker run -i --rm -v "$PWD:/workspace" roslyn-codelens-mcp
 #
-# See docs/docker.md for MCP client configuration and the NuGet cache mount.
+# See docs/site/docs/getting-started/docker.md for MCP client configuration and the NuGet cache mount.
 
 # ---------------------------------------------------------------- build -------
 FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
