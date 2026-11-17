@@ -4,6 +4,18 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>moderate</NuGetAuditLevel>
   </PropertyGroup>
+  <!-- Debugging into the package: Go to Definition and step-into show the original source.
+       The PDB is embedded in each DLL, so consumers need no symbol server setting; Source Link,
+       built into the .NET SDK, maps it to this commit on GitHub. ContinuousIntegrationBuild
+       makes CI builds deterministic and writes /_/ paths instead of the runner's. It applies to
+       the shipped projects under src/ only: in a test project it would also turn CallerFilePath
+       into /_/..., which breaks tests that find snapshot files through it. -->
+  <PropertyGroup>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true' and $(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src$([System.IO.Path]::DirectorySeparatorChar)'))">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Meziantou.Analyzer" Version="3.0.341">
       <PrivateAssets>all</PrivateAssets>
