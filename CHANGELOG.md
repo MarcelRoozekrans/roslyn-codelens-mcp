@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.19.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.19.0...v2.19.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* embed PDBs so Go to Definition shows the package source ([69a4f11](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/69a4f11582d25544fe26c739d62053ba9de170e5))
+
 ## [2.19.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.18.2...v2.19.0) (2026-11-13)
 
 
