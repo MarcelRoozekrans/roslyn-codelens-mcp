@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using RoslynCodeLens;
 using RoslynCodeLens.BackgroundTasks;
 using RoslynCodeLens.Tools;
@@ -17,6 +18,28 @@ public class LegacySolutionHandlingTests
         AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolution", "TestSolution.slnx"));
 
     [Fact]
+    public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableProjectOnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "LoadableLegacy.slnx");
+
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
+        using var _ = workspace;
+
+        var project = Assert.Single(solution.Projects);
+        Assert.Equal("LoadableLegacyLib", project.Name);
+        Assert.Equal("LegacyLib", Assert.Single(skipped).Name);
+
+        var compilation = await project.GetCompilationAsync();
+
+        Assert.NotNull(compilation);
+        Assert.NotNull(compilation.GetTypeByMetadataName("LegacyLib.LegacyClass"));
+        Assert.DoesNotContain(compilation.GetDiagnostics(), diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact]
     public async Task SolutionManager_CreateAsync_DoesNotThrowOnLegacyProject()
     {
         var manager = await SolutionManager.CreateAsync(LegacySolutionPath);
@@ -30,6 +53,7 @@ public class LegacySolutionHandlingTests
         await manager.WaitForWarmupAsync();
 
         var loaded = manager.GetLoadedSolution();
+        Assert.Empty(loaded.Solution.Projects);
         Assert.NotEmpty(loaded.SkippedProjects);
         Assert.Contains(loaded.SkippedProjects, p => string.Equals(p.Kind, "Legacy", StringComparison.Ordinal));
         Assert.Contains(loaded.SkippedProjects, p => p.Reason.Contains("non-SDK", StringComparison.OrdinalIgnoreCase));

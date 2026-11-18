@@ -112,17 +112,14 @@ public class SolutionLoader
             return await OpenFilteredAsync(solutionPath, classified, filter, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var legacyOrMissing = classified
-            .Where(p => p.Kind is ProjectClassifier.ProjectKind.Legacy
-                     or ProjectClassifier.ProjectKind.Missing
-                     or ProjectClassifier.ProjectKind.Unknown)
+        var legacyProjects = classified
+            .Where(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)
             .ToList();
 
-        var preFilter = legacyOrMissing.Any(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
-        if (preFilter)
+        if (legacyProjects.Count > 0 && !OperatingSystem.IsWindows())
         {
             await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
+                $"[roslyn-codelens] Detected {legacyProjects.Count} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
@@ -189,7 +186,9 @@ public class SolutionLoader
                 bestWorkspace?.Dispose();
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
-                return await WithAnalyzerSkewAsync(new SolutionOpen(solution, workspace, [], [])).ConfigureAwait(false);
+                return await WithAnalyzerSkewAsync(
+                    RemoveUnloadedLegacyProjects(new SolutionOpen(solution, workspace, [], []), legacyProjects))
+                    .ConfigureAwait(false);
             }
 
             // Degraded: retain the attempt with the fewest dropped projects.
@@ -219,7 +218,33 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped)).ConfigureAwait(false);
+            RemoveUnloadedLegacyProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), legacyProjects))
+            .ConfigureAwait(false);
+    }
+
+    private static SolutionOpen RemoveUnloadedLegacyProjects(
+        SolutionOpen open, IReadOnlyList<ProjectClassifier.ClassifiedProject> legacyProjects)
+    {
+        if (legacyProjects.Count == 0)
+            return open;
+
+        var solution = open.Solution;
+        var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, StringComparer.OrdinalIgnoreCase);
+        // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
+        var skipped = legacyProjects
+            .Where(legacy => !projectsByPath[legacy.Path].Any(p =>
+                p.OutputFilePath is not null || p.DocumentIds.Count > 0))
+            .Select(legacy => new SkippedProject(legacy.Path, legacy.Name, "Legacy",
+                "MSBuild could not load the legacy non-SDK-style project."))
+            .ToArray();
+
+        foreach (var entry in skipped)
+        {
+            foreach (var project in projectsByPath[entry.Path])
+                solution = solution.RemoveProject(project.Id);
+        }
+
+        return open with { Solution = solution, Skipped = skipped };
     }
 
     /// <summary>

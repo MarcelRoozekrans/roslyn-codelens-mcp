@@ -35,22 +35,13 @@ Full benchmark results are in the [repository](https://github.com/MarcelRoozekra
 
 ## What .NET versions are supported?
 
-The server targets .NET 10 and .NET 11 and can analyse solutions targeting any .NET version (net48, net6.0, net8.0, net10.0, etc.) — **as long as the projects use the SDK-style csproj format** (`<Project Sdk="...">`).
+The server targets .NET 10 and .NET 11. SDK-style projects (`<Project Sdk="...">`) can target any .NET version, including .NET Framework.
 
 ## Are legacy (non-SDK-style) .NET Framework projects supported?
 
-**No, and they will be skipped — but the rest of the solution still loads.**
+Yes, during a full solution load on Windows with Visual Studio MSBuild and the project's .NET Framework targeting pack. Call `load_solution` with the solution path to use the full solution load.
 
-Legacy projects use the old MSBuild XML format (`<Project ToolsVersion="..." xmlns="http://schemas.microsoft.com/developer/msbuild/2003">`) and rely on the .NET Framework MSBuild that ships with Visual Studio. The .NET SDK does not include those targets, so MSBuildWorkspace cannot load them under `dotnet run`.
-
-What the server does when it encounters them:
-
-- Pre-classifies every `.csproj` in the solution before invoking MSBuild.
-- Loads all SDK-style projects normally — every tool works for those.
-- Records each legacy project in `LoadedSolution.SkippedProjects`.
-- Exposes the skipped list through `list_solutions` (the `SkippedProjects` array, with `Name`, `Path`, `Kind`, and `Reason` per project), and includes a summary in the return message of `load_solution`.
-
-To analyse a legacy project, either convert it to SDK-style csproj format, or run the server from a Visual Studio Developer Command Prompt where the full MSBuild toolchain is on `PATH`.
+Filtered loads, per-project fallback loads, and loads on other platforms skip legacy projects. Check `list_solutions` for the skipped projects and their reasons.
 
 ## Why is `list_solutions` showing `SkippedProjects` for my solution?
 
