@@ -18,7 +18,7 @@ public class LegacySolutionHandlingTests
         AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolution", "TestSolution.slnx"));
 
     [Fact]
-    public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableProjectOnWindows()
+    public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows()
     {
         if (!OperatingSystem.IsWindows())
             return;
@@ -30,7 +30,10 @@ public class LegacySolutionHandlingTests
 
         var project = Assert.Single(solution.Projects);
         Assert.Equal("LoadableLegacyLib", project.Name);
-        Assert.Equal("LegacyLib", Assert.Single(skipped).Name);
+        Assert.Contains(skipped, entry => entry is { Name: "MissingProject", Kind: "Missing" });
+        Assert.Contains(skipped, entry => entry is { Name: "LegacyLib", Kind: "Legacy" });
+        Assert.Contains(skipped, entry => entry is { Name: "UnsupportedProject", Kind: "Unknown" });
+        Assert.Equal(3, skipped.Count);
 
         var compilation = await project.GetCompilationAsync();
 

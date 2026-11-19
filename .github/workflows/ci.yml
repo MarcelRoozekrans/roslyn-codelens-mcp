@@ -75,3 +75,25 @@ jobs:
           files: "TestResults/**/coverage.cobertura.xml"
           disable_search: true   # only the files above, not every *.xml the search finds
           fail_ci_if_error: false
+
+  legacy-windows:
+    name: Legacy project loading on Windows
+    runs-on: windows-2025
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            10.0.x
+            11.0.x
+
+      - name: Test legacy solution loading
+        run: >-
+          dotnet test tests/RoslynCodeLens.Tests/RoslynCodeLens.Tests.csproj -c Release -m:1
+          --filter "FullyQualifiedName~OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows"

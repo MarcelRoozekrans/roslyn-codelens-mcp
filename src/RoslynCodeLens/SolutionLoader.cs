@@ -112,17 +112,18 @@ public class SolutionLoader
             return await OpenFilteredAsync(solutionPath, classified, filter, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var legacyProjects = classified
-            .Where(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)
-            .ToList();
-
-        if (legacyProjects.Count > 0 && !OperatingSystem.IsWindows())
+        var legacyCount = classified.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
+        if (legacyCount > 0 && !OperatingSystem.IsWindows())
         {
             await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Detected {legacyProjects.Count} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
+                $"[roslyn-codelens] Detected {legacyCount} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
+
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck = legacyCount > 0
+            ? classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray()
+            : [];
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
@@ -187,7 +188,7 @@ public class SolutionLoader
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
                 return await WithAnalyzerSkewAsync(
-                    RemoveUnloadedLegacyProjects(new SolutionOpen(solution, workspace, [], []), legacyProjects))
+                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), projectsToCheck))
                     .ConfigureAwait(false);
             }
 
@@ -218,24 +219,26 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            RemoveUnloadedLegacyProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), legacyProjects))
+            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), projectsToCheck))
             .ConfigureAwait(false);
     }
 
-    private static SolutionOpen RemoveUnloadedLegacyProjects(
-        SolutionOpen open, IReadOnlyList<ProjectClassifier.ClassifiedProject> legacyProjects)
+    private static SolutionOpen RemoveUnloadedProjects(
+        SolutionOpen open, IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck)
     {
-        if (legacyProjects.Count == 0)
+        if (projectsToCheck.Count == 0)
             return open;
 
         var solution = open.Solution;
         var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, StringComparer.OrdinalIgnoreCase);
         // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
-        var skipped = legacyProjects
-            .Where(legacy => !projectsByPath[legacy.Path].Any(p =>
+        var skipped = projectsToCheck
+            .Where(entry => !projectsByPath[entry.Path].Any(p =>
                 p.OutputFilePath is not null || p.DocumentIds.Count > 0))
-            .Select(legacy => new SkippedProject(legacy.Path, legacy.Name, "Legacy",
-                "MSBuild could not load the legacy non-SDK-style project."))
+            .Select(entry => new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
+                entry.Kind == ProjectClassifier.ProjectKind.Legacy
+                    ? "MSBuild could not load the legacy non-SDK-style project."
+                    : entry.Reason ?? "Unsupported project format."))
             .ToArray();
 
         foreach (var entry in skipped)

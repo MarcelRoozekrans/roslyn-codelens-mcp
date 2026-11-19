@@ -312,7 +312,7 @@ Limitations: abstract methods, interface instance members, and properties-as-who
 - `unload_solution` — free memory.
 - `rebuild_solution` — full reload (after `Directory.Build.props` changes, new analyzers/packages, or stale diagnostics).
 
-**Legacy non-SDK-style .NET Framework projects** are attempted during a full solution load on Windows with Visual Studio MSBuild. Use `load_solution` with the solution path to attempt a full load. Filtered loads, per-project fallback loads, and loads on other platforms skip legacy projects. If a legacy project is unavailable, check `list_solutions` for its entry in `SkippedProjects`.
+**Legacy non-SDK-style .NET Framework projects** are attempted during a full solution load on Windows with Visual Studio MSBuild. Call `load_solution` with just the solution path. If the solution is already loaded with a filter, call `unload_solution` first. Filtered loads, per-project fallback loads, and loads on other platforms skip legacy projects. If a legacy project is unavailable, check `list_solutions` for its entry in `SkippedProjects`.
 
 ### Planning a Change — standard order
 1. `get_type_overview` — context + hierarchy + diagnostics.

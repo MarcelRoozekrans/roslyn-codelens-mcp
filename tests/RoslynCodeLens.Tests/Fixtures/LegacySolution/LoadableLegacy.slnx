@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="LegacyLib/LegacyLib.csproj" />
   <Project Path="LegacyLib/LoadableLegacyLib.csproj" />
+  <Project Path="LegacyLib/MissingProject.csproj" />
+  <Project Path="UnsupportedProject.sqlproj" />
 </Solution>

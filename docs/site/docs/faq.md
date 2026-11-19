@@ -39,7 +39,7 @@ The server targets .NET 10 and .NET 11. SDK-style projects (`<Project Sdk="...">
 
 ## Are legacy (non-SDK-style) .NET Framework projects supported?
 
-Yes, during a full solution load on Windows with Visual Studio MSBuild and the project's .NET Framework targeting pack. Call `load_solution` with the solution path to use the full solution load.
+Yes, during a full solution load on Windows with Visual Studio MSBuild and the project's .NET Framework targeting pack. Call `load_solution` with just the solution path. If the solution is already loaded with a filter, call `unload_solution` first.
 
 Filtered loads, per-project fallback loads, and loads on other platforms skip legacy projects. Check `list_solutions` for the skipped projects and their reasons.
 
