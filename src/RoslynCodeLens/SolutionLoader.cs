@@ -112,20 +112,16 @@ public class SolutionLoader
             return await OpenFilteredAsync(solutionPath, classified, filter, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var legacyOrMissing = classified
-            .Where(p => p.Kind is ProjectClassifier.ProjectKind.Legacy
-                     or ProjectClassifier.ProjectKind.Missing
-                     or ProjectClassifier.ProjectKind.Unknown)
-            .ToList();
-
-        var preFilter = legacyOrMissing.Any(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
-        if (preFilter)
+        var legacyCount = classified.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
+        if (legacyCount > 0 && !OperatingSystem.IsWindows())
         {
             await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
+                $"[roslyn-codelens] Detected {legacyCount} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
+
+        var projectsToCheck = classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray();
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
@@ -189,7 +185,9 @@ public class SolutionLoader
                 bestWorkspace?.Dispose();
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
-                return await WithAnalyzerSkewAsync(new SolutionOpen(solution, workspace, [], [])).ConfigureAwait(false);
+                return await WithAnalyzerSkewAsync(
+                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), projectsToCheck))
+                    .ConfigureAwait(false);
             }
 
             // Degraded: retain the attempt with the fewest dropped projects.
@@ -219,7 +217,36 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped)).ConfigureAwait(false);
+            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), projectsToCheck))
+            .ConfigureAwait(false);
+    }
+
+    private static SolutionOpen RemoveUnloadedProjects(
+        SolutionOpen open, IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck)
+    {
+        if (projectsToCheck.Count == 0)
+            return open;
+
+        var solution = open.Solution;
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
+        // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
+        var skipped = projectsToCheck
+            .Where(entry => !projectsByPath[entry.Path].Any(p =>
+                p.OutputFilePath is not null || p.DocumentIds.Count > 0))
+            .Select(entry => new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
+                entry.Kind == ProjectClassifier.ProjectKind.Legacy
+                    ? "MSBuild could not load the legacy non-SDK-style project."
+                    : entry.Reason ?? "Unsupported project format."))
+            .ToArray();
+
+        foreach (var entry in skipped)
+        {
+            foreach (var project in projectsByPath[entry.Path])
+                solution = solution.RemoveProject(project.Id);
+        }
+
+        return open with { Solution = solution, Skipped = skipped };
     }
 
     /// <summary>

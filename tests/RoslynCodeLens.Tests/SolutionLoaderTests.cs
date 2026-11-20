@@ -33,6 +33,21 @@ public class SolutionLoaderTests
     }
 
     [Fact]
+    public async Task OpenAsync_WithoutLegacyProjects_ReportsMissingAndUnsupportedProjects()
+    {
+        var fixturePath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "LegacySolution", "NonLegacyWithSkippedProjects.slnx"));
+
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(fixturePath);
+        using var _ = workspace;
+
+        Assert.Equal("Sample.Unrelated", Assert.Single(solution.Projects).Name);
+        Assert.Contains(skipped, entry => entry is { Name: "MissingProject", Kind: "Missing" });
+        Assert.Contains(skipped, entry => entry is { Name: "UnsupportedProject", Kind: "Unknown" });
+        Assert.Equal(2, skipped.Count);
+    }
+
+    [Fact]
     public async Task CompileAllParallelAsync_CompilesAllProjects()
     {
         var fixturePath = Path.Combine(
