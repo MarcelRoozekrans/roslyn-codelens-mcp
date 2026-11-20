@@ -121,9 +121,7 @@ public class SolutionLoader
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck = legacyCount > 0
-            ? classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray()
-            : [];
+        var projectsToCheck = classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray();
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
@@ -230,7 +228,8 @@ public class SolutionLoader
             return open;
 
         var solution = open.Solution;
-        var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, StringComparer.OrdinalIgnoreCase);
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
         // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
         var skipped = projectsToCheck
             .Where(entry => !projectsByPath[entry.Path].Any(p =>
