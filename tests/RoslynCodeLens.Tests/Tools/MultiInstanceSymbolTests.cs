@@ -55,6 +55,18 @@ public class MultiInstanceSymbolTests
     }
 
     [Fact]
+    public void FindTestsForSymbol_TestAttributeOnOneTargetFrameworkOnly_ReportsEveryTest()
+    {
+        var result = FindTestsForSymbolLogic.Execute(_loaded, _resolver, "Shared.Calculator.Halve");
+
+        Assert.Equal(
+            ["Halve_OnNet10", "Halve_OnNet9"],
+            result.DirectTests.Select(t => t.FullyQualifiedName.Split('.')[^1]).Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+        Assert.All(result.DirectTests, t => Assert.EndsWith("CalculatorTests.cs", t.FilePath, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void FindTestsForSymbol_TestsOnDifferentTargetFrameworks_ReportsEveryTest()
     {
         var result = FindTestsForSymbolLogic.Execute(_loaded, _resolver, "Shared.Publisher.Compute");

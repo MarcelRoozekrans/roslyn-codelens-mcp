@@ -4,4 +4,5 @@
   <Project Path="AppNet10/AppNet10.csproj" />
   <Project Path="TestsNet9/TestsNet9.csproj" />
   <Project Path="TestsNet10/TestsNet10.csproj" />
+  <Project Path="TestsMulti/TestsMulti.csproj" />
 </Solution>

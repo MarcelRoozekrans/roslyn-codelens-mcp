@@ -41,8 +41,10 @@ public static class FindTestsForSymbolLogic
         List<TestReference> directTests,
         List<TestReference> transitiveTests)
     {
+        // Report each test once, even when it exists as one instance per target framework...
         var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
-        var visited = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
+        // ...but classify every instance: a test attribute may exist on one target framework only.
+        var visited = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
 
         // BFS: each entry is (method we want callers for, chain so far ending with the target method's short name)
         var queue = new Queue<(IMethodSymbol Method, List<string> Chain, int Depth)>();

@@ -20,10 +20,10 @@ public class MultiInstanceSolutionFixture : IAsyncLifetime
     // on, so the health probe below tells them apart and we retry on a fresh workspace.
     private const int MaxLoadAttempts = 4;
 
-    // Shared compiles once per target framework, plus two app and two test projects.
-    private const int ExpectedCompilations = 6;
+    // Shared and TestsMulti compile once per target framework, plus two app and two single-targeted test projects.
+    private const int ExpectedCompilations = 8;
 
-    private static readonly string[] ProjectDirs = ["Shared", "AppNet9", "AppNet10", "TestsNet9", "TestsNet10"];
+    private static readonly string[] ProjectDirs = ["Shared", "AppNet9", "AppNet10", "TestsNet9", "TestsNet10", "TestsMulti"];
 
     public string SolutionPath { get; private set; } = null!;
     public LoadedSolution Loaded { get; private set; } = null!;

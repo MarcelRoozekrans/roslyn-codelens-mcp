@@ -15,6 +15,12 @@ public class Publisher
     public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
 }
 
+// Separate type so that TestsMulti does not add to Publisher's incoming namespaces.
+public static class Calculator
+{
+    public static int Halve(int value) => value / 2;
+}
+
 [AttributeUsage(AttributeTargets.All)]
 public sealed class MarkerAttribute : Attribute;
 
