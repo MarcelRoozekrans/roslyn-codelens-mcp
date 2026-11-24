@@ -131,11 +131,8 @@ public static class FindEventSubscribersLogic
         if (target.ContainingType.TypeKind != TypeKind.Interface)
             return false;
 
-        // Subscribed through the interface itself, possibly through another compilation's instance of it.
-        if (SymbolSignatureComparer.Instance.Equals(called, target))
-            return true;
-
-        // Subscribed through an implementing type. The target may be another compilation's instance of
+        // A subscription through the interface itself already matched the target set in IsEventMatch(),
+        // so this is one through an implementing type. The target may be another compilation's instance of
         // the interface event, which FindImplementationForInterfaceMember() does not recognize, so ask with
         // the interface instance the implementing type itself binds to. Only the actual implementation
         // matches, not an unrelated event of the same name beside an explicit implementation.
