@@ -137,6 +137,219 @@ public class SymbolSignatureComparerTests
 		Assert.Contains(metadata, set);
 	}
 
+	// Compiles source as assembly "Lib" plus a consumer that references Lib as metadata, so every
+	// declaration exists both as a source symbol and as a metadata symbol.
+	private static (CSharpCompilation Lib, CSharpCompilation Consumer) CompileLibWithConsumer(string source)
+	{
+		var corlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
+		var lib = CSharpCompilation.Create(
+			"Lib",
+			[CSharpSyntaxTree.ParseText(source)],
+			[corlib],
+			new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		using var ms = new System.IO.MemoryStream();
+		var emitResult = lib.Emit(ms);
+		Assert.True(emitResult.Success, string.Join("\n", emitResult.Diagnostics.Select(d => d.ToString())));
+		ms.Position = 0;
+
+		var consumer = CSharpCompilation.Create(
+			"Consumer",
+			[],
+			[corlib, MetadataReference.CreateFromStream(ms)],
+			new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		return (lib, consumer);
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_NestedAndTopLevelTypeWithSameName_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class Widget { } public class Holder { public class Widget { } }");
+
+		var topLevel = lib.GetTypeByMetadataName("Lib.Widget")!;
+		var nested = lib.GetTypeByMetadataName("Lib.Holder+Widget")!;
+
+		Assert.False(NamedTypeSignatureComparer.Instance.Equals(topLevel, nested));
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_NestedTypesWithSameNameInDifferentOuterTypes_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class A { public class Widget { } } public class B { public class Widget { } }");
+
+		var inA = lib.GetTypeByMetadataName("Lib.A+Widget")!;
+		var inB = lib.GetTypeByMetadataName("Lib.B+Widget")!;
+
+		Assert.False(NamedTypeSignatureComparer.Instance.Equals(inA, inB));
+	}
+
+	[Fact]
+	public void NamedTypeSignatureComparer_SameNestedTypeFromDifferentCompilations_AreEqualWithSameHashCode()
+	{
+		var (lib, consumer) = CompileLibWithConsumer(
+			"namespace Lib; public class Holder { public class Widget { } }");
+
+		var source = lib.GetTypeByMetadataName("Lib.Holder+Widget")!;
+		var metadata = consumer.GetTypeByMetadataName("Lib.Holder+Widget")!;
+
+		Assert.True(NamedTypeSignatureComparer.Instance.Equals(source, metadata));
+		Assert.Equal(
+			NamedTypeSignatureComparer.Instance.GetHashCode(source),
+			NamedTypeSignatureComparer.Instance.GetHashCode(metadata));
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_MembersOfNestedTypesWithSameName_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class A { public class Widget { public int Value; } } " +
+			"public class B { public class Widget { public int Value; } }");
+
+		var inA = lib.GetTypeByMetadataName("Lib.A+Widget")!.GetMembers("Value").Single();
+		var inB = lib.GetTypeByMetadataName("Lib.B+Widget")!.GetMembers("Value").Single();
+
+		Assert.False(SymbolSignatureComparer.Instance.Equals(inA, inB));
+	}
+
+	[Theory]
+	[InlineData("ref")]
+	[InlineData("out")]
+	[InlineData("in")]
+	public void SymbolSignatureComparer_OverloadsDifferingOnlyByRefKind_AreNotEqual(string modifier)
+	{
+		var body = string.Equals(modifier, "out", StringComparison.Ordinal) ? "value = 0;" : string.Empty;
+		var (lib, _) = CompileLibWithConsumer(
+			$"namespace Lib; public class C {{ public void M(int value) {{ }} public void M({modifier} int value) {{ {body} }} }}");
+
+		var overloads = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("M");
+
+		Assert.Equal(2, overloads.Length);
+		Assert.False(SymbolSignatureComparer.Instance.Equals(overloads[0], overloads[1]));
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_OverloadsDifferingOnlyByArity_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class C { public void M(int value) { } public void M<T>(int value) { } }");
+
+		var overloads = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("M");
+
+		Assert.Equal(2, overloads.Length);
+		Assert.False(SymbolSignatureComparer.Instance.Equals(overloads[0], overloads[1]));
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_ConversionOperatorsDifferingOnlyByReturnType_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class C { " +
+			"public static implicit operator int(C c) => 0; public static implicit operator string(C c) => \"\"; }");
+
+		var operators = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("op_Implicit");
+
+		Assert.Equal(2, operators.Length);
+		Assert.False(SymbolSignatureComparer.Instance.Equals(operators[0], operators[1]));
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_IndexerOverloads_AreNotEqual()
+	{
+		var (lib, _) = CompileLibWithConsumer(
+			"namespace Lib; public class C { public int this[int index] => 0; public int this[string key] => 0; }");
+
+		var indexers = lib.GetTypeByMetadataName("Lib.C")!.GetMembers().OfType<IPropertySymbol>().ToList();
+
+		Assert.Equal(2, indexers.Count);
+		Assert.False(SymbolSignatureComparer.Instance.Equals(indexers[0], indexers[1]));
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_OverloadsFromDifferentCompilations_MatchTheirOwnCounterpart()
+	{
+		// Every overload must still find its counterpart in another compilation, and only that one.
+		var (lib, consumer) = CompileLibWithConsumer(
+			"namespace Lib; public class C { " +
+			"public void M(int value) { } public void M(ref int value) { } public void M<T>(int value) { } " +
+			"public static implicit operator int(C c) => 0; public static implicit operator string(C c) => \"\"; " +
+			"public int this[int index] => 0; public int this[string key] => 0; " +
+			"public class Nested { public int Value; } }");
+
+		var sourceMembers = AllMembers(lib.GetTypeByMetadataName("Lib.C")!);
+		var metadataMembers = AllMembers(consumer.GetTypeByMetadataName("Lib.C")!);
+
+		Assert.All(sourceMembers, source =>
+		{
+			var match = Assert.Single(metadataMembers, m => SymbolSignatureComparer.Instance.Equals(source, m));
+			Assert.Equal(SymbolSignatureComparer.Instance.GetHashCode(source), SymbolSignatureComparer.Instance.GetHashCode(match));
+		});
+
+		static List<ISymbol> AllMembers(INamedTypeSymbol type) =>
+			[
+				.. type.GetMembers().Where(m => m.Name is "M" or "op_Implicit" or "this[]"),
+				.. type.GetTypeMembers("Nested").Single().GetMembers("Value"),
+			];
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_SignatureTypeForwardedToAnotherAssembly_MatchesWithSameHashCode()
+	{
+		// Models a framework type seen from two target frameworks: Lib is compiled against a "Core" that declares
+		// N.Widget (like mscorlib for net48), while the consumer references a "Core" facade that forwards N.Widget
+		// to "Impl" (like System.Runtime forwarding to System.Private.CoreLib). The same method must still match.
+		var corlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
+		var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
+		const string widget = "namespace N { public class Widget { } }";
+
+		var coreDeclaring = EmitReference(CSharpCompilation.Create("Core", [CSharpSyntaxTree.ParseText(widget)], [corlib], options));
+		var impl = EmitReference(CSharpCompilation.Create("Impl", [CSharpSyntaxTree.ParseText(widget)], [corlib], options));
+		var coreForwarding = EmitReference(CSharpCompilation.Create(
+			"Core",
+			[CSharpSyntaxTree.ParseText("[assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(N.Widget))]")],
+			[corlib, impl],
+			options));
+
+		var lib = CSharpCompilation.Create(
+			"Lib",
+			[CSharpSyntaxTree.ParseText(
+				"namespace Lib; public class C { public void M(N.Widget widget) { } " +
+				"public static implicit operator N.Widget(C c) => null!; }")],
+			[corlib, coreDeclaring],
+			options);
+		var consumer = CSharpCompilation.Create("Consumer", [], [corlib, EmitReference(lib), coreForwarding, impl], options);
+
+		var sourceMembers = Members(lib);
+		var metadataMembers = Members(consumer);
+
+		// Precondition: both views of the method really see N.Widget in different assemblies.
+		Assert.Equal("Core", ((IMethodSymbol)sourceMembers[0]).Parameters[0].Type.ContainingAssembly.Name);
+		Assert.Equal("Impl", ((IMethodSymbol)metadataMembers[0]).Parameters[0].Type.ContainingAssembly.Name);
+		Assert.Equal("Core", ((IMethodSymbol)sourceMembers[1]).ReturnType.ContainingAssembly.Name);
+		Assert.Equal("Impl", ((IMethodSymbol)metadataMembers[1]).ReturnType.ContainingAssembly.Name);
+		Assert.All(sourceMembers.Zip(metadataMembers), pair =>
+		{
+			Assert.True(SymbolSignatureComparer.Instance.Equals(pair.First, pair.Second));
+			Assert.Equal(SymbolSignatureComparer.Instance.GetHashCode(pair.First), SymbolSignatureComparer.Instance.GetHashCode(pair.Second));
+		});
+
+		static ISymbol[] Members(CSharpCompilation compilation)
+		{
+			var type = compilation.GetTypeByMetadataName("Lib.C")!;
+			return [type.GetMembers("M").Single(), type.GetMembers("op_Implicit").Single()];
+		}
+
+		static MetadataReference EmitReference(CSharpCompilation compilation)
+		{
+			using var ms = new System.IO.MemoryStream();
+			var emitResult = compilation.Emit(ms);
+			Assert.True(emitResult.Success, string.Join("\n", emitResult.Diagnostics.Select(d => d.ToString())));
+			return MetadataReference.CreateFromImage(ms.ToArray());
+		}
+	}
+
 	// Repro for issue #222: NoPiaMissingCanonicalTypeSymbol (an ErrorTypeSymbol) has a null
 	// ContainingNamespace and surfaces from AllInterfaces when embedded-interop canonical
 	// type lookup fails (e.g. WebView2 referenced from a WPF app). The comparer must not NRE

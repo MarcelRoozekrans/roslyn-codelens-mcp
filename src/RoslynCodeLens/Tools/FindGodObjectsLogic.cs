@@ -140,11 +140,11 @@ public static class FindGodObjectsLogic
     private static Dictionary<INamedTypeSymbol, HashSet<string>> ComputeIncomingNamespaces(
         LoadedSolution loaded, List<SizeSuspect> suspects)
     {
-        var byType = new Dictionary<INamedTypeSymbol, HashSet<string>>(SymbolEqualityComparer.Default);
+        var byType = new Dictionary<INamedTypeSymbol, HashSet<string>>(NamedTypeSignatureComparer.Instance);
         foreach (var s in suspects)
             byType[s.Type] = new HashSet<string>(StringComparer.Ordinal);
 
-        var suspectSet = new HashSet<INamedTypeSymbol>(suspects.Select(s => s.Type), SymbolEqualityComparer.Default);
+        var suspectSet = new HashSet<INamedTypeSymbol>(suspects.Select(s => s.Type), NamedTypeSignatureComparer.Instance);
 
         foreach (var (_, compilation) in loaded.Compilations)
         {

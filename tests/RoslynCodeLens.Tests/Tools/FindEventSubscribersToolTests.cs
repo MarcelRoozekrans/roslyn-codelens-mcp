@@ -90,6 +90,18 @@ public class FindEventSubscribersToolTests
     }
 
     [Fact]
+    public void ImplementationEvent_DoesNotMatchSiblingImplementation()
+    {
+        // BusB implements the same interface event under the same name, but is not the queried event.
+        var results = FindEventSubscribersLogic.Execute(
+            _loaded, _resolver, _metadata, "BusA.MessageReceived");
+
+        var match = Assert.Single(results);
+        Assert.Equal("_busA.MessageReceived += OnBusMessage;", match.Snippet);
+        Assert.Equal("TestLib.BusA.MessageReceived", match.EventName);
+    }
+
+    [Fact]
     public void TwoSubscriptionsOnSameLine_BothReported()
     {
         var clickedResults = FindEventSubscribersLogic.Execute(

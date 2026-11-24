@@ -26,6 +26,7 @@
     <Compile Remove="Fixtures\FilterableSolution\**" />
     <Compile Remove="Fixtures\RazorFixture\**" />
     <Compile Remove="Fixtures\PropsFixture\**" />
+    <Compile Remove="Fixtures\MultiInstanceSolution\**" />
     <None Include="Fixtures\TestSolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\TestSolutionAlt\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\LegacySolution\**" CopyToOutputDirectory="Never" />
@@ -33,6 +34,7 @@
     <None Include="Fixtures\FilterableSolution\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\RazorFixture\**" CopyToOutputDirectory="Never" />
     <None Include="Fixtures\PropsFixture\**" CopyToOutputDirectory="Never" />
+    <None Include="Fixtures\MultiInstanceSolution\**" CopyToOutputDirectory="Never" />
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
