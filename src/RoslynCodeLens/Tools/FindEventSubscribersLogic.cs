@@ -128,34 +128,29 @@ public static class FindEventSubscribersLogic
 
     private static bool IsInterfaceImplementation(IEventSymbol called, IEventSymbol target)
     {
-        if (target.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            if (SymbolSignatureComparer.Instance.Equals(called, target))
-                return true;
+        if (target.ContainingType.TypeKind != TypeKind.Interface)
+            return false;
 
-            var containingType = called.ContainingType;
-            var implementation = containingType.FindImplementationForInterfaceMember(target);
-            if (implementation != null &&
-                SymbolSignatureComparer.Instance.Equals(implementation, called))
-                return true;
-        }
-
-        if (called.ContainingType.TypeKind == TypeKind.Interface &&
-            target.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            return NamedTypeSignatureComparer.Instance.Equals(
-                       called.ContainingType, target.ContainingType) &&
-                   string.Equals(called.Name, target.Name, StringComparison.Ordinal);
-        }
-
-        // Last-resort: target is interface event, called is a non-interface event whose containing type
-        // implements the interface (covers explicit re-declarations of interface events).
-        if (target.ContainingType.TypeKind == TypeKind.Interface &&
-            called.ContainingType.TypeKind != TypeKind.Interface &&
-            string.Equals(called.Name, target.Name, StringComparison.Ordinal) &&
-            called.ContainingType.AllInterfaces.Contains(target.ContainingType, NamedTypeSignatureComparer.Instance))
-        {
+        // Subscribed through the interface itself, possibly through another compilation's instance of it.
+        if (SymbolSignatureComparer.Instance.Equals(called, target))
             return true;
+
+        // Subscribed through an implementing type. The target may be another compilation's instance of
+        // the interface event, which FindImplementationForInterfaceMember() does not recognize, so ask with
+        // the interface instance the implementing type itself binds to. Only the actual implementation
+        // matches, not an unrelated event of the same name beside an explicit implementation.
+        var implementingType = called.ContainingType;
+        foreach (var iface in implementingType.AllInterfaces)
+        {
+            if (!NamedTypeSignatureComparer.Instance.Equals(iface, target.ContainingType))
+                continue;
+
+            foreach (var interfaceEvent in iface.GetMembers(target.Name).OfType<IEventSymbol>())
+            {
+                var implementation = implementingType.FindImplementationForInterfaceMember(interfaceEvent);
+                if (implementation is not null && SymbolSignatureComparer.Instance.Equals(implementation, called))
+                    return true;
+            }
         }
 
         return false;

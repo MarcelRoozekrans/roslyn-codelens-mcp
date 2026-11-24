@@ -11,6 +11,9 @@ namespace RoslynCodeLens.Tests.Tools;
 /// MultiInstanceSolution, AppNet9/TestsNet9 bind to the net9.0 instance of every Shared type and
 /// AppNet10/TestsNet10 to the net10.0 instance, so a tool that compares symbols by instance
 /// reports only one of the two consumers, whichever instance the index happened to keep.
+/// Comparing by signature must not go so far as to merge symbols that only look alike: overloads,
+/// unrelated events of the same name, and the per-framework instances of a test method whose
+/// test attribute exists on one framework only (TestsMulti).
 /// </summary>
 [Collection("MultiInstanceSolution")]
 public class MultiInstanceSymbolTests
@@ -52,6 +55,15 @@ public class MultiInstanceSymbolTests
                 ("AppNet9", "viaInterface.Notified += OnChanged;"),
             ],
             results.Select(r => (r.Project, r.Snippet)).Order());
+    }
+
+    [Fact]
+    public void FindEventSubscribers_SameNamedEventBesideExplicitInterfaceImplementation_IsNotReported()
+    {
+        // DualNotifier implements INotifier.Notified explicitly; its public Notified is another event.
+        var results = FindEventSubscribersLogic.Execute(_loaded, _resolver, _metadata, "Shared.INotifier.Notified");
+
+        Assert.DoesNotContain(results, r => string.Equals(r.Snippet, "dual.Notified += OnChanged;", StringComparison.Ordinal));
     }
 
     [Fact]
