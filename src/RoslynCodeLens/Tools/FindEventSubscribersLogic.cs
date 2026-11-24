@@ -22,7 +22,7 @@ public static class FindEventSubscribersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolEqualityComparer.Default);
+        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolSignatureComparer.Instance);
         var targetMetadataKeys = BuildMetadataKeys(targetEvents);
         var results = new List<EventSubscriberInfo>();
         var seen = new HashSet<(string, TextSpan)>();
@@ -130,20 +130,20 @@ public static class FindEventSubscribersLogic
     {
         if (target.ContainingType.TypeKind == TypeKind.Interface)
         {
-            if (SymbolEqualityComparer.Default.Equals(called, target))
+            if (SymbolSignatureComparer.Instance.Equals(called, target))
                 return true;
 
             var containingType = called.ContainingType;
             var implementation = containingType.FindImplementationForInterfaceMember(target);
             if (implementation != null &&
-                SymbolEqualityComparer.Default.Equals(implementation, called))
+                SymbolSignatureComparer.Instance.Equals(implementation, called))
                 return true;
         }
 
         if (called.ContainingType.TypeKind == TypeKind.Interface &&
             target.ContainingType.TypeKind == TypeKind.Interface)
         {
-            return SymbolEqualityComparer.Default.Equals(
+            return NamedTypeSignatureComparer.Instance.Equals(
                        called.ContainingType, target.ContainingType) &&
                    string.Equals(called.Name, target.Name, StringComparison.Ordinal);
         }
@@ -153,7 +153,7 @@ public static class FindEventSubscribersLogic
         if (target.ContainingType.TypeKind == TypeKind.Interface &&
             called.ContainingType.TypeKind != TypeKind.Interface &&
             string.Equals(called.Name, target.Name, StringComparison.Ordinal) &&
-            called.ContainingType.AllInterfaces.Contains(target.ContainingType, SymbolEqualityComparer.Default))
+            called.ContainingType.AllInterfaces.Contains(target.ContainingType, NamedTypeSignatureComparer.Instance))
         {
             return true;
         }

@@ -41,8 +41,8 @@ public static class FindTestsForSymbolLogic
         List<TestReference> directTests,
         List<TestReference> transitiveTests)
     {
-        var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
-        var visited = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
+        var visited = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
 
         // BFS: each entry is (method we want callers for, chain so far ending with the target method's short name)
         var queue = new Queue<(IMethodSymbol Method, List<string> Chain, int Depth)>();
@@ -117,9 +117,9 @@ public static class FindTestsForSymbolLogic
                     if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
                         continue;
 
-                    if (!SymbolEqualityComparer.Default.Equals(calledMethod, target) &&
-                        !SymbolEqualityComparer.Default.Equals(calledMethod.OriginalDefinition, target) &&
-                        !SymbolEqualityComparer.Default.Equals(calledMethod, target.OriginalDefinition))
+                    if (!SymbolSignatureComparer.Instance.Equals(calledMethod, target) &&
+                        !SymbolSignatureComparer.Instance.Equals(calledMethod.OriginalDefinition, target) &&
+                        !SymbolSignatureComparer.Instance.Equals(calledMethod, target.OriginalDefinition))
                         continue;
 
                     var enclosing = FindEnclosingMethodSymbol(invocation, semanticModel);
