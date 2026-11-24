@@ -12,6 +12,15 @@ namespace RoslynCodeLens.Symbols;
 // indexers, plus the generic arity of methods and the return type of conversion operators, which C#
 // may overload on.
 // Assembly version and type-parameter names are ignored — see NamedTypeSignatureComparer.
+// Parameter types and the conversion return type are compared by display string, which leaves out the
+// assembly on purpose: a framework type lives in a different assembly per target framework (System.String
+// is in mscorlib for net48 and in System.Runtime for net8.0, reached through type forwarding), so comparing
+// assemblies would split a method of a net48 or netstandard project from its view in a net8.0 project.
+// Roslyn's own Find References ignores assemblies for the same reason
+// (SymbolEquivalenceComparer.IgnoreAssembliesInstance).
+// Known limitation: two overloads in the same type whose parameter types share a full name but come from
+// different assemblies are treated as one symbol. C# can declare them only through extern aliases, since
+// referencing both types otherwise makes the name ambiguous (CS0433).
 internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 {
 	public static readonly SymbolSignatureComparer Instance = new();
@@ -106,6 +115,7 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		return symbol is IPropertySymbol property ? property.Parameters : [];
 	}
 
+	// Display strings leave out the assembly on purpose, see the header comment.
 	private static bool ParametersEqual(ImmutableArray<IParameterSymbol> x, ImmutableArray<IParameterSymbol> y)
 	{
 		if (x.Length != y.Length) return false;
