@@ -73,7 +73,8 @@ public class MultiInstanceSymbolTests
         var result = FindObsoleteUsageLogic.Execute(_loaded, _resolver, project: null, errorOnly: false);
 
         var group = Assert.Single(result.Groups);
-        Assert.Contains("LegacyCompute", group.SymbolName, StringComparison.Ordinal);
+        Assert.Equal("Shared.Publisher.LegacyCompute(int)", group.SymbolName);
+        // The calls to the ref overload are not usages of the obsolete one.
         Assert.Equal(2, group.UsageCount);
         Assert.Equal(AppProjects, group.Usages.Select(u => u.Project).Order(StringComparer.Ordinal), StringComparer.Ordinal);
         Assert.All(group.Usages, u => Assert.Equal("publisher.LegacyCompute(1)", u.Snippet));

@@ -9,6 +9,9 @@ public class Publisher
     [Obsolete("Use Compute instead.")]
     public int LegacyCompute(int value) => value;
 
+    // Same name and parameter type as the obsolete overload, differs only by ref: must stay apart.
+    public int LegacyCompute(ref int value) => value;
+
     public void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
 }
 

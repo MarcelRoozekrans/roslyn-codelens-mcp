@@ -17,6 +17,8 @@ public class Usages
     public int CallLegacy(Publisher publisher) => publisher.LegacyCompute(1);
 #pragma warning restore CS0618
 
+    public int CallLegacyByRef(Publisher publisher, int value) => publisher.LegacyCompute(ref value);
+
     private void OnChanged(object? sender, EventArgs e) { }
 }
 

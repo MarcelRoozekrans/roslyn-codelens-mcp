@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeLens.Symbols;
@@ -7,7 +8,9 @@ namespace RoslynCodeLens.Symbols;
 // object in the declaring compilation versus any referencing compilation.
 // SymbolEqualityComparer.Default treats those as different, causing cross-project lookups
 // (references, callers, unused-symbol detection) to miss matches.
-// For methods, parameter type display strings are included to distinguish overloads.
+// Overloads are told apart by their full signature: parameter types and ref kinds for methods and
+// indexers, plus the generic arity of methods and the return type of conversion operators, which C#
+// may overload on.
 // Assembly version and type-parameter names are ignored — see NamedTypeSignatureComparer.
 internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 {
@@ -37,52 +40,94 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		};
 	}
 
-	private static string ContainingTypeKey(ISymbol symbol)
-	{
-		if (symbol.ContainingType is { } ct)
-			return NamedTypeSignatureComparer.Instance.GetHashCode(ct).ToString();
-		if (symbol.ContainingNamespace is { IsGlobalNamespace: false } ns)
-			return ns.ToDisplayString();
-		return string.Empty;
-	}
-
 	private static bool MethodEquals(IMethodSymbol? x, IMethodSymbol? y)
 	{
 		if (x is null || y is null) return false;
 		if (!string.Equals(x.MetadataName, y.MetadataName, StringComparison.Ordinal)) return false;
+		if (x.Arity != y.Arity) return false;
 		if (!NamedTypeSignatureComparer.Instance.Equals(x.ContainingType, y.ContainingType)) return false;
-		if (x.Parameters.Length != y.Parameters.Length) return false;
+		if (!ParametersEqual(x.Parameters, y.Parameters)) return false;
 
-		for (int i = 0; i < x.Parameters.Length; i++)
-		{
-			var xParam = x.Parameters[i].Type.ToDisplayString();
-			var yParam = y.Parameters[i].Type.ToDisplayString();
-			if (!string.Equals(xParam, yParam, StringComparison.Ordinal))
-				return false;
-		}
-
-		return true;
+		return x.MethodKind != MethodKind.Conversion
+			|| string.Equals(x.ReturnType.ToDisplayString(), y.ReturnType.ToDisplayString(), StringComparison.Ordinal);
 	}
 
 	private static int MethodHashCode(IMethodSymbol m)
 	{
 		var hc = new HashCode();
 		hc.Add(m.MetadataName, StringComparer.Ordinal);
+		hc.Add(m.Arity);
 		hc.Add(NamedTypeSignatureComparer.Instance.GetHashCode(m.ContainingType));
-		hc.Add(m.Parameters.Length);
-		foreach (var p in m.Parameters)
-			hc.Add(p.Type.ToDisplayString(), StringComparer.Ordinal);
+		AddParameters(ref hc, m.Parameters);
+		if (m.MethodKind == MethodKind.Conversion)
+			hc.Add(m.ReturnType.ToDisplayString(), StringComparer.Ordinal);
 		return hc.ToHashCode();
 	}
 
+	// Indexers are the only overloadable members besides methods; for every other member the
+	// parameter lists are empty.
 	private static bool MemberEquals(ISymbol x, ISymbol y)
 	{
 		if (!string.Equals(x.MetadataName, y.MetadataName, StringComparison.Ordinal)) return false;
-		return string.Equals(ContainingTypeKey(x), ContainingTypeKey(y), StringComparison.Ordinal);
+		if (!ContainerEquals(x, y)) return false;
+		return ParametersEqual(IndexerParameters(x), IndexerParameters(y));
 	}
 
 	private static int MemberHashCode(ISymbol s)
 	{
-		return HashCode.Combine(s.MetadataName, ContainingTypeKey(s));
+		var hc = new HashCode();
+		hc.Add(s.MetadataName, StringComparer.Ordinal);
+		hc.Add(ContainerHashCode(s));
+		AddParameters(ref hc, IndexerParameters(s));
+		return hc.ToHashCode();
+	}
+
+	private static bool ContainerEquals(ISymbol x, ISymbol y)
+	{
+		if (x.ContainingType is not null || y.ContainingType is not null)
+			return NamedTypeSignatureComparer.Instance.Equals(x.ContainingType, y.ContainingType);
+		return string.Equals(NamespaceKey(x), NamespaceKey(y), StringComparison.Ordinal);
+	}
+
+	private static int ContainerHashCode(ISymbol symbol)
+	{
+		return symbol.ContainingType is { } containingType
+			? NamedTypeSignatureComparer.Instance.GetHashCode(containingType)
+			: StringComparer.Ordinal.GetHashCode(NamespaceKey(symbol));
+	}
+
+	private static string NamespaceKey(ISymbol symbol)
+	{
+		return symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : string.Empty;
+	}
+
+	private static ImmutableArray<IParameterSymbol> IndexerParameters(ISymbol symbol)
+	{
+		return symbol is IPropertySymbol property ? property.Parameters : [];
+	}
+
+	private static bool ParametersEqual(ImmutableArray<IParameterSymbol> x, ImmutableArray<IParameterSymbol> y)
+	{
+		if (x.Length != y.Length) return false;
+
+		for (int i = 0; i < x.Length; i++)
+		{
+			if (x[i].RefKind != y[i].RefKind)
+				return false;
+			if (!string.Equals(x[i].Type.ToDisplayString(), y[i].Type.ToDisplayString(), StringComparison.Ordinal))
+				return false;
+		}
+
+		return true;
+	}
+
+	private static void AddParameters(ref HashCode hc, ImmutableArray<IParameterSymbol> parameters)
+	{
+		hc.Add(parameters.Length);
+		foreach (var p in parameters)
+		{
+			hc.Add(p.RefKind);
+			hc.Add(p.Type.ToDisplayString(), StringComparer.Ordinal);
+		}
 	}
 }
