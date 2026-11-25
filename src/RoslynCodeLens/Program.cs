@@ -63,14 +63,16 @@ void RegisterServices(IServiceCollection services)
     services.AddSingleton(allowlist);
     services.AddSingleton<BackgroundTaskStore>();
 
-    // Wrap every registered tool with StructuredErrorToolWrapper so thrown exceptions
-    // surface as CallToolResult { IsError = true } carrying structured JSON.
-    // OperationCanceledException intentionally bubbles unchanged.
+    // Drop the tools not selected with --tools, then wrap every remaining tool with
+    // StructuredErrorToolWrapper so thrown exceptions surface as CallToolResult { IsError = true }
+    // carrying structured JSON. OperationCanceledException intentionally bubbles unchanged.
     services.PostConfigure<McpServerOptions>(o =>
     {
         var coll = o.ToolCollection;
         if (coll is null) return;
-        var wrapped = coll.Select(t => (McpServerTool)new StructuredErrorToolWrapper(t)).ToList();
+        var wrapped = ToolSelection.Filter(coll, options.Tools)
+            .Select(t => (McpServerTool)new StructuredErrorToolWrapper(t))
+            .ToList();
         coll.Clear();
         foreach (var t in wrapped) coll.Add(t);
     });

@@ -11,6 +11,7 @@ public class CliOptionsTests
         Assert.False(options.UseHttp);
         Assert.Equal(CliOptions.DefaultPort, options.Port);
         Assert.Equal(CliOptions.DefaultHttpHost, options.HttpHost);
+        Assert.Null(options.Tools);
     }
 
     [Fact]
@@ -87,8 +88,45 @@ public class CliOptionsTests
     }
 
     [Theory]
+    [InlineData("--tools find_callers,go_to_definition")]
+    [InlineData("--tools=find_callers,go_to_definition")]
+    public void Parse_Tools_BothSyntaxes(string argLine)
+    {
+        var options = CliOptions.Parse(["my.sln", .. argLine.Split(' ')]);
+
+        Assert.Equal(["my.sln"], options.SolutionPaths);
+        Assert.Equal(new HashSet<string>(StringComparer.Ordinal) { "find_callers", "go_to_definition" }, options.Tools);
+    }
+
+    [Fact]
+    public void Parse_Tools_RepeatedWithSpaces_AreMerged()
+    {
+        var options = CliOptions.Parse(["--tools", "find_callers, go_to_definition", "--tools", "find_callers"]);
+
+        Assert.Equal(new HashSet<string>(StringComparer.Ordinal) { "find_callers", "go_to_definition" }, options.Tools);
+    }
+
+    [Fact]
+    public void Parse_Tools_UnknownNames_Throws()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => CliOptions.Parse(["--tools", "find_callers,no_such_tool,Find_Callers"]));
+        Assert.Equal("Unknown tool(s) for --tools: no_such_tool, Find_Callers.", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("--tools=")]
+    [InlineData("--tools=find_callers,")]
+    [InlineData("--tools=find_callers,,go_to_definition")]
+    public void Parse_Tools_EmptyName_Throws(string arg)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => CliOptions.Parse([arg]));
+        Assert.StartsWith("Invalid value for --tools:", ex.Message);
+    }
+
+    [Theory]
     [InlineData("--port")]
     [InlineData("--host")]
+    [InlineData("--tools")]
     public void Parse_MissingValue_Throws(string flag)
     {
         var ex = Assert.Throws<ArgumentException>(() => CliOptions.Parse([flag]));
