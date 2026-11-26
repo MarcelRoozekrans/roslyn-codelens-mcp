@@ -18,6 +18,9 @@ namespace NetStdLib
 
         public static void Subscribe() { AppDomain.CurrentDomain.ProcessExit += OnExit; }
 
+        // AppDomain.GetCurrentThreadId() carries the same [Obsolete] message on netstandard2.0 as on net48.
+        public static int ThreadId() { return AppDomain.GetCurrentThreadId(); }
+
         public static void Fail() { throw new InvalidOperationException("NetStdLib"); }
 
         public static void Guard()

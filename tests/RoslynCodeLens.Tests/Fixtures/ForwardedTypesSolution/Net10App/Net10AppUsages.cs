@@ -37,6 +37,9 @@ namespace Net10App
         // SHA1Managed is [Obsolete] on net10.0, but not on net48.
         public static object Hasher() { return new System.Security.Cryptography.SHA1Managed(); }
 
+        // AppDomain.GetCurrentThreadId() is [Obsolete] on net10.0 and net48, with different messages.
+        public static int ThreadId() { return AppDomain.GetCurrentThreadId(); }
+
         private static void OnExit(object sender, EventArgs e) { }
     }
 }

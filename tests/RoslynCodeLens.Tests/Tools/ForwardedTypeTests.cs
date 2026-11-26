@@ -20,6 +20,11 @@ public class ForwardedTypeTests
     private static readonly string[] ResourceTypes =
         ["Net10App.Net10AppResource", "Net48Lib.Net48LibResource", "NetStdLib.NetStdLibResource"];
 
+    // Common part of the [Obsolete] messages of AppDomain.GetCurrentThreadId() on net10.0 and net48.
+    private const string GetCurrentThreadIdMessage =
+        "AppDomain.GetCurrentThreadId has been deprecated because it does not provide a stable Id when managed threads are running " +
+        "on fibers (aka lightweight threads). To get a stable identifier for a managed thread, use the ManagedThreadId property on Thread";
+
     private readonly LoadedSolution _loaded;
     private readonly SymbolResolver _resolver;
     private readonly MetadataSymbolResolver _metadata;
@@ -173,6 +178,40 @@ public class ForwardedTypeTests
         var usage = Assert.Single(group.Usages);
         Assert.Equal("Net10AppUsages.Hasher", usage.CallerName);
         Assert.Equal("Net10App", usage.Project);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FindObsoleteUsage_InstancesWithDifferentMessages_ReportsGroupPerMessage(bool scanNet48First)
+    {
+        // Each usage carries the message of the instance it binds to, whichever instance the index scanned first.
+        // net48 and netstandard2.0 share their message and therefore one group.
+        var resolver = scanNet48First ? ResolverScanningNet48First() : _resolver;
+
+        var result = FindObsoleteUsageLogic.Execute(_loaded, resolver, project: null, errorOnly: false);
+
+        // Equal severity and name: the usage count orders the two groups.
+        var groups = result.Groups.Where(g => g.SymbolName == "System.AppDomain.GetCurrentThreadId()");
+        Assert.Collection(
+            groups,
+            net48 =>
+            {
+                Assert.Equal(GetCurrentThreadIdMessage + ".  http://go.microsoft.com/fwlink/?linkid=14202", net48.DeprecationMessage);
+                Assert.False(net48.IsError);
+                Assert.Equal(2, net48.UsageCount);
+                Assert.Collection(
+                    net48.Usages,
+                    u => Assert.Equal("Net48LibUsages.ThreadId", u.CallerName),
+                    u => Assert.Equal("NetStdLibUsages.ThreadId", u.CallerName));
+            },
+            net10 =>
+            {
+                Assert.Equal(GetCurrentThreadIdMessage + " instead.", net10.DeprecationMessage);
+                Assert.False(net10.IsError);
+                Assert.Equal(1, net10.UsageCount);
+                Assert.Equal("Net10AppUsages.ThreadId", Assert.Single(net10.Usages).CallerName);
+            });
     }
 
     // The resolver scans the projects in file path order, Net10App first. Moving Net48Lib to a
