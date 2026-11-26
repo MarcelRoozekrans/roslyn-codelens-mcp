@@ -139,6 +139,19 @@ public class ForwardedTypeTests
         Assert.EndsWith("Net10AppUsages.cs", reference.File, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FindObsoleteUsage_AttributeMissingOnFirstScannedFramework_ReportsUsage()
+    {
+        var result = FindObsoleteUsageLogic.Execute(_loaded, ResolverScanningNet48First(), project: null, errorOnly: false);
+
+        var group = Assert.Single(result.Groups);
+        Assert.Equal("string.Copy(string)", group.SymbolName);
+        var usage = Assert.Single(group.Usages);
+        Assert.Equal("Net10AppUsages.Clone", usage.CallerName);
+        Assert.Equal("Net10App", usage.Project);
+        Assert.Equal("string.Copy(text)", usage.Snippet);
+    }
+
     // The resolver scans the projects in file path order, Net10App first. Moving Net48Lib to a
     // directory that sorts first makes its framework instances the indexed ones.
     private SymbolResolver ResolverScanningNet48First()

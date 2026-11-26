@@ -31,6 +31,9 @@ namespace Net10App
         // String.Contains(string, StringComparison) does not exist on net48 and netstandard2.0.
         public static bool Mentions(string text) { return text.Contains("Net10App", StringComparison.Ordinal); }
 
+        // String.Copy(string) is [Obsolete] on net10.0, but not on net48 and netstandard2.0.
+        public static string Clone(string text) { return string.Copy(text); }
+
         private static void OnExit(object sender, EventArgs e) { }
     }
 }

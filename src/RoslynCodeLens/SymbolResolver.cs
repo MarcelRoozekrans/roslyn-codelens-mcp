@@ -259,6 +259,25 @@ public class SymbolResolver
                 memberList.Add(member);
             }
         }
+
+        // Attributes can differ per instance of a type, e.g. String.Copy(string) is [Obsolete] in System.Runtime of
+        // net10.0 but not in mscorlib of net48, and find_obsolete_usage reads metadata attributes from the index. The
+        // member index stays with the representative: its only consumer reports members with a source location.
+        foreach (var (type, instances) in _typeInstances)
+        {
+            foreach (var instance in instances)
+            {
+                if (SymbolEqualityComparer.Default.Equals(instance, type))
+                    continue;
+
+                IndexAttributes(instance);
+                foreach (var member in instance.GetMembers())
+                {
+                    if (!member.IsImplicitlyDeclared && !string.IsNullOrEmpty(member.Name))
+                        IndexAttributes(member);
+                }
+            }
+        }
     }
 
     private static HashSet<string> BuildGeneratedFileIndex(LoadedSolution loaded)
