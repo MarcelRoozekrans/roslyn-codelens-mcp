@@ -32,7 +32,7 @@ public static class FindAttributeUsagesLogic
         {
             foreach (ref readonly var entry in CollectionsMarshal.AsSpan(list))
             {
-                if (NamedTypeSignatureComparer.Instance.Equals(entry.Attribute.AttributeClass, attributeType))
+                if (resolver.TypeComparer.Equals(entry.Attribute.AttributeClass, attributeType))
                     matches.Add(entry);
             }
         }

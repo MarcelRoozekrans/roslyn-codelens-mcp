@@ -22,7 +22,7 @@ public static class FindEventSubscribersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolSignatureComparer.Instance);
+        var targetSet = new HashSet<IEventSymbol>(targetEvents, source.SymbolComparer);
         var targetMetadataKeys = BuildMetadataKeys(targetEvents);
         var results = new List<EventSubscriberInfo>();
         var seen = new HashSet<(string, TextSpan)>();
@@ -48,7 +48,7 @@ public static class FindEventSubscribersLogic
 
                     if (semanticModel.GetSymbolInfo(asg.Left).Symbol is not IEventSymbol called)
                         continue;
-                    if (!IsEventMatch(called, targetSet, targetEvents, targetMetadataKeys))
+                    if (!IsEventMatch(called, targetSet, targetEvents, targetMetadataKeys, source))
                         continue;
 
                     if (!seen.Add((syntaxTree.FilePath, asg.Span)))
@@ -102,7 +102,8 @@ public static class FindEventSubscribersLogic
         IEventSymbol called,
         HashSet<IEventSymbol> targetSet,
         IReadOnlyList<IEventSymbol> targetEvents,
-        HashSet<string> targetMetadataKeys)
+        HashSet<string> targetMetadataKeys,
+        SymbolResolver resolver)
     {
         if (targetSet.Contains(called) || targetSet.Contains((IEventSymbol)called.OriginalDefinition))
             return true;
@@ -119,14 +120,14 @@ public static class FindEventSubscribersLogic
         {
             if (!string.Equals(called.Name, targetEvents[i].Name, StringComparison.Ordinal))
                 continue;
-            if (IsInterfaceImplementation(called, targetEvents[i]))
+            if (IsInterfaceImplementation(called, targetEvents[i], resolver))
                 return true;
         }
 
         return false;
     }
 
-    private static bool IsInterfaceImplementation(IEventSymbol called, IEventSymbol target)
+    private static bool IsInterfaceImplementation(IEventSymbol called, IEventSymbol target, SymbolResolver resolver)
     {
         if (target.ContainingType.TypeKind != TypeKind.Interface)
             return false;
@@ -139,13 +140,13 @@ public static class FindEventSubscribersLogic
         var implementingType = called.ContainingType;
         foreach (var iface in implementingType.AllInterfaces)
         {
-            if (!NamedTypeSignatureComparer.Instance.Equals(iface, target.ContainingType))
+            if (!resolver.TypeComparer.Equals(iface, target.ContainingType))
                 continue;
 
             foreach (var interfaceEvent in iface.GetMembers(target.Name).OfType<IEventSymbol>())
             {
                 var implementation = implementingType.FindImplementationForInterfaceMember(interfaceEvent);
-                if (implementation is not null && SymbolSignatureComparer.Instance.Equals(implementation, called))
+                if (implementation is not null && resolver.SymbolComparer.Equals(implementation, called))
                     return true;
             }
         }

@@ -25,7 +25,7 @@ public static class FindObsoleteUsageLogic
         // SymbolResolver.AttributeIndex is keyed by simple attribute name; entries are
         // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by signature, which
         // also matches usages bound to another compilation's instance of the same symbol.
-        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(SymbolSignatureComparer.Instance);
+        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(resolver.SymbolComparer);
         foreach (var key in new[] { "Obsolete", "ObsoleteAttribute" })
         {
             if (!resolver.AttributeIndex.TryGetValue(key, out var entries)) continue;
@@ -43,8 +43,8 @@ public static class FindObsoleteUsageLogic
             return new FindObsoleteUsageResult([]);
 
         // Step 2: walk all production syntax trees and collect usages per obsolete symbol.
-        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, SymbolSignatureComparer.Instance);
-        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(SymbolSignatureComparer.Instance);
+        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, resolver.SymbolComparer);
+        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(resolver.SymbolComparer);
         foreach (var s in obsoleteSymbols.Keys)
             usagesByTarget[s] = new List<ObsoleteUsageSite>();
 

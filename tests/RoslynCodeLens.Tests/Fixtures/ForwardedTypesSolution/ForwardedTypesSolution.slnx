@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Net10App/Net10App.csproj" />
+  <Project Path="NetStdLib/NetStdLib.csproj" />
+  <Project Path="Net48Lib/Net48Lib.csproj" />
+</Solution>

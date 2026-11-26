@@ -31,10 +31,10 @@ public static class FindCallersLogic
         var results = new List<CallerInfo>();
         var seen = new HashSet<(string, int)>();
 
-        foreach (var target in targetMethods)
+        // SymbolFinder handles cross-compilation identity, virtual dispatch and interface implementations, but matches a
+        // forwarded framework method only where its assembly is visible: one query per instance (SymbolResolver.GetInstances).
+        foreach (var target in targetMethods.SelectMany(source.GetInstances))
         {
-            // Roslyn's SymbolFinder.FindCallersAsync handles cross-compilation symbol
-            // identity, virtual-dispatch cascading, and interface→implementation matching.
             var callerInfos = SymbolFinder.FindCallersAsync(target, loaded.Solution)
                 .GetAwaiter().GetResult();
 

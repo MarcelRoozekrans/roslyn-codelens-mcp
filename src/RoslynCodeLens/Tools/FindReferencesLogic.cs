@@ -33,7 +33,9 @@ public static class FindReferencesLogic
         // Built on demand (see GetModel) and reused per document for the rest of the scan.
         var models = new Dictionary<DocumentId, SemanticModel>();
 
-        foreach (var target in targets)
+        // A forwarded framework symbol is queried once per assembly instance: SymbolFinder matches a start symbol
+        // only in compilations that can see its assembly (see SymbolResolver.GetInstances). Locations are merged below.
+        foreach (var target in targets.SelectMany(resolver.GetInstances))
         {
             // Roslyn's SymbolFinder handles cross-compilation symbol identity, generic
             // constructions, partial-class merges, and metadata-vs-source symbol unification.

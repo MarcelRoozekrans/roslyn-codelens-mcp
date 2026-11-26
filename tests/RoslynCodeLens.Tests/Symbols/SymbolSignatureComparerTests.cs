@@ -6,6 +6,10 @@ namespace RoslynCodeLens.Tests.Symbols;
 
 public class SymbolSignatureComparerTests
 {
+	// No forwarding: these tests compare types of in-memory compilations, which forward nothing.
+	private static readonly NamedTypeSignatureComparer TypeComparer = new(TypeForwardingMap.Empty);
+	private static readonly SymbolSignatureComparer SymbolComparer = new(TypeComparer);
+
 	// Builds two separate compilations that model the cross-project scenario:
 	// - libCompilation: defines IFoo in assembly "Lib"
 	// - consumerCompilation: references Lib as metadata, so its view of IFoo
@@ -61,7 +65,7 @@ public class SymbolSignatureComparerTests
 	{
 		var (source, metadata) = BuildCrossCompilationSymbols();
 
-		Assert.True(NamedTypeSignatureComparer.Instance.Equals(source, metadata));
+		Assert.True(TypeComparer.Equals(source, metadata));
 	}
 
 	[Fact]
@@ -70,8 +74,8 @@ public class SymbolSignatureComparerTests
 		var (source, metadata) = BuildCrossCompilationSymbols();
 
 		Assert.Equal(
-			NamedTypeSignatureComparer.Instance.GetHashCode(source),
-			NamedTypeSignatureComparer.Instance.GetHashCode(metadata));
+			TypeComparer.GetHashCode(source),
+			TypeComparer.GetHashCode(metadata));
 	}
 
 	[Fact]
@@ -80,7 +84,7 @@ public class SymbolSignatureComparerTests
 		var (iFoo, _) = BuildCrossCompilationSymbols("namespace Lib; public interface IFoo { }", "IFoo");
 		var (iBar, _) = BuildCrossCompilationSymbols("namespace Lib; public interface IBar { }", "IBar");
 
-		Assert.False(NamedTypeSignatureComparer.Instance.Equals(iFoo, iBar));
+		Assert.False(TypeComparer.Equals(iFoo, iBar));
 	}
 
 	[Fact]
@@ -89,7 +93,7 @@ public class SymbolSignatureComparerTests
 		var (nonGeneric, _) = BuildCrossCompilationSymbols("namespace Lib; public interface IFoo { }", "IFoo");
 		var (generic, _) = BuildCrossCompilationSymbols("namespace Lib; public interface IFoo<T> { }", "IFoo");
 
-		Assert.False(NamedTypeSignatureComparer.Instance.Equals(nonGeneric, generic));
+		Assert.False(TypeComparer.Equals(nonGeneric, generic));
 	}
 
 	[Fact]
@@ -98,7 +102,7 @@ public class SymbolSignatureComparerTests
 		var (source, metadata) = BuildCrossCompilationSymbols();
 
 		// Simulate the inheritance map: keyed on the source symbol, looked up with metadata symbol
-		var dict = new Dictionary<INamedTypeSymbol, string>(NamedTypeSignatureComparer.Instance)
+		var dict = new Dictionary<INamedTypeSymbol, string>(TypeComparer)
 		{
 			[source] = "found"
 		};
@@ -112,7 +116,7 @@ public class SymbolSignatureComparerTests
 	{
 		var (source, metadata) = BuildCrossCompilationSymbols();
 
-		Assert.True(SymbolSignatureComparer.Instance.Equals(source, metadata));
+		Assert.True(SymbolComparer.Equals(source, metadata));
 	}
 
 	[Fact]
@@ -123,7 +127,7 @@ public class SymbolSignatureComparerTests
 		var sourceMethod = source.GetMembers("Do").OfType<IMethodSymbol>().Single();
 		var metadataMethod = metadata.GetMembers("Do").OfType<IMethodSymbol>().Single();
 
-		Assert.True(SymbolSignatureComparer.Instance.Equals(sourceMethod, metadataMethod));
+		Assert.True(SymbolComparer.Equals(sourceMethod, metadataMethod));
 	}
 
 	[Fact]
@@ -132,9 +136,33 @@ public class SymbolSignatureComparerTests
 		var (source, metadata) = BuildCrossCompilationSymbols();
 
 		// Simulate the referenced-symbol set: added from one compilation, checked from another
-		var set = new HashSet<ISymbol>(SymbolSignatureComparer.Instance) { source };
+		var set = new HashSet<ISymbol>(SymbolComparer) { source };
 
 		Assert.Contains(metadata, set);
+	}
+
+	[Fact]
+	public void SymbolSignatureComparer_SameMethodWithAndWithoutNullableAnnotations_AreEqual()
+	{
+		// A framework method is annotated in the net10 reference assemblies (Console.WriteLine(string? value)) but not
+		// in net48's mscorlib (Console.WriteLine(string value)). C# cannot overload on nullable annotations, so both
+		// are the same method.
+		var annotated = CompileMethodOwner("#nullable enable\nnamespace Lib; public class C { public void M(string? s, System.Collections.Generic.List<string?> l) { } }");
+		var oblivious = CompileMethodOwner("namespace Lib; public class C { public void M(string s, System.Collections.Generic.List<string> l) { } }");
+
+		Assert.True(SymbolComparer.Equals(annotated, oblivious));
+		Assert.Equal(SymbolComparer.GetHashCode(annotated), SymbolComparer.GetHashCode(oblivious));
+	}
+
+	private static IMethodSymbol CompileMethodOwner(string source)
+	{
+		var compilation = CSharpCompilation.Create(
+			"Lib",
+			[CSharpSyntaxTree.ParseText(source)],
+			[MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+			new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+		return compilation.GetTypeByMetadataName("Lib.C")!.GetMembers("M").OfType<IMethodSymbol>().Single();
 	}
 
 	// Compiles source as assembly "Lib" plus a consumer that references Lib as metadata, so every
@@ -171,7 +199,7 @@ public class SymbolSignatureComparerTests
 		var topLevel = lib.GetTypeByMetadataName("Lib.Widget")!;
 		var nested = lib.GetTypeByMetadataName("Lib.Holder+Widget")!;
 
-		Assert.False(NamedTypeSignatureComparer.Instance.Equals(topLevel, nested));
+		Assert.False(TypeComparer.Equals(topLevel, nested));
 	}
 
 	[Fact]
@@ -183,7 +211,7 @@ public class SymbolSignatureComparerTests
 		var inA = lib.GetTypeByMetadataName("Lib.A+Widget")!;
 		var inB = lib.GetTypeByMetadataName("Lib.B+Widget")!;
 
-		Assert.False(NamedTypeSignatureComparer.Instance.Equals(inA, inB));
+		Assert.False(TypeComparer.Equals(inA, inB));
 	}
 
 	[Fact]
@@ -195,10 +223,10 @@ public class SymbolSignatureComparerTests
 		var source = lib.GetTypeByMetadataName("Lib.Holder+Widget")!;
 		var metadata = consumer.GetTypeByMetadataName("Lib.Holder+Widget")!;
 
-		Assert.True(NamedTypeSignatureComparer.Instance.Equals(source, metadata));
+		Assert.True(TypeComparer.Equals(source, metadata));
 		Assert.Equal(
-			NamedTypeSignatureComparer.Instance.GetHashCode(source),
-			NamedTypeSignatureComparer.Instance.GetHashCode(metadata));
+			TypeComparer.GetHashCode(source),
+			TypeComparer.GetHashCode(metadata));
 	}
 
 	[Fact]
@@ -211,7 +239,7 @@ public class SymbolSignatureComparerTests
 		var inA = lib.GetTypeByMetadataName("Lib.A+Widget")!.GetMembers("Value").Single();
 		var inB = lib.GetTypeByMetadataName("Lib.B+Widget")!.GetMembers("Value").Single();
 
-		Assert.False(SymbolSignatureComparer.Instance.Equals(inA, inB));
+		Assert.False(SymbolComparer.Equals(inA, inB));
 	}
 
 	[Theory]
@@ -227,7 +255,7 @@ public class SymbolSignatureComparerTests
 		var overloads = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("M");
 
 		Assert.Equal(2, overloads.Length);
-		Assert.False(SymbolSignatureComparer.Instance.Equals(overloads[0], overloads[1]));
+		Assert.False(SymbolComparer.Equals(overloads[0], overloads[1]));
 	}
 
 	[Fact]
@@ -239,7 +267,7 @@ public class SymbolSignatureComparerTests
 		var overloads = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("M");
 
 		Assert.Equal(2, overloads.Length);
-		Assert.False(SymbolSignatureComparer.Instance.Equals(overloads[0], overloads[1]));
+		Assert.False(SymbolComparer.Equals(overloads[0], overloads[1]));
 	}
 
 	[Fact]
@@ -252,7 +280,7 @@ public class SymbolSignatureComparerTests
 		var operators = lib.GetTypeByMetadataName("Lib.C")!.GetMembers("op_Implicit");
 
 		Assert.Equal(2, operators.Length);
-		Assert.False(SymbolSignatureComparer.Instance.Equals(operators[0], operators[1]));
+		Assert.False(SymbolComparer.Equals(operators[0], operators[1]));
 	}
 
 	[Fact]
@@ -264,7 +292,7 @@ public class SymbolSignatureComparerTests
 		var indexers = lib.GetTypeByMetadataName("Lib.C")!.GetMembers().OfType<IPropertySymbol>().ToList();
 
 		Assert.Equal(2, indexers.Count);
-		Assert.False(SymbolSignatureComparer.Instance.Equals(indexers[0], indexers[1]));
+		Assert.False(SymbolComparer.Equals(indexers[0], indexers[1]));
 	}
 
 	[Fact]
@@ -283,8 +311,8 @@ public class SymbolSignatureComparerTests
 
 		Assert.All(sourceMembers, source =>
 		{
-			var match = Assert.Single(metadataMembers, m => SymbolSignatureComparer.Instance.Equals(source, m));
-			Assert.Equal(SymbolSignatureComparer.Instance.GetHashCode(source), SymbolSignatureComparer.Instance.GetHashCode(match));
+			var match = Assert.Single(metadataMembers, m => SymbolComparer.Equals(source, m));
+			Assert.Equal(SymbolComparer.GetHashCode(source), SymbolComparer.GetHashCode(match));
 		});
 
 		static List<ISymbol> AllMembers(INamedTypeSymbol type) =>
@@ -331,8 +359,8 @@ public class SymbolSignatureComparerTests
 		Assert.Equal("Impl", ((IMethodSymbol)metadataMembers[1]).ReturnType.ContainingAssembly.Name);
 		Assert.All(sourceMembers.Zip(metadataMembers), pair =>
 		{
-			Assert.True(SymbolSignatureComparer.Instance.Equals(pair.First, pair.Second));
-			Assert.Equal(SymbolSignatureComparer.Instance.GetHashCode(pair.First), SymbolSignatureComparer.Instance.GetHashCode(pair.Second));
+			Assert.True(SymbolComparer.Equals(pair.First, pair.Second));
+			Assert.Equal(SymbolComparer.GetHashCode(pair.First), SymbolComparer.GetHashCode(pair.Second));
 		});
 
 		static ISymbol[] Members(CSharpCompilation compilation)
@@ -370,7 +398,7 @@ public class SymbolSignatureComparerTests
 		// Sanity check: this is the precondition the regression depends on.
 		Assert.Null(errorType.ContainingNamespace);
 
-		var ex = Record.Exception(() => NamedTypeSignatureComparer.Instance.GetHashCode(errorType));
+		var ex = Record.Exception(() => TypeComparer.GetHashCode(errorType));
 
 		Assert.Null(ex);
 	}
@@ -380,7 +408,7 @@ public class SymbolSignatureComparerTests
 	{
 		var errorType = BuildErrorTypeWithoutNamespace();
 
-		var ex = Record.Exception(() => NamedTypeSignatureComparer.Instance.Equals(errorType, errorType));
+		var ex = Record.Exception(() => TypeComparer.Equals(errorType, errorType));
 
 		Assert.Null(ex);
 	}
@@ -390,7 +418,7 @@ public class SymbolSignatureComparerTests
 	{
 		// Mirrors BuildInheritanceMaps: the dictionary insert triggers GetHashCode on the key.
 		var errorType = BuildErrorTypeWithoutNamespace();
-		var dict = new Dictionary<INamedTypeSymbol, string>(NamedTypeSignatureComparer.Instance);
+		var dict = new Dictionary<INamedTypeSymbol, string>(TypeComparer);
 
 		var ex = Record.Exception(() => dict[errorType] = "x");
 
