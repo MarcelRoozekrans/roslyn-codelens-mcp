@@ -69,12 +69,12 @@ public static class GetTypeHierarchyLogic
         var derivedTypes = target.TypeKind == TypeKind.Interface
             ? resolver.GetInterfaceImplementors(target)
             : resolver.GetDerivedTypes(target);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // By type identity, not by name: same-named types of different projects are different derived types.
+        var seen = new HashSet<INamedTypeSymbol>(resolver.TypeComparer);
 
         foreach (var candidate in derivedTypes)
         {
-            var fullName = candidate.ToDisplayString();
-            if (!seen.Add(fullName))
+            if (!seen.Add(candidate))
                 continue;
 
             derived.Add(BuildLocation(candidate, resolver));

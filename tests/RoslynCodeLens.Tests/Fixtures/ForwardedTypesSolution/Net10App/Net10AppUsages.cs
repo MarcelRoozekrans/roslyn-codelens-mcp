@@ -28,6 +28,9 @@ namespace Net10App
 
         public static int WordCount(this string text) { return text.Split(' ').Length; }
 
+        // String.Contains(string, StringComparison) does not exist on net48 and netstandard2.0.
+        public static bool Mentions(string text) { return text.Contains("Net10App", StringComparison.Ordinal); }
+
         private static void OnExit(object sender, EventArgs e) { }
     }
 }

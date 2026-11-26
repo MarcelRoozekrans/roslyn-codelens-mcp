@@ -148,4 +148,34 @@ public class MultiInstanceSymbolTests
 
         Assert.Equal(AppProjects, results.Select(r => r.Project).Order(StringComparer.Ordinal), StringComparer.Ordinal);
     }
+
+    [Fact]
+    public void FindImplementations_SameNamedImplementationsInTwoProjects_ReportsBoth()
+    {
+        var results = FindImplementationsLogic.Execute(_loaded, _resolver, _metadata, "Shared.IRunner");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            results.Select(r => (r.Project, r.FullName)).Order());
+    }
+
+    [Fact]
+    public void GetTypeHierarchy_SameNamedDerivedTypesInTwoProjects_ReportsBoth()
+    {
+        var hierarchy = GetTypeHierarchyLogic.Execute(_resolver, _metadata, "Shared.IRunner");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            hierarchy.Derived.Select(r => (r.Project, r.FullName)).Order());
+    }
+
+    [Fact]
+    public void FindAttributeUsages_FullNameDeclaredInTwoProjects_ReportsUsagesOfBoth()
+    {
+        var results = FindAttributeUsagesLogic.Execute(_loaded, _resolver, _metadata, "Duplicate.MarkerAttribute");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            results.Select(r => (r.Project, r.TargetName)).Order());
+    }
 }

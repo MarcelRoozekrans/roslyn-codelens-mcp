@@ -355,7 +355,7 @@ public class SymbolResolver
 
         foreach (var type in FindNamedTypes(typeName))
         {
-            results.AddRange(type.GetMembers(methodName).OfType<IMethodSymbol>());
+            results.AddRange(GetMembersOfAllInstances(type, methodName).OfType<IMethodSymbol>());
         }
 
         return results;
@@ -372,10 +372,34 @@ public class SymbolResolver
 
         foreach (var type in FindNamedTypes(typeName))
         {
-            results.AddRange(type.GetMembers(eventName).OfType<IEventSymbol>());
+            results.AddRange(GetMembersOfAllInstances(type, eventName).OfType<IEventSymbol>());
         }
 
         return results;
+    }
+
+    // The members of a type merged over its instances: an instance can declare members the representative lacks, e.g.
+    // String.Contains(string, StringComparison) exists in System.Runtime of net10.0 but not in mscorlib of net48.
+    private IReadOnlyList<ISymbol> GetMembersOfAllInstances(INamedTypeSymbol type, string name)
+    {
+        var members = type.GetMembers(name);
+        if (!_typeInstances.TryGetValue(type, out var instances))
+            return members;
+
+        var result = new List<ISymbol>(members);
+        foreach (var instance in instances)
+        {
+            if (SymbolEqualityComparer.Default.Equals(instance, type))
+                continue;
+
+            foreach (var member in instance.GetMembers(name))
+            {
+                if (!result.Contains(member, _symbolComparer))
+                    result.Add(member);
+            }
+        }
+
+        return result;
     }
 
     public static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
@@ -429,10 +453,7 @@ public class SymbolResolver
         var memberName = parts[^1];
 
         foreach (var type in FindNamedTypes(typeName))
-        {
-            foreach (var m in type.GetMembers(memberName))
-                results.Add(m);
-        }
+            results.AddRange(GetMembersOfAllInstances(type, memberName));
 
         return results;
     }

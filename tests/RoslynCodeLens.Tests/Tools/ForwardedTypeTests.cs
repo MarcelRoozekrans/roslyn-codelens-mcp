@@ -99,6 +99,57 @@ public class ForwardedTypeTests
         Assert.Equal(Projects, impact.AffectedProjects, StringComparer.Ordinal);
     }
 
+    [Fact]
+    public void FindMethods_OverloadMissingOnFirstScannedFramework_ReturnsOverloadsOfEveryFramework()
+    {
+        // net48 keeps its System.String as the indexed instance; it lacks the char and StringComparison overloads.
+        var resolver = ResolverScanningNet48First();
+
+        var methods = resolver.FindMethods("System.String.Contains");
+
+        Assert.Equal(
+            [
+                "string.Contains(char)",
+                "string.Contains(char, System.StringComparison)",
+                "string.Contains(string)",
+                "string.Contains(string, System.StringComparison)",
+            ],
+            methods.Select(m => m.ToDisplayString()).Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void FindCallers_OverloadMissingOnFirstScannedFramework_ReportsCaller()
+    {
+        // Only Net10App calls String.Contains, through an overload the net48 instance lacks.
+        var results = FindCallersLogic.Execute(_loaded, ResolverScanningNet48First(), _metadata, "System.String.Contains");
+
+        var caller = Assert.Single(results);
+        Assert.Equal("Net10AppUsages.Mentions", caller.Caller);
+        Assert.Equal("Net10App", caller.Project);
+    }
+
+    [Fact]
+    public void FindReferences_OverloadMissingOnFirstScannedFramework_ReportsReference()
+    {
+        var results = FindReferencesLogic.Execute(_loaded, ResolverScanningNet48First(), _metadata, "System.String.Contains");
+
+        var reference = Assert.Single(results);
+        Assert.Equal("Net10App", reference.Project);
+        Assert.EndsWith("Net10AppUsages.cs", reference.File, StringComparison.Ordinal);
+    }
+
+    // The resolver scans the projects in file path order, Net10App first. Moving Net48Lib to a
+    // directory that sorts first makes its framework instances the indexed ones.
+    private SymbolResolver ResolverScanningNet48First()
+    {
+        var net48 = _loaded.Solution.Projects.Single(p => string.Equals(p.Name, "Net48Lib", StringComparison.Ordinal));
+        var solutionDir = Path.GetDirectoryName(Path.GetDirectoryName(net48.FilePath))!;
+        var solution = _loaded.Solution.WithProjectFilePath(net48.Id, Path.Combine(solutionDir, "0", "Net48Lib.csproj"));
+
+        return new SymbolResolver(new LoadedSolution { Solution = solution, Compilations = _loaded.Compilations });
+    }
+
     // Framework types that implement the interface have no project; only the fixture's own types do.
     private static IEnumerable<string> SourceTypes(IEnumerable<RoslynCodeLens.Models.SymbolLocation> locations)
         => locations.Where(l => l.Project.Length > 0).Select(l => l.FullName).Order(StringComparer.Ordinal);
