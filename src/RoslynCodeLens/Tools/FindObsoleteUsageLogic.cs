@@ -32,7 +32,7 @@ public static class FindObsoleteUsageLogic
 
             foreach (var (symbol, attr) in entries)
             {
-                if (attr.AttributeClass?.ToDisplayString() != "System.ObsoleteAttribute") continue;
+                if (!IsObsoleteAttribute(attr)) continue;
                 if (obsoleteSymbols.ContainsKey(symbol)) continue;
 
                 obsoleteSymbols[symbol] = ParseObsoleteAttribute(attr);
@@ -160,22 +160,39 @@ public static class FindObsoleteUsageLogic
         return new ObsoleteAttributeData(message, isError);
     }
 
+    // The target set matches by signature, which unifies the instances of a framework member across
+    // target frameworks; the attribute can differ between them (String.Copy(string) is [Obsolete] on
+    // net10.0, not on net48). Like the compiler, only a bound symbol that carries the attribute itself counts.
     private static ISymbol? MatchObsoleteSymbol(ISymbol referenced, HashSet<ISymbol> targetSet)
     {
-        if (targetSet.Contains(referenced)) return referenced;
-        if (targetSet.Contains(referenced.OriginalDefinition)) return referenced.OriginalDefinition;
+        if (targetSet.Contains(referenced) && IsObsolete(referenced)) return referenced;
+        if (targetSet.Contains(referenced.OriginalDefinition) && IsObsolete(referenced.OriginalDefinition))
+            return referenced.OriginalDefinition;
 
         // Constructor calls: also match the containing type (when the type itself has [Obsolete]).
         if (referenced is IMethodSymbol m && m.MethodKind == MethodKind.Constructor)
         {
-            if (m.ContainingType is not null && targetSet.Contains(m.ContainingType))
+            if (m.ContainingType is not null && targetSet.Contains(m.ContainingType) && IsObsolete(m.ContainingType))
                 return m.ContainingType;
-            if (m.ContainingType?.OriginalDefinition is { } ctorTypeOrig && targetSet.Contains(ctorTypeOrig))
+            if (m.ContainingType?.OriginalDefinition is { } ctorTypeOrig && targetSet.Contains(ctorTypeOrig) && IsObsolete(ctorTypeOrig))
                 return ctorTypeOrig;
         }
 
         return null;
     }
+
+    private static bool IsObsolete(ISymbol symbol)
+    {
+        foreach (var attr in symbol.GetAttributes())
+        {
+            if (IsObsoleteAttribute(attr)) return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsObsoleteAttribute(AttributeData attr)
+        => string.Equals(attr.AttributeClass?.ToDisplayString(), "System.ObsoleteAttribute", StringComparison.Ordinal);
 
     // Returns true when `node` is a child of another node that the caller will already process
     // and that resolves to the same target symbol. Keeps usage counts at one-per-call-site.

@@ -34,6 +34,9 @@ namespace Net10App
         // String.Copy(string) is [Obsolete] on net10.0, but not on net48 and netstandard2.0.
         public static string Clone(string text) { return string.Copy(text); }
 
+        // SHA1Managed is [Obsolete] on net10.0, but not on net48.
+        public static object Hasher() { return new System.Security.Cryptography.SHA1Managed(); }
+
         private static void OnExit(object sender, EventArgs e) { }
     }
 }

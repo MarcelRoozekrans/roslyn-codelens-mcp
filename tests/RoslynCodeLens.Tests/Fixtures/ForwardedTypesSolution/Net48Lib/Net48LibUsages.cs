@@ -28,6 +28,12 @@ namespace Net48Lib
 
         public static int WordCount(this string text) { return text.Split(' ').Length; }
 
+        // String.Copy(string) is not [Obsolete] on net48, unlike on net10.0.
+        public static string Clone(string text) { return string.Copy(text); }
+
+        // SHA1Managed is not [Obsolete] on net48, unlike on net10.0.
+        public static object Hasher() { return new System.Security.Cryptography.SHA1Managed(); }
+
         private static void OnExit(object sender, EventArgs e) { }
     }
 }

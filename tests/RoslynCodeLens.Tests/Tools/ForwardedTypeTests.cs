@@ -144,12 +144,35 @@ public class ForwardedTypeTests
     {
         var result = FindObsoleteUsageLogic.Execute(_loaded, ResolverScanningNet48First(), project: null, errorOnly: false);
 
-        var group = Assert.Single(result.Groups);
-        Assert.Equal("string.Copy(string)", group.SymbolName);
+        var group = Assert.Single(result.Groups, g => g.SymbolName == "string.Copy(string)");
         var usage = Assert.Single(group.Usages);
         Assert.Equal("Net10AppUsages.Clone", usage.CallerName);
         Assert.Equal("Net10App", usage.Project);
         Assert.Equal("string.Copy(text)", usage.Snippet);
+    }
+
+    [Fact]
+    public void FindObsoleteUsage_CallBoundToNonObsoleteFrameworkInstance_IsNotReported()
+    {
+        // Net48Lib calls String.Copy too, but its net48 instance is not [Obsolete]; the compiler does not warn there.
+        var result = FindObsoleteUsageLogic.Execute(_loaded, _resolver, project: null, errorOnly: false);
+
+        var group = Assert.Single(result.Groups, g => g.SymbolName == "string.Copy(string)");
+        var usage = Assert.Single(group.Usages);
+        Assert.Equal("Net10AppUsages.Clone", usage.CallerName);
+        Assert.Equal("Net10App", usage.Project);
+    }
+
+    [Fact]
+    public void FindObsoleteUsage_ConstructorOfTypeNotObsoleteOnItsFramework_IsNotReported()
+    {
+        // Both projects call new SHA1Managed(); only the net10.0 type is [Obsolete], its constructor is not.
+        var result = FindObsoleteUsageLogic.Execute(_loaded, _resolver, project: null, errorOnly: false);
+
+        var group = Assert.Single(result.Groups, g => g.SymbolName == "System.Security.Cryptography.SHA1Managed");
+        var usage = Assert.Single(group.Usages);
+        Assert.Equal("Net10AppUsages.Hasher", usage.CallerName);
+        Assert.Equal("Net10App", usage.Project);
     }
 
     // The resolver scans the projects in file path order, Net10App first. Moving Net48Lib to a
