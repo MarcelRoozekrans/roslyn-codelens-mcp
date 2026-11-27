@@ -659,6 +659,36 @@ public class ChangeSignatureLogicTests
     }
 
     [Fact]
+    public async Task PartialMethodWithDefinitionPerProjectAndLinkedImplementation_RewritesEveryPartAndCallSite()
+    {
+        // The definitions do not point at the linked implementation, yet it makes the projects' methods one target.
+        const string alpha = "namespace Demo; public partial class Helper { public partial int Compute(int value, int other); }";
+        const string beta = "namespace Demo; public partial class Helper { public partial int Compute(int value, int other); "
+            + "public int Beta() => Compute(3, 4); }";
+        const string shared = "namespace Demo; public partial class Helper { public partial int Compute(int value, int other) => value; "
+            + "public int Use() => Compute(1, 2); }";
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", alpha), ("Shared/Helper.Impl.cs", shared)]),
+            ("Beta", [("Beta/Helper.cs", beta), ("Shared/Helper.Impl.cs", shared)]));
+
+        var result = await RunAsync(loaded, resolver, "Demo.Helper.Compute",
+            [new SignatureOperation("remove", Parameter: "other")]);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(3, result.FilesChanged);
+        // Each linked document reports the same change, so the edits are compared without duplicates.
+        Assert.Equal(
+            [
+                ("Alpha/Helper.cs", "namespace Demo; public partial class Helper { public partial int Compute(int value); }"),
+                ("Beta/Helper.cs", "namespace Demo; public partial class Helper { public partial int Compute(int value); "
+                    + "public int Beta() => Compute(3); }"),
+                ("Shared/Helper.Impl.cs", "namespace Demo; public partial class Helper { public partial int Compute(int value) => value; "
+                    + "public int Use() => Compute(1); }"),
+            ],
+            result.Edits.Select(e => (e.FilePath, e.NewText)).Distinct().Order());
+    }
+
+    [Fact]
     public async Task ConstructorOfFullNameDeclaredInTwoProjects_IsAmbiguousNamingTheProjects()
     {
         const string helper = "namespace Duplicate; public class Helper { public Helper(int a) { } }";

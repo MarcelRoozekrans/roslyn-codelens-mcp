@@ -67,9 +67,9 @@ internal static class LogicalMemberGroups
         var representatives = groups.Select((_, i) => Representative(groups, i)).ToList();
 
         var candidates = representatives
-            .Select(r => r.IsUnique
+            .Select((r, i) => r.IsUnique
                 ? r.Symbol.ToDisplayString()
-                : $"{r.Symbol.ToDisplayString()} ({Origin(r.Symbol, resolver)})")
+                : $"{r.Symbol.ToDisplayString()} ({Origin(groups[i], resolver)})")
             .ToList();
 
         var hint = representatives.All(r => r.IsUnique)
@@ -141,13 +141,20 @@ internal static class LogicalMemberGroups
     // owns its location; synthesized members share theirs (both Equals overloads of a record point at the record's
     // name), so they also carry their documentation ID, whose types are namespace-qualified (a record named Object) and
     // which is the same in every compilation of a declaration. Display strings would not do: IntPtr is nint on runtimes
-    // with a numeric IntPtr.
+    // with a numeric IntPtr. A partial method or property is listed as its definition part, whose locations leave out the
+    // implementation part's, so those are added: a definition per project with a linked implementation is one target.
     private static IEnumerable<DeclarationKey> DeclarationKeys(ISymbol symbol, SymbolResolver resolver)
     {
         var synthesized = symbol.IsImplicitlyDeclared
             ? DocumentationCommentId.CreateDeclarationId(symbol) ?? symbol.MetadataName
             : "";
-        return symbol.Locations
+        var implementation = symbol switch
+        {
+            IMethodSymbol method => method.PartialImplementationPart,
+            IPropertySymbol property => (ISymbol?)property.PartialImplementationPart,
+            _ => null,
+        };
+        return symbol.Locations.Concat(implementation?.Locations ?? [])
             .Where(l => l.IsInSource && !string.IsNullOrEmpty(l.SourceTree?.FilePath))
             .Select(l => new DeclarationKey(
                 l.SourceTree!.FilePath,
@@ -162,10 +169,21 @@ internal static class LogicalMemberGroups
         ? $"{type.ToDisplayString()}.{method.Name}"
         : symbol.ToDisplayString();
 
-    private static string Origin(ISymbol symbol, SymbolResolver resolver)
+    // The projects whose compilations declare the group, in group order. A file path cannot tell them: a linked file
+    // belongs to several projects, and generators can give their documents the same path in every project.
+    private static string Origin(IReadOnlyList<ISymbol> group, SymbolResolver resolver)
     {
-        var project = resolver.GetProjectName(symbol);
-        return project.Length > 0 ? $"project {project}" : $"assembly {symbol.ContainingAssembly?.Name}";
+        var projects = group
+            .Select(resolver.GetDeclaringProjectName)
+            .Where(name => name.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return projects.Count switch
+        {
+            0 => $"assembly {group[0].ContainingAssembly?.Name}",
+            1 => $"project {projects[0]}",
+            _ => $"projects {string.Join(", ", projects)}",
+        };
     }
 
     // GeneratedIn is the assembly of a generated document and empty for a project document, which a link can share.

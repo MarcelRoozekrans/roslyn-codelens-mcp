@@ -16,6 +16,7 @@ public class SymbolResolver
     private readonly Dictionary<string, string> _fileToProjectName;
     private readonly HashSet<string> _projectDocumentPaths;
     private readonly Dictionary<ProjectId, string> _projectIdToName;
+    private readonly Dictionary<IAssemblySymbol, string> _assemblyToProjectName;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _interfaceImplementors;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _derivedTypes;
     private readonly Dictionary<string, List<ISymbol>> _membersBySimpleName;
@@ -31,7 +32,7 @@ public class SymbolResolver
 
         (_allTypes, _typeInstances) = CollectAllTypes(compilations, _typeComparer);
         (_typesBySimpleName, _typesByFullName, _typesByStrippedFullName) = BuildTypeLookups(_allTypes);
-        (_fileToProjectName, _projectDocumentPaths, _projectIdToName) = BuildProjectLookups(loaded);
+        (_fileToProjectName, _projectDocumentPaths, _projectIdToName, _assemblyToProjectName) = BuildProjectLookups(loaded);
         (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes, _typeComparer);
 
         _membersBySimpleName = new Dictionary<string, List<ISymbol>>(StringComparer.OrdinalIgnoreCase);
@@ -164,12 +165,13 @@ public class SymbolResolver
         return (bySimple, byFull, byStripped);
     }
 
-    private static (Dictionary<string, string>, HashSet<string>, Dictionary<ProjectId, string>)
+    private static (Dictionary<string, string>, HashSet<string>, Dictionary<ProjectId, string>, Dictionary<IAssemblySymbol, string>)
         BuildProjectLookups(LoadedSolution loaded)
     {
         var fileToProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var documentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var idToName = new Dictionary<ProjectId, string>();
+        var assemblyToProject = new Dictionary<IAssemblySymbol, string>(SymbolEqualityComparer.Default);
 
         foreach (var project in loaded.Solution.Projects)
         {
@@ -190,6 +192,7 @@ public class SymbolResolver
             // generator output. The compilation is the only place both kinds appear together.
             if (loaded.Compilations.TryGetValue(project.Id, out var compilation))
             {
+                assemblyToProject[compilation.Assembly] = project.Name;
                 foreach (var tree in compilation.SyntaxTrees)
                 {
                     if (!string.IsNullOrEmpty(tree.FilePath))
@@ -198,7 +201,22 @@ public class SymbolResolver
             }
         }
 
-        return (fileToProject, documentPaths, idToName);
+        // A compilation sees a referenced project through its own assembly symbol when it binds the project's references
+        // differently (other versions or another core library): the referenced project's types are then retargeted, and
+        // the type index may hold exactly those instances.
+        foreach (var compilation in loaded.Compilations.Values)
+        {
+            foreach (var reference in compilation.References.OfType<CompilationReference>())
+            {
+                if (compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol seen
+                    && assemblyToProject.TryGetValue(reference.Compilation.Assembly, out var name))
+                {
+                    assemblyToProject.TryAdd(seen, name);
+                }
+            }
+        }
+
+        return (fileToProject, documentPaths, idToName, assemblyToProject);
     }
 
     private static (Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>,
@@ -465,6 +483,18 @@ public class SymbolResolver
     public string GetProjectName(ProjectId projectId)
     {
         return _projectIdToName.TryGetValue(projectId, out var name) ? name : "";
+    }
+
+    /// <summary>
+    /// The project whose compilation declares <paramref name="symbol"/>, or an empty string for a symbol from a referenced
+    /// assembly. Unlike <see cref="GetProjectName(ISymbol)"/>, it tells apart the projects of a file linked into several
+    /// of them and of generated documents that have the same path in several projects.
+    /// </summary>
+    public string GetDeclaringProjectName(ISymbol symbol)
+    {
+        return symbol.ContainingAssembly is { } assembly && _assemblyToProjectName.TryGetValue(assembly, out var name)
+            ? name
+            : "";
     }
 
     public IReadOnlyList<ISymbol> FindMembers(string symbol)
