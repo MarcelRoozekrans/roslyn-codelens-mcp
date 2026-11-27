@@ -121,8 +121,6 @@ public class SolutionLoader
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var projectsToCheck = classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray();
-
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
         // Re-open on a fresh workspace when the design-time build drops a project's
@@ -195,7 +193,7 @@ public class SolutionLoader
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
                 return await WithAnalyzerSkewAsync(
-                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), projectsToCheck, workspaceFailures))
+                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), classified, workspaceFailures))
                     .ConfigureAwait(false);
             }
 
@@ -226,7 +224,7 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), projectsToCheck, workspaceFailures))
+            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), classified, workspaceFailures))
             .ConfigureAwait(false);
     }
 
@@ -245,26 +243,61 @@ public class SolutionLoader
         return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
     }
 
+    internal static string UnresolvedFrameworkReason(string projectPath, IReadOnlyCollection<string> workspaceFailures)
+    {
+        const string Prefix = "The legacy non-SDK-style project loaded without its framework references, so its types would not resolve."
+            + " Check that the targeting pack for its target framework and any Visual Studio imports are installed";
+        var cause = workspaceFailures.FirstOrDefault(
+            message => message.Contains(projectPath, StringComparison.OrdinalIgnoreCase));
+        return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
+    }
+
+    internal static string PlaceholderReason(ProjectClassifier.ClassifiedProject entry, IReadOnlyCollection<string> workspaceFailures)
+    {
+        if (entry.Kind == ProjectClassifier.ProjectKind.Legacy)
+            return LegacyLoadFailureReason(entry.Path, workspaceFailures);
+
+        var cause = workspaceFailures.FirstOrDefault(
+            message => message.Contains(entry.Path, StringComparison.OrdinalIgnoreCase));
+        var reason = entry.Reason ?? "MSBuild could not evaluate the project and returned an empty placeholder.";
+        return cause is null ? reason : $"{reason} {cause}";
+    }
+
+    private static readonly string[] s_coreLibraryNames = ["mscorlib", "System.Runtime", "System.Private.CoreLib", "netstandard"];
+
+    // A project that resolved its framework references has a core library among its metadata references.
+    internal static bool HasFrameworkReference(Project project) =>
+        project.MetadataReferences.OfType<PortableExecutableReference>().Any(reference =>
+            reference.FilePath is { } path
+            && s_coreLibraryNames.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase));
+
     internal static SolutionOpen RemoveUnloadedProjects(
         SolutionOpen open,
-        IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck,
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> projects,
         IReadOnlyCollection<string> workspaceFailures)
     {
-        if (projectsToCheck.Count == 0)
+        if (projects.Count == 0)
             return open;
 
         var solution = open.Solution;
         var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
-        // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
-        var skipped = projectsToCheck
-            .Where(entry => !projectsByPath[entry.Path].Any(p =>
-                p.OutputFilePath is not null || p.DocumentIds.Count > 0))
-            .Select(entry => new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
-                entry.Kind == ProjectClassifier.ProjectKind.Legacy
-                    ? LegacyLoadFailureReason(entry.Path, workspaceFailures)
-                    : entry.Reason ?? "Unsupported project format."))
-            .ToArray();
+        var skipped = new List<SkippedProject>();
+        foreach (var entry in projects)
+        {
+            var loaded = projectsByPath[entry.Path].ToArray();
+            // Roslyn may return an empty placeholder if MSBuild could not evaluate the project. This holds for
+            // SDK-style projects too, for example after a broken import or an invalid condition.
+            var placeholder = !loaded.Any(p => p.OutputFilePath is not null || p.DocumentIds.Count > 0);
+            // Roslyn's design-time build ignores missing imports, so a legacy project can keep its documents while
+            // its framework references never resolve; every type in it would then fail with CS0246.
+            var unresolved = !placeholder && entry.Kind == ProjectClassifier.ProjectKind.Legacy
+                && !loaded.Any(HasFrameworkReference);
+            if (placeholder)
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(), PlaceholderReason(entry, workspaceFailures)));
+            else if (unresolved)
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(), UnresolvedFrameworkReason(entry.Path, workspaceFailures)));
+        }
 
         foreach (var entry in skipped)
         {
@@ -275,7 +308,7 @@ public class SolutionLoader
         // A legacy project that stayed in the solution can still have failed partly, for example an unresolved
         // reference; its workspace failures mark the load as degraded instead of passing unnoticed.
         var skippedPaths = skipped.Select(entry => entry.Path).ToHashSet(pathComparer);
-        var keptLegacyPaths = projectsToCheck
+        var keptLegacyPaths = projects
             .Where(entry => entry.Kind == ProjectClassifier.ProjectKind.Legacy && !skippedPaths.Contains(entry.Path))
             .Select(entry => entry.Path)
             .ToArray();
@@ -284,7 +317,7 @@ public class SolutionLoader
             .Where(message => keptLegacyPaths.Any(path => message.Contains(path, StringComparison.OrdinalIgnoreCase)))
             .Distinct(StringComparer.Ordinal));
 
-        return open with { Solution = solution, Skipped = skipped, LoadDiagnostics = diagnostics };
+        return open with { Solution = solution, Skipped = skipped.ToArray(), LoadDiagnostics = diagnostics };
     }
 
     /// <summary>

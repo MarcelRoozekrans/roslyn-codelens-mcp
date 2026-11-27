@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LoadableLegacyLib/LoadableLegacyLib.csproj" />
+  <Project Path="MissingImportLib/MissingImportLib.csproj" />
+</Solution>
