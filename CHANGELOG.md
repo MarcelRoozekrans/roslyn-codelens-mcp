@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.20.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.1...v2.20.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* load legacy .NET Framework projects on Windows ([c6146f7](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/c6146f7b0d56120b12a1b12c0a23195e1225e658))
+
 ## [2.20.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.0...v2.20.1) (2026-11-27)
 
 
