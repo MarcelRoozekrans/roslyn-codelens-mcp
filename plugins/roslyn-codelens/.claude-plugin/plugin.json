@@ -10,7 +10,7 @@
       "args": [
         "--yes",
         "--version",
-        "2.20.2",
+        "2.20.3",
         "RoslynCodeLens.Mcp"
       ],
       "transport": "stdio"
