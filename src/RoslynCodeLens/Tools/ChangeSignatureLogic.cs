@@ -102,8 +102,8 @@ public static class ChangeSignatureLogic
     internal static IMethodSymbol ResolveMethod(SymbolResolver resolver, string method)
     {
         var matches = resolver.FindSymbols(method);
-        if (matches.Count == 0 && TryResolveConstructorForm(resolver, method) is { } ctorType)
-            return ResolveConstructor(ctorType, method);
+        if (matches.Count == 0 && TryResolveConstructorForm(resolver, method) is { } ctorTypes)
+            return ResolveConstructor(ctorTypes, method, resolver);
 
         if (matches.Count == 0)
         {
@@ -123,8 +123,12 @@ public static class ChangeSignatureLogic
                 new { matches = ambiguity.Candidates });
         }
 
+        // FindSymbols answers with types or with members, never both, so a group of types holds only types.
+        if (groups[0][0] is INamedTypeSymbol)
+            return ResolveConstructor(groups[0].Cast<INamedTypeSymbol>().ToList(), method, resolver);
+
         // A method in a file linked into several projects is one declaration, not several overloads.
-        var group = LogicalMemberGroups.DistinctDeclarations(groups[0]);
+        var group = LogicalMemberGroups.DistinctDeclarations(groups[0], resolver);
         if (group.Count > 1)
         {
             var signatures = group.Select(s => s.ToDisplayString()).OrderBy(s => s, StringComparer.Ordinal).ToList();
@@ -133,9 +137,6 @@ public static class ChangeSignatureLogic
                     + "change_signature edits one overload — qualify the call or rename it first.",
                 new { overloads = signatures });
         }
-
-        if (group[0] is INamedTypeSymbol type)
-            return ResolveConstructor(type, method);
 
         if (group[0] is not IMethodSymbol target)
         {
@@ -153,9 +154,9 @@ public static class ChangeSignatureLogic
     /// Constructors are named ".ctor", so the member index never matches them under the type's
     /// name; the type is looked up instead. Null when the request is not of that form or names
     /// no type, so the caller reports the usual not-found. Types are grouped as for every other
-    /// target, so a type in a file linked into several projects is one type.
+    /// target, so a type in a file linked into several projects is one type with an instance per project.
     /// </summary>
-    private static INamedTypeSymbol? TryResolveConstructorForm(SymbolResolver resolver, string method)
+    private static List<INamedTypeSymbol>? TryResolveConstructorForm(SymbolResolver resolver, string method)
     {
         var lastDot = method.LastIndexOf('.');
         if (lastDot <= 0)
@@ -179,33 +180,41 @@ public static class ChangeSignatureLogic
                 new { matches = ambiguity.Candidates });
         }
 
-        return (INamedTypeSymbol)groups[0][0];
+        return groups[0].Cast<INamedTypeSymbol>().ToList();
     }
 
     /// <summary>
     /// A type stands for its constructor: the primary constructor when it has one (positional
     /// record, record struct, or a C# 12 class or struct with a parameter list), else the only
     /// constructor declared in source. Several declared constructors and no primary one is the
-    /// same ambiguity as method overloads.
+    /// same ambiguity as method overloads. A partial type in a file linked into several projects
+    /// has an instance per project, and each project can add its own constructors, so they must
+    /// all stand for the same one.
     /// </summary>
-    private static IMethodSymbol ResolveConstructor(INamedTypeSymbol type, string method)
+    private static IMethodSymbol ResolveConstructor(
+        IReadOnlyList<INamedTypeSymbol> types, string method, SymbolResolver resolver)
     {
-        var primary = type.InstanceConstructors.FirstOrDefault(IsPrimaryConstructor);
-        if (primary != null)
-            return primary;
+        var hasPrimary = false;
+        var candidates = new List<ISymbol>();
+        foreach (var instance in types)
+        {
+            var primary = instance.InstanceConstructors.FirstOrDefault(IsPrimaryConstructor);
+            hasPrimary |= primary != null;
+            candidates.AddRange(primary != null
+                ? [primary]
+                : instance.InstanceConstructors.Where(c => c.DeclaringSyntaxReferences.Any(
+                    r => r.GetSyntax() is ConstructorDeclarationSyntax)));
+        }
 
-        var declared = type.InstanceConstructors
-            .Where(c => c.DeclaringSyntaxReferences.Any(
-                r => r.GetSyntax() is ConstructorDeclarationSyntax))
-            .ToList();
-
+        // Every compilation of a declaration contributes its own symbol for it.
+        var declared = LogicalMemberGroups.DistinctDeclarations(candidates, resolver);
         if (declared.Count == 1)
-            return declared[0];
+            return (IMethodSymbol)declared[0];
 
         if (declared.Count == 0)
         {
             throw new McpToolException(ToolErrorCode.InvalidArgument,
-                $"'{method}' is a {type.TypeKind} with no constructor declared in source — "
+                $"'{method}' is a {types[0].TypeKind} with no constructor declared in source — "
                     + "change_signature applies to methods and to constructors written in source, "
                     + "not to an implicit default constructor.",
                 new { method });
@@ -213,10 +222,12 @@ public static class ChangeSignatureLogic
 
         var signatures = declared.Select(c => c.ToDisplayString())
             .OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var reason = hasPrimary
+            ? "the type's projects declare different constructors"
+            : "a type without a primary constructor does not say which one is meant";
         throw new McpToolException(ToolErrorCode.AmbiguousMatch,
             $"'{method}' has {declared.Count} constructors: {string.Join(", ", signatures)}. "
-                + "change_signature edits one constructor, and a type without a primary "
-                + "constructor does not say which one is meant.",
+                + $"change_signature edits one constructor, and {reason}.",
             new { overloads = signatures });
     }
 

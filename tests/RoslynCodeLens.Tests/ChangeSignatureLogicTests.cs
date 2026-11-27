@@ -613,22 +613,28 @@ public class ChangeSignatureLogicTests
         Assert.Contains("Add(int, string)", ex.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task SynthesizedRecordEquals_AreAmbiguousOverloads()
+    /// <summary>
+    /// Both synthesized Equals overloads point their declaration at the record's name; sharing that location does not
+    /// make them one declaration.
+    /// </summary>
+    /// <param name="record">The record's name; <c>Object</c> differs from the type of <c>Equals(object?)</c> only in its
+    /// namespace.</param>
+    [Theory]
+    [InlineData("Shipment")]
+    [InlineData("Object")]
+    public async Task SynthesizedRecordEquals_AreAmbiguousOverloads(string record)
     {
-        // Both synthesized Equals overloads point their declaration at the record's name; sharing that location
-        // does not make them one declaration.
         var (loaded, resolver) = RenameTestWorkspace.Create(
-            ("Shipment.cs", "namespace SigDemo; public record Shipment(int Id);"));
+            ($"{record}.cs", $"namespace SigDemo; public record {record}(int Id);"));
 
         var ex = await Assert.ThrowsAsync<McpToolException>(
-            () => RunAsync(loaded, resolver, "SigDemo.Shipment.Equals",
+            () => RunAsync(loaded, resolver, $"SigDemo.{record}.Equals",
                 [new SignatureOperation("remove", Parameter: "obj")]));
 
         Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
         Assert.Equal(
-            "'SigDemo.Shipment.Equals' matched 2 overloads: SigDemo.Shipment.Equals(SigDemo.Shipment?), "
-                + "SigDemo.Shipment.Equals(object?). change_signature edits one overload — qualify the call or rename it first.",
+            $"'SigDemo.{record}.Equals' matched 2 overloads: SigDemo.{record}.Equals(SigDemo.{record}?), "
+                + $"SigDemo.{record}.Equals(object?). change_signature edits one overload — qualify the call or rename it first.",
             ex.Message);
     }
 
@@ -700,6 +706,49 @@ public class ChangeSignatureLogicTests
         var ctor = ChangeSignatureLogic.ResolveMethod(resolver, "Shared.Widget");
 
         Assert.Equal("Shared.Widget.Widget(int)", ctor.ToDisplayString());
+    }
+
+    /// <summary>
+    /// Only the empty part is linked; each project declares its own constructor, so the one type has two of them and
+    /// neither may be picked for the caller.
+    /// </summary>
+    /// <param name="name">The type form or the constructor form of the request.</param>
+    [Theory]
+    [InlineData("Shared.Widget")]
+    [InlineData("Shared.Widget.Widget")]
+    public void ResolveMethod_LinkedPartialTypeWithConstructorPerProject_IsAmbiguous(string name)
+    {
+        const string shared = "namespace Shared; public partial class Widget { }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Widget.cs", shared), ("Alpha/Widget.Alpha.cs", "namespace Shared; public partial class Widget { public Widget(int size) { } }")]),
+            ("Beta", [("Shared/Widget.cs", shared), ("Beta/Widget.Beta.cs", "namespace Shared; public partial class Widget { public Widget(string name) { } }")]));
+
+        var ex = Assert.Throws<McpToolException>(() => ChangeSignatureLogic.ResolveMethod(resolver, name));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            $"'{name}' has 2 constructors: Shared.Widget.Widget(int), Shared.Widget.Widget(string). change_signature edits one "
+                + "constructor, and a type without a primary constructor does not say which one is meant.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveMethod_LinkedPartialTypeWithPrimaryConstructorPerProject_IsAmbiguous()
+    {
+        // Each project gives the type a different parameter list on its own part, so the primary constructor does not
+        // say which constructor is meant either.
+        const string shared = "namespace Shared; public partial class Widget { }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Widget.cs", shared), ("Alpha/Widget.Alpha.cs", "namespace Shared; public partial class Widget(int size) { }")]),
+            ("Beta", [("Shared/Widget.cs", shared), ("Beta/Widget.Beta.cs", "namespace Shared; public partial class Widget(string name) { }")]));
+
+        var ex = Assert.Throws<McpToolException>(() => ChangeSignatureLogic.ResolveMethod(resolver, "Shared.Widget"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "'Shared.Widget' has 2 constructors: Shared.Widget.Widget(int), Shared.Widget.Widget(string). change_signature edits one "
+                + "constructor, and the type's projects declare different constructors.",
+            ex.Message);
     }
 
     [Fact]

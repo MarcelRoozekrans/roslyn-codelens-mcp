@@ -26,87 +26,98 @@ internal static class LogicalMemberGroups
             .GroupBy(s => s, new LogicalTargetComparer(resolver))
             .Select(g => (IReadOnlyList<ISymbol>)g.ToList())
             .ToList();
-        return MergeSharedDeclarations(groups);
+        return MergeSharedDeclarations(groups, resolver);
     }
 
     /// <summary>
-    /// One symbol per source declaration of <paramref name="group"/>: a declaration in a file linked into several
+    /// One symbol per source declaration of <paramref name="symbols"/>: a declaration in a file linked into several
     /// projects appears once per compilation. Symbols without a source declaration are all kept.
     /// </summary>
-    /// <param name="group">A logical target as returned by <see cref="GroupLogicalTargets"/>.</param>
-    /// <returns>The symbols of <paramref name="group"/> without the further compilations of a declaration.</returns>
-    public static IReadOnlyList<ISymbol> DistinctDeclarations(IReadOnlyList<ISymbol> group)
+    /// <param name="symbols">A logical target as returned by <see cref="GroupLogicalTargets"/>, or the constructors
+    /// of its types.</param>
+    /// <param name="resolver">The resolver that tells project documents from generated ones, which only the
+    /// compilations of one assembly share.</param>
+    /// <returns>The first symbol of each declaration, in the order of <paramref name="symbols"/>.</returns>
+    public static IReadOnlyList<ISymbol> DistinctDeclarations(IReadOnlyList<ISymbol> symbols, SymbolResolver resolver)
     {
-        var seen = new HashSet<DeclarationKey>();
-        var keys = new List<DeclarationKey>();
-        var distinct = new List<ISymbol>();
-        foreach (var symbol in group)
-        {
-            // Any shared key makes it the same declaration: a partial type can have one part in a linked file and
-            // further parts per project, so its compilations need not start at the same part.
-            keys.Clear();
-            keys.AddRange(DeclarationKeys(symbol));
-            if (keys.Count == 0 || !keys.Exists(seen.Contains))
-                distinct.Add(symbol);
-            seen.UnionWith(keys);
-        }
-
-        return distinct;
+        // Any shared key makes it the same declaration: a partial type can have one part in a linked file and further
+        // parts per project, so its compilations need not share a part directly.
+        return ConnectedComponents(symbols.Select(s => DeclarationKeys(s, resolver)).ToList())
+            .Select(component => symbols[component[0]])
+            .ToList();
     }
 
     /// <summary>
-    /// True when every group has the same full name, i.e. the groups differ only in the project or
+    /// True when every symbol of the groups has the same full name, i.e. the groups differ only in the project or
     /// assembly that declares them.
     /// </summary>
     public static bool ShareOneFullName(IReadOnlyList<IReadOnlyList<ISymbol>> groups)
-        => groups.Select(g => FullName(g[0])).Distinct(StringComparer.Ordinal).Count() == 1;
+        => groups.SelectMany(g => g).Select(FullName).Distinct(StringComparer.Ordinal).Count() == 1;
 
     /// <summary>
-    /// Describes the groups of an ambiguous match: one candidate per group, where candidates that share a
-    /// full name with another candidate name their project (or assembly), plus the hint for the caller.
+    /// Describes the groups of an ambiguous match: one candidate per group, where candidates whose full name also
+    /// matches another candidate name their project (or assembly), plus the hint for the caller.
     /// </summary>
+    /// <remarks>
+    /// A group whose declarations have several full names (a linked file compiled into different namespaces) is listed
+    /// under the first full name that no other group has, so the caller can select it by that name.
+    /// </remarks>
     public static LogicalAmbiguity DescribeAmbiguity(IReadOnlyList<IReadOnlyList<ISymbol>> groups, SymbolResolver resolver)
     {
-        var colliding = groups
-            .GroupBy(g => FullName(g[0]), StringComparer.Ordinal)
-            .Where(c => c.Count() > 1)
-            .Select(c => c.Key)
-            .ToHashSet(StringComparer.Ordinal);
+        var representatives = groups.Select((_, i) => Representative(groups, i)).ToList();
 
-        var candidates = groups
-            .Select(g => colliding.Contains(FullName(g[0]))
-                ? $"{g[0].ToDisplayString()} ({Origin(g[0], resolver)})"
-                : g[0].ToDisplayString())
+        var candidates = representatives
+            .Select(r => r.IsUnique
+                ? r.Symbol.ToDisplayString()
+                : $"{r.Symbol.ToDisplayString()} ({Origin(r.Symbol, resolver)})")
             .ToList();
 
-        var hint = colliding.Count == 0
+        var hint = representatives.All(r => r.IsUnique)
             ? QualifyHint
-            : groups.All(g => colliding.Contains(FullName(g[0]))) ? SharedFullNameHint : MixedHint;
+            : representatives.Any(r => r.IsUnique) ? MixedHint : SharedFullNameHint;
         return new LogicalAmbiguity(candidates, hint);
     }
 
     // A file linked into several projects is compiled into each of their assemblies, so the type comparer sees one
     // type per assembly. Groups that share a declaration are one target; the first group of a merge keeps its place.
-    private static List<IReadOnlyList<ISymbol>> MergeSharedDeclarations(List<IReadOnlyList<ISymbol>> groups)
+    private static List<IReadOnlyList<ISymbol>> MergeSharedDeclarations(List<IReadOnlyList<ISymbol>> groups, SymbolResolver resolver)
     {
-        var root = Enumerable.Range(0, groups.Count).ToArray();
+        return ConnectedComponents(groups.Select(g => g.SelectMany(s => DeclarationKeys(s, resolver))).ToList())
+            .Select(component => (IReadOnlyList<ISymbol>)component.SelectMany(i => groups[i]).ToList())
+            .ToList();
+    }
+
+    // The symbol that stands for the group at index: the first one whose full name no other group has (IsUnique), else
+    // the first symbol. A name that any symbol of another group has would select that group too.
+    private static (ISymbol Symbol, bool IsUnique) Representative(IReadOnlyList<IReadOnlyList<ISymbol>> groups, int index)
+    {
+        var otherNames = groups
+            .Where((_, i) => i != index)
+            .SelectMany(g => g)
+            .Select(FullName)
+            .ToHashSet(StringComparer.Ordinal);
+        var unique = groups[index].FirstOrDefault(s => !otherNames.Contains(FullName(s)));
+        return unique is null ? (groups[index][0], false) : (unique, true);
+    }
+
+    // The items connected by shared keys, directly or through further items. Components are ordered by their first item,
+    // and each lists its item indexes in ascending order; an item without keys is a component of its own.
+    private static List<List<int>> ConnectedComponents(IReadOnlyList<IEnumerable<DeclarationKey>> keysPerItem)
+    {
+        var root = Enumerable.Range(0, keysPerItem.Count).ToArray();
         var owner = new Dictionary<DeclarationKey, int>();
-        for (var i = 0; i < groups.Count; i++)
+        for (var i = 0; i < keysPerItem.Count; i++)
         {
-            foreach (var symbol in groups[i])
+            foreach (var key in keysPerItem[i])
             {
-                foreach (var key in DeclarationKeys(symbol))
-                {
-                    if (!owner.TryAdd(key, i))
-                        Union(owner[key], i);
-                }
+                if (!owner.TryAdd(key, i))
+                    Union(owner[key], i);
             }
         }
 
-        return groups
-            .Select((group, index) => (Group: group, Root: Find(index)))
-            .GroupBy(x => x.Root)
-            .Select(merged => (IReadOnlyList<ISymbol>)merged.SelectMany(x => x.Group).ToList())
+        return Enumerable.Range(0, keysPerItem.Count)
+            .GroupBy(Find)
+            .Select(component => component.ToList())
             .ToList();
 
         int Find(int i)
@@ -125,20 +136,25 @@ internal static class LogicalMemberGroups
     }
 
     // Documents without a file path (in-memory workspaces) cannot be told apart, so they never count as shared. A
-    // declared symbol owns its location; synthesized members share theirs (both Equals overloads of a record point at
-    // the record's name), so they also carry their metadata signature. Display strings would not do: the same
-    // declaration displays differently per compilation (IntPtr is nint on runtimes with a numeric IntPtr).
-    private static IEnumerable<DeclarationKey> DeclarationKeys(ISymbol symbol)
+    // generated document is shared only within its assembly: the compilations of a multi-targeted project generate the
+    // same document, but two projects can generate the same path and span without sharing anything. A declared symbol
+    // owns its location; synthesized members share theirs (both Equals overloads of a record point at the record's
+    // name), so they also carry their documentation ID, whose types are namespace-qualified (a record named Object) and
+    // which is the same in every compilation of a declaration. Display strings would not do: IntPtr is nint on runtimes
+    // with a numeric IntPtr.
+    private static IEnumerable<DeclarationKey> DeclarationKeys(ISymbol symbol, SymbolResolver resolver)
     {
-        var synthesized = symbol.IsImplicitlyDeclared ? MetadataSignature(symbol) : "";
+        var synthesized = symbol.IsImplicitlyDeclared
+            ? DocumentationCommentId.CreateDeclarationId(symbol) ?? symbol.MetadataName
+            : "";
         return symbol.Locations
             .Where(l => l.IsInSource && !string.IsNullOrEmpty(l.SourceTree?.FilePath))
-            .Select(l => new DeclarationKey(l.SourceTree!.FilePath, l.SourceSpan, synthesized));
+            .Select(l => new DeclarationKey(
+                l.SourceTree!.FilePath,
+                l.SourceSpan,
+                synthesized,
+                resolver.IsProjectDocument(l.SourceTree.FilePath) ? "" : symbol.ContainingAssembly?.Name ?? ""));
     }
-
-    private static string MetadataSignature(ISymbol symbol) => symbol is IMethodSymbol method
-        ? $"{method.MetadataName}({string.Join(",", method.Parameters.Select(p => p.Type.MetadataName))})"
-        : symbol.MetadataName;
 
     // The name a caller can type: containing type + name for methods (shared by all overloads), the
     // display string otherwise. Neither contains the project or assembly.
@@ -152,7 +168,8 @@ internal static class LogicalMemberGroups
         return project.Length > 0 ? $"project {project}" : $"assembly {symbol.ContainingAssembly?.Name}";
     }
 
-    private readonly record struct DeclarationKey(string FilePath, TextSpan Span, string SynthesizedSignature);
+    // GeneratedIn is the assembly of a generated document and empty for a project document, which a link can share.
+    private readonly record struct DeclarationKey(string FilePath, TextSpan Span, string SynthesizedSignature, string GeneratedIn);
 
     private sealed class LogicalTargetComparer(SymbolResolver resolver) : IEqualityComparer<ISymbol>
     {

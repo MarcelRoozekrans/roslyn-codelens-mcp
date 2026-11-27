@@ -331,6 +331,28 @@ public class GetMethodSourceLogicTests
     }
 
     [Fact]
+    public void Ambiguous_LinkedFileCompiledIntoTwoNamespaces_IsNotAnsweredAsOneFullName()
+    {
+        // The linked file compiles into First in Alpha and into Third in Beta (as #if around the namespace would do), so
+        // its declaration can be selected as Third.Helper.Common. Only Gamma's First.Helper shares the full name.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", "namespace First; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Shared/Helper.cs", "namespace Third; public class Helper { public int Common() => 1; }")]),
+            ("Gamma", [("Gamma/Helper.cs", "namespace First; public class Helper { public int Common() => 3; }")]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Helper.Common"]));
+
+        Assert.Equal("ambiguous", item.Status);
+        // The linked declaration is listed under the name only it has. First.Helper.Common would select it too, so
+        // Gamma's candidate keeps its project label.
+        Assert.Equal(
+            ["First.Helper.Common() (project Gamma)", "Third.Helper.Common()"],
+            item.Candidates!.Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
     public void CtorRequest_FullNameDeclaredInTwoProjects_ReturnsTheSourceOfEach()
     {
         var (loaded, resolver) = RenameTestWorkspace.Create(

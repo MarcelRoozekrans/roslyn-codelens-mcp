@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using RoslynCodeLens;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Tests.Fixtures;
@@ -49,6 +50,22 @@ public class RenameSymbolLogicTests
             LoadDiagnostics = ["RenameProj: metadata reference 'Missing.dll' could not be resolved"],
         };
         return (degraded, new SymbolResolver(degraded));
+    }
+
+    /// <summary>
+    /// Adds a tree to every compilation of a workspace without adding it to the solution's documents, the way a source
+    /// generator's output appears.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) WithGeneratedTree(
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace, string filePath, string source)
+    {
+        var generated = new LoadedSolution
+        {
+            Solution = workspace.Loaded.Solution,
+            Compilations = new ConcurrentDictionary<ProjectId, Compilation>(workspace.Loaded.Compilations.Select(
+                pair => KeyValuePair.Create(pair.Key, pair.Value.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source, path: filePath))))),
+        };
+        return (generated, new SymbolResolver(generated));
     }
 
     [Fact]
@@ -103,6 +120,28 @@ public class RenameSymbolLogicTests
     }
 
     [Fact]
+    public void ResolveSingleTarget_FullNameDeclaredInTwoProjectsWithTheSameGeneratedPart_ThrowsAmbiguousMatchNamingTheProjects()
+    {
+        // A generator runs in each project. Without an output directory its documents get the same relative path, and
+        // generating the same part gives the same span. That is no linked file, so the two types stay distinct. The
+        // generated tree is not in the solution, so the test stops at target resolution instead of running Renamer.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper' matched 2 distinct symbols: Duplicate.Helper (project Alpha), Duplicate.Helper (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
     public async Task AmbiguousNameWithSharedFullName_HintsBothWaysOut()
     {
         // Other.Helper.Common can still be selected by a more qualified name; only the two Duplicate.Helper.Common
@@ -122,6 +161,28 @@ public class RenameSymbolLogicTests
             "Symbol 'Helper.Common' matched 3 distinct symbols: Duplicate.Helper.Common() (project Alpha), Other.Helper.Common(), "
                 + "Duplicate.Helper.Common() (project Beta). Use a more qualified name; symbols that share a full name in "
                 + "different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task AmbiguousNameWithLinkedFileInTwoNamespaces_ListsTheLinkedDeclarationByItsUniqueName()
+    {
+        // The linked file compiles into Third in Alpha and into First in Beta. Only Third.Helper.Common selects it alone;
+        // First.Helper.Common matches Gamma's method as well, so Gamma's candidate cannot be selected by name. That holds
+        // although First is not the name the linked declaration has in its first project.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", "namespace Third; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Shared/Helper.cs", "namespace First; public class Helper { public int Common() => 1; }")]),
+            ("Gamma", [("Gamma/Helper.cs", "namespace First; public class Helper { public int Common() => 3; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Helper.Common", "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Helper.Common' matched 2 distinct symbols: Third.Helper.Common(), First.Helper.Common() (project Gamma). "
+                + "Use a more qualified name; symbols that share a full name in different projects or assemblies cannot be "
+                + "selected by name.",
             ex.Message);
     }
 

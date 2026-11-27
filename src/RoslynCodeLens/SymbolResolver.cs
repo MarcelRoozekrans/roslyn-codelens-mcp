@@ -14,6 +14,7 @@ public class SymbolResolver
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByFullName;
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByStrippedFullName;
     private readonly Dictionary<string, string> _fileToProjectName;
+    private readonly HashSet<string> _projectDocumentPaths;
     private readonly Dictionary<ProjectId, string> _projectIdToName;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _interfaceImplementors;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _derivedTypes;
@@ -30,7 +31,7 @@ public class SymbolResolver
 
         (_allTypes, _typeInstances) = CollectAllTypes(compilations, _typeComparer);
         (_typesBySimpleName, _typesByFullName, _typesByStrippedFullName) = BuildTypeLookups(_allTypes);
-        (_fileToProjectName, _projectIdToName) = BuildProjectLookups(loaded);
+        (_fileToProjectName, _projectDocumentPaths, _projectIdToName) = BuildProjectLookups(loaded);
         (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes, _typeComparer);
 
         _membersBySimpleName = new Dictionary<string, List<ISymbol>>(StringComparer.OrdinalIgnoreCase);
@@ -163,10 +164,11 @@ public class SymbolResolver
         return (bySimple, byFull, byStripped);
     }
 
-    private static (Dictionary<string, string>, Dictionary<ProjectId, string>)
+    private static (Dictionary<string, string>, HashSet<string>, Dictionary<ProjectId, string>)
         BuildProjectLookups(LoadedSolution loaded)
     {
         var fileToProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var documentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var idToName = new Dictionary<ProjectId, string>();
 
         foreach (var project in loaded.Solution.Projects)
@@ -175,7 +177,10 @@ public class SymbolResolver
             foreach (var doc in project.Documents)
             {
                 if (doc.FilePath != null)
+                {
                     fileToProject[doc.FilePath] = project.Name;
+                    documentPaths.Add(doc.FilePath);
+                }
             }
 
             // Source-generated documents are not in project.Documents, but their symbols are
@@ -193,7 +198,7 @@ public class SymbolResolver
             }
         }
 
-        return (fileToProject, idToName);
+        return (fileToProject, documentPaths, idToName);
     }
 
     private static (Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>,
@@ -565,6 +570,13 @@ public class SymbolResolver
     /// </summary>
     public string? GetMarkupSource(string? filePath) =>
         filePath is not null && _generatedToMarkup.TryGetValue(filePath, out var markup) ? markup : null;
+
+    /// <summary>
+    /// True when <paramref name="filePath"/> is a regular document of a loaded project. Source-generated documents are
+    /// not: they exist only in the compilation, and the same generator can give them the same path in every project.
+    /// </summary>
+    public bool IsProjectDocument(string? filePath) =>
+        !string.IsNullOrEmpty(filePath) && _projectDocumentPaths.Contains(filePath);
 
     public bool IsGenerated(string? filePath)
     {
