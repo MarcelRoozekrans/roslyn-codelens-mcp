@@ -438,7 +438,10 @@ public class SolutionLoader
         // references after re-stitch. Reuses the same lightweight XML reader and
         // separator normalisation as the filter feature, so it is cross-platform.
         var targetPaths = new HashSet<string>(targets.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
-        var targetsByPath = targets.ToDictionary(t => t.Path, StringComparer.OrdinalIgnoreCase);
+        // Keep the first entry per path, as the capture below does, so paths that differ only in case cannot throw.
+        var targetsByPath = new Dictionary<string, ProjectClassifier.ClassifiedProject>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in targets)
+            targetsByPath.TryAdd(t.Path, t);
         var graph = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in targets)
         {
