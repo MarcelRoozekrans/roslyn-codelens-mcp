@@ -80,6 +80,51 @@ public class RenameSymbolLogicTests
         Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
     }
 
+    [Theory]
+    [InlineData("Duplicate.Helper", "Duplicate.Helper")]
+    [InlineData("Duplicate.Helper.Common", "Duplicate.Helper.Common()")]
+    public async Task FullNameDeclaredInTwoProjects_ThrowsAmbiguousMatchNamingTheProjects(string symbol, string candidate)
+    {
+        // Two distinct types that share a full name: no name selects one of them, so renaming only the first would
+        // silently leave the other project behind. Beta references Alpha (the builder chains projects), which only
+        // adds a CS0436 warning in Beta and does not merge the two types.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 2; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, symbol, "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            $"Symbol '{symbol}' matched 2 distinct symbols: {candidate} (project Alpha), {candidate} (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task AmbiguousNameWithSharedFullName_HintsBothWaysOut()
+    {
+        // Other.Helper.Common can still be selected by a more qualified name; only the two Duplicate.Helper.Common
+        // methods cannot, so the message gives both hints.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [
+                ("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }"),
+                ("Alpha/Other.cs", "namespace Other; public class Helper { public int Common() => 3; }"),
+            ]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 2; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Helper.Common", "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Helper.Common' matched 3 distinct symbols: Duplicate.Helper.Common() (project Alpha), Other.Helper.Common(), "
+                + "Duplicate.Helper.Common() (project Beta). Use a more qualified name; symbols that share a full name in "
+                + "different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
     [Fact]
     public void ConstructorTarget_ThrowsInvalidArgument()
     {

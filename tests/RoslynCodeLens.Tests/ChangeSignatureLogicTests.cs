@@ -614,6 +614,95 @@ public class ChangeSignatureLogicTests
     }
 
     [Fact]
+    public async Task SynthesizedRecordEquals_AreAmbiguousOverloads()
+    {
+        // Both synthesized Equals overloads point their declaration at the record's name; sharing that location
+        // does not make them one declaration.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Shipment.cs", "namespace SigDemo; public record Shipment(int Id);"));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "SigDemo.Shipment.Equals",
+                [new SignatureOperation("remove", Parameter: "obj")]));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "'SigDemo.Shipment.Equals' matched 2 overloads: SigDemo.Shipment.Equals(SigDemo.Shipment?), "
+                + "SigDemo.Shipment.Equals(object?). change_signature edits one overload — qualify the call or rename it first.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task MethodOfFullNameDeclaredInTwoProjects_IsAmbiguousNamingTheProjects()
+    {
+        // Not two overloads: two methods of two distinct types that share a full name.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public int Common(int a) => a; }")]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public int Common(int a) => a; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Duplicate.Helper.Common",
+                [new SignatureOperation("remove", Parameter: "a")]));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "'Duplicate.Helper.Common' matched 2 distinct symbols: Duplicate.Helper.Common(int) (project Alpha), "
+                + "Duplicate.Helper.Common(int) (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task ConstructorOfFullNameDeclaredInTwoProjects_IsAmbiguousNamingTheProjects()
+    {
+        const string helper = "namespace Duplicate; public class Helper { public Helper(int a) { } }";
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", helper)]),
+            ("Beta", [("Beta/Helper.cs", helper)]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Helper.Helper",
+                [new SignatureOperation("remove", Parameter: "a")]));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "'Helper.Helper' matched 2 types: Duplicate.Helper (project Alpha), Duplicate.Helper (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    // The same file path in two projects stands for a file linked into both: one declaration compiled twice.
+    [Theory]
+    [InlineData("Shared.Widget")]
+    [InlineData("Shared.Widget.Widget")]
+    public void ResolveMethod_ConstructorInLinkedFile_ReturnsTheOneConstructor(string name)
+    {
+        const string widget = "namespace Shared; public class Widget { public Widget(int size) { } }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Widget.cs", widget)]),
+            ("Beta", [("Shared/Widget.cs", widget)]));
+
+        var ctor = ChangeSignatureLogic.ResolveMethod(resolver, name);
+
+        Assert.Equal("Shared.Widget.Widget(int)", ctor.ToDisplayString());
+    }
+
+    [Fact]
+    public void ResolveMethod_PartialTypeWithLinkedPart_ReturnsItsConstructor()
+    {
+        // Each project lists its own part first, so the two copies of the type start at different declarations
+        // and are one type only through the linked part.
+        const string shared = "namespace Shared; public partial class Widget { public Widget(int size) { } }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Widget.Alpha.cs", "namespace Shared; public partial class Widget { }"), ("Shared/Widget.cs", shared)]),
+            ("Beta", [("Beta/Widget.Beta.cs", "namespace Shared; public partial class Widget { }"), ("Shared/Widget.cs", shared)]));
+
+        var ctor = ChangeSignatureLogic.ResolveMethod(resolver, "Shared.Widget");
+
+        Assert.Equal("Shared.Widget.Widget(int)", ctor.ToDisplayString());
+    }
+
+    [Fact]
     public async Task UnknownMethod_ThrowsSymbolNotFound()
     {
         var (loaded, resolver) = RenameTestWorkspace.Create(("Svc.cs", TwoParamSource));

@@ -66,22 +66,31 @@ public static class GetMethodSourceLogic
             return [new MemberSourceInfo(requested, "notFound", null, null, null, null, null, null, null)];
         }
 
-        // Overloads of one method are ONE logical request; distinct symbols are ambiguity.
-        var groups = LogicalMemberGroups.GroupLogicalTargets(matches);
-        if (groups.Count > 1)
+        // Overloads of one method are ONE logical request; distinct symbols are ambiguity —
+        // unless they all share one full name: the request then names each of them, and no
+        // more qualified name could select one, so the answer is the source of each.
+        var groups = LogicalMemberGroups.GroupLogicalTargets(matches, resolver);
+        if (groups.Count > 1 && !LogicalMemberGroups.ShareOneFullName(groups))
         {
             return [new MemberSourceInfo(requested, "ambiguous", null, null, null, null, null, null, null,
-                groups.Select(g => g.First().ToDisplayString()).ToList())];
+                LogicalMemberGroups.DescribeAmbiguity(groups, resolver).Candidates.ToList())];
         }
 
+        return groups.SelectMany(g => GroupItems(resolver, requested, g));
+    }
+
+    private static IEnumerable<MemberSourceInfo> GroupItems(
+        SymbolResolver resolver, string requested, IEnumerable<ISymbol> group)
+    {
         // A logical group with no source-backed symbol is ONE metadata answer for
         // the request — not one stub per overload. In a mixed group (some source,
         // some metadata overloads) the metadata-only overloads are simply skipped.
-        var sourceBacked = groups[0]
+        var symbols = group.ToList();
+        var sourceBacked = symbols
             .Where(s => s.Locations.Any(l => l.IsInSource))
             .ToList();
         if (sourceBacked.Count == 0)
-            return [NotInSource(requested, groups[0].First())];
+            return [NotInSource(requested, symbols[0])];
 
         return sourceBacked.SelectMany(s => Items(resolver, requested, s));
     }
@@ -119,27 +128,30 @@ public static class GetMethodSourceLogic
     {
         var types = resolver.FindSymbols(typeName)
             .OfType<INamedTypeSymbol>()
-            .Distinct(SymbolEqualityComparer.Default)
-            .Cast<INamedTypeSymbol>()
-            .ToList();
+            .ToList<ISymbol>();
 
         // No such type — this wasn't a ctor request after all; the caller falls
         // through to normal member resolution.
         if (types.Count == 0)
-            yield break;
+            return [];
 
-        // Multiple distinct types share the simple name: merging their ctors as
-        // "ok" would silently interleave unrelated constructors. Report ambiguity,
-        // consistent with the member path.
-        if (types.Count > 1)
+        // Distinct types share the name: merging their ctors as "ok" would silently
+        // interleave unrelated constructors. Report ambiguity, consistent with the
+        // member path — including its answer for types that share one full name.
+        var groups = LogicalMemberGroups.GroupLogicalTargets(types, resolver);
+        if (groups.Count > 1 && !LogicalMemberGroups.ShareOneFullName(groups))
         {
-            yield return new MemberSourceInfo(requested, "ambiguous", null, null,
+            return [new MemberSourceInfo(requested, "ambiguous", null, null,
                 null, null, null, null, null,
-                types.Select(t => t.ToDisplayString()).ToList());
-            yield break;
+                LogicalMemberGroups.DescribeAmbiguity(groups, resolver).Candidates.ToList())];
         }
 
-        var type = types[0];
+        return groups.SelectMany(g => g).SelectMany(t => TypeCtorItems(resolver, requested, (INamedTypeSymbol)t));
+    }
+
+    private static IEnumerable<MemberSourceInfo> TypeCtorItems(
+        SymbolResolver resolver, string requested, INamedTypeSymbol type)
+    {
         var emitted = false;
         foreach (var ctor in type.InstanceConstructors.Concat(type.StaticConstructors))
         {

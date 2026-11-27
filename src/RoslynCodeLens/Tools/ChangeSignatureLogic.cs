@@ -113,17 +113,18 @@ public static class ChangeSignatureLogic
 
         // Overloads share one logical group; unlike rename, change_signature edits exactly one
         // of them, so a group with more than one member is an ambiguity the caller must resolve.
-        var groups = LogicalMemberGroups.GroupLogicalTargets(matches);
+        var groups = LogicalMemberGroups.GroupLogicalTargets(matches, resolver);
         if (groups.Count > 1)
         {
+            var ambiguity = LogicalMemberGroups.DescribeAmbiguity(groups, resolver);
             throw new McpToolException(ToolErrorCode.AmbiguousMatch,
                 $"'{method}' matched {groups.Count} distinct symbols: "
-                    + string.Join(", ", groups.Select(g => g.First().ToDisplayString()))
-                    + ". Use a more qualified name.",
-                new { matches = groups.Select(g => g.First().ToDisplayString()).ToList() });
+                    + $"{string.Join(", ", ambiguity.Candidates)}. {ambiguity.Hint}",
+                new { matches = ambiguity.Candidates });
         }
 
-        var group = groups[0].ToList();
+        // A method in a file linked into several projects is one declaration, not several overloads.
+        var group = LogicalMemberGroups.DistinctDeclarations(groups[0]);
         if (group.Count > 1)
         {
             var signatures = group.Select(s => s.ToDisplayString()).OrderBy(s => s, StringComparer.Ordinal).ToList();
@@ -151,7 +152,8 @@ public static class ChangeSignatureLogic
     /// The `Type.Type` spelling get_method_source and get_overloads accept for a constructor.
     /// Constructors are named ".ctor", so the member index never matches them under the type's
     /// name; the type is looked up instead. Null when the request is not of that form or names
-    /// no type, so the caller reports the usual not-found.
+    /// no type, so the caller reports the usual not-found. Types are grouped as for every other
+    /// target, so a type in a file linked into several projects is one type.
     /// </summary>
     private static INamedTypeSymbol? TryResolveConstructorForm(SymbolResolver resolver, string method)
     {
@@ -164,20 +166,20 @@ public static class ChangeSignatureLogic
         if (!string.Equals(typePart.Split('.')[^1], memberPart, StringComparison.Ordinal))
             return null;
 
-        var types = resolver.FindNamedTypes(typePart)
-            .Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
-            .ToList();
-        if (types.Count > 1)
+        var types = resolver.FindNamedTypes(typePart);
+        if (types.Count == 0)
+            return null;
+
+        var groups = LogicalMemberGroups.GroupLogicalTargets([.. types], resolver);
+        if (groups.Count > 1)
         {
-            var names = types.Select(t => t.ToDisplayString())
-                .OrderBy(n => n, StringComparer.Ordinal).ToList();
+            var ambiguity = LogicalMemberGroups.DescribeAmbiguity(groups, resolver);
             throw new McpToolException(ToolErrorCode.AmbiguousMatch,
-                $"'{method}' matched {types.Count} types: {string.Join(", ", names)}. "
-                    + "Use a more qualified name.",
-                new { matches = names });
+                $"'{method}' matched {groups.Count} types: {string.Join(", ", ambiguity.Candidates)}. {ambiguity.Hint}",
+                new { matches = ambiguity.Candidates });
         }
 
-        return types.Count == 1 ? types[0] : null;
+        return (INamedTypeSymbol)groups[0][0];
     }
 
     /// <summary>

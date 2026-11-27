@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using RoslynCodeLens;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
@@ -167,6 +168,32 @@ public class MultiInstanceSymbolTests
         Assert.Equal(
             [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
             hierarchy.Derived.Select(r => (r.Project, r.FullName)).Order());
+    }
+
+    [Fact]
+    public void ResolveRenameTarget_FullNameDeclaredInTwoProjects_ThrowsAmbiguousMatch()
+    {
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(_resolver, "Duplicate.Helper"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Contains("Duplicate.Helper (project AppNet10), Duplicate.Helper (project AppNet9)", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GroupLogicalTargets_OverloadsOfTypeCompiledForTwoFrameworks_FormOneGroup()
+    {
+        // Shared compiles once per target framework, so each of its members exists as one symbol per framework. They
+        // are still one rename target; only same-named types of different assemblies are told apart.
+        var overloads = _loaded.Compilations.Values
+            .Where(c => string.Equals(c.AssemblyName, "Shared", StringComparison.Ordinal))
+            .SelectMany(c => c.GetTypeByMetadataName("Shared.Publisher")!.GetMembers("LegacyCompute"))
+            .ToList();
+
+        var groups = LogicalMemberGroups.GroupLogicalTargets(overloads, _resolver);
+
+        // Two overloads in each of the two framework compilations, as four distinct symbol objects.
+        Assert.Equal(4, overloads.Distinct(SymbolEqualityComparer.Default).Count());
+        Assert.Equal(4, Assert.Single(groups).Count());
     }
 
     [Fact]
