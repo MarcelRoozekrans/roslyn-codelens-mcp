@@ -28,6 +28,16 @@ public class LegacySolutionHandlingTests
         }
     }
 
+    // On Windows the legacy project loads in the solution-level pass, so the per-project path is not taken.
+    private sealed class NonWindowsFactAttribute : FactAttribute
+    {
+        public NonWindowsFactAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "The per-project path for a solution with a legacy project runs only off Windows.";
+        }
+    }
+
     [WindowsOnlyFact]
     public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows()
     {
@@ -196,6 +206,62 @@ public class LegacySolutionHandlingTests
         Assert.Equal("MissingImportLib", entry.Name);
         Assert.Equal("Legacy", entry.Kind);
         Assert.Contains("reference assemblies", entry.Reason, StringComparison.Ordinal);
+    }
+
+    [NonWindowsFact]
+    public async Task OpenAsync_PerProjectPath_ReportsSdkStyleProjectMsBuildCouldNotEvaluate()
+    {
+        var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "BrokenSdkWithLegacy.slnx");
+
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
+        using var _ = workspace;
+
+        Assert.Empty(solution.Projects);
+        Assert.Contains(skipped, entry => entry is { Name: "BrokenSdkLib", Kind: "SdkStyle" });
+        Assert.Contains(skipped, entry => entry.Name == "LegacyLib");
+    }
+
+    [Theory]
+    [InlineData("failed for '/src/Lib.csproj' with message", true)]
+    [InlineData("failed for /src/Lib.csproj.", true)]
+    [InlineData("failed for /src/Lib.csproj", true)]
+    [InlineData("failed for '/src/Lib.csproj.Legacy.csproj' with message", false)]
+    [InlineData("failed for '/src/Lib.csproj2'", false)]
+    [InlineData("failed for '/src/Other.csproj'", false)]
+    public void NamesProject_MatchesTheWholePathOnly(string message, bool expected)
+    {
+        Assert.Equal(expected, SolutionLoader.NamesProject(message, "/src/Lib.csproj"));
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_PathThatIsAPrefixOfAnotherProject_KeepsTheHealthyProject()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Lib", "/src/Lib.csproj", withDocument: true);
+        solution = AddProject(solution, "Other", "/src/Lib.csproj.Legacy.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+        [
+            new("/src/Lib.csproj", "Lib", ProjectClassifier.ProjectKind.Legacy, null),
+            new("/src/Lib.csproj.Legacy.csproj", "Other", ProjectClassifier.ProjectKind.Legacy, null),
+        ];
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects,
+            ["Msbuild failed when processing the file '/src/Lib.csproj.Legacy.csproj' with message: The reference assemblies were not found."]);
+
+        Assert.Equal(["Lib"], result.Solution.Projects.Select(p => p.Name));
+        Assert.Equal("Other", Assert.Single(result.Skipped).Name);
+    }
+
+    [Fact]
+    public void IsPlaceholder_ProjectWithDocumentsOrOutputPath_IsNotAPlaceholder()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Empty", "/src/Empty.csproj", withDocument: false);
+        solution = AddProject(solution, "Docs", "/src/Docs.csproj", withDocument: true);
+
+        Assert.True(SolutionLoader.IsPlaceholder(solution.Projects.Single(p => p.Name == "Empty")));
+        Assert.False(SolutionLoader.IsPlaceholder(solution.Projects.Single(p => p.Name == "Docs")));
     }
 
     [Fact]
