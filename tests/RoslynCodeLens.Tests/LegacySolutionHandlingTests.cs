@@ -51,6 +51,36 @@ public class LegacySolutionHandlingTests
     }
 
     [Fact]
+    public void LegacyLoadFailureReason_NoFailureNamesTheProject_GivesTheGenericReason()
+    {
+        var reason = SolutionLoader.LegacyLoadFailureReason(
+            @"C:\src\LegacyLib\LegacyLib.csproj", ["Msbuild failed when processing the file 'C:\\src\\Other\\Other.csproj'."]);
+
+        Assert.Equal("MSBuild could not load the legacy non-SDK-style project.", reason);
+    }
+
+    [Fact]
+    public void LegacyLoadFailureReason_FailureNamesTheProject_IncludesTheCause()
+    {
+        const string cause = "Msbuild failed when processing the file 'C:\\SRC\\LegacyLib\\LegacyLib.csproj': MSB3644 targeting pack not found.";
+
+        var reason = SolutionLoader.LegacyLoadFailureReason(
+            @"C:\src\LegacyLib\LegacyLib.csproj", ["unrelated warning", cause]);
+
+        Assert.Equal("MSBuild could not load the legacy non-SDK-style project: " + cause, reason);
+    }
+
+    [Fact]
+    public void LegacyFallbackReason_NamesTheCauseAndDoesNotAskForAnotherUnfilteredLoad()
+    {
+        var reason = SolutionLoader.LegacyFallbackReason("the solution-level load timed out");
+
+        Assert.Contains("non-SDK", reason, StringComparison.Ordinal);
+        Assert.Contains("the solution-level load timed out", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("unfiltered", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SolutionManager_CreateAsync_DoesNotThrowOnLegacyProject()
     {
         var manager = await SolutionManager.CreateAsync(LegacySolutionPath);

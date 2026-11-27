@@ -232,7 +232,12 @@ public class SolutionLoader
 
     // The first workspace failure that names the project says what MSBuild is missing, for example a
     // targeting pack (MSB3644) or an import, so list_solutions shows the prerequisite.
-    private static string LegacyLoadFailureReason(string projectPath, IReadOnlyCollection<string> workspaceFailures)
+    // A legacy project reaches the per-project path after an unfiltered Windows load only through a fallback;
+    // telling that user to do an unfiltered load again would be wrong, so the reason names the fallback cause.
+    internal static string LegacyFallbackReason(string fallbackCause) =>
+        $"Legacy (non-SDK-style) project; it was not loaded because {fallbackCause}.";
+
+    internal static string LegacyLoadFailureReason(string projectPath, IReadOnlyCollection<string> workspaceFailures)
     {
         const string Prefix = "MSBuild could not load the legacy non-SDK-style project";
         var cause = workspaceFailures.FirstOrDefault(
@@ -344,10 +349,8 @@ public class SolutionLoader
             else
             {
                 var kind = entry.Kind.ToString();
-                // A legacy project reaches this path after an unfiltered Windows load only through a fallback;
-                // telling that user to do an unfiltered load again would be wrong, so name the fallback cause.
                 var reason = fallbackCause is not null && entry.Kind == ProjectClassifier.ProjectKind.Legacy
-                    ? $"Legacy (non-SDK-style) project; it was not loaded because {fallbackCause}."
+                    ? LegacyFallbackReason(fallbackCause)
                     : entry.Reason ?? "Unsupported project format.";
                 await Console.Error.WriteLineAsync(
                     $"[roslyn-codelens] Skipping {kind} project {entry.Name}: {reason}").ConfigureAwait(false);
