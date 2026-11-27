@@ -246,6 +246,11 @@ public class SolutionLoader
         return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
     }
 
+    // File systems differ in case sensitivity: on Linux two project files whose paths differ only in case are
+    // different projects, so every path keyed map uses the comparer of the platform's file system.
+    internal static StringComparer PathComparer { get; } =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     // A workspace failure names a project by its full path. A plain substring test would also match a project whose
     // path merely starts with this one, as Lib.csproj does in Lib.csproj.Legacy.csproj, so the path must not be
     // followed by more of a file name.
@@ -301,7 +306,7 @@ public class SolutionLoader
             return open;
 
         var solution = open.Solution;
-        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var pathComparer = PathComparer;
         var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
         var skipped = new List<SkippedProject>();
         foreach (var entry in projects)
@@ -437,12 +442,12 @@ public class SolutionLoader
         // and the leaves are skipped before they are scheduled) and to re-wire
         // references after re-stitch. Reuses the same lightweight XML reader and
         // separator normalisation as the filter feature, so it is cross-platform.
-        var targetPaths = new HashSet<string>(targets.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
-        // Keep the first entry per path, as the capture below does, so paths that differ only in case cannot throw.
-        var targetsByPath = new Dictionary<string, ProjectClassifier.ClassifiedProject>(StringComparer.OrdinalIgnoreCase);
+        var targetPaths = new HashSet<string>(targets.Select(t => t.Path), PathComparer);
+        // Keep the first entry per path, as the capture below does, so a duplicate entry cannot throw.
+        var targetsByPath = new Dictionary<string, ProjectClassifier.ClassifiedProject>(PathComparer);
         foreach (var t in targets)
             targetsByPath.TryAdd(t.Path, t);
-        var graph = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var graph = new Dictionary<string, IReadOnlyList<string>>(PathComparer);
         foreach (var t in targets)
         {
             var refs = new List<string>();
@@ -457,8 +462,8 @@ public class SolutionLoader
         // path -> detached ProjectInfo (text materialised in-memory, ProjectReferences
         // stripped). Keep-first wins: a project pulled in transitively by an earlier
         // worker is captured once and not re-opened standalone.
-        var captured = new ConcurrentDictionary<string, ProjectInfo>(StringComparer.OrdinalIgnoreCase);
-        var failures = new ConcurrentDictionary<string, SkippedProject>(StringComparer.OrdinalIgnoreCase);
+        var captured = new ConcurrentDictionary<string, ProjectInfo>(PathComparer);
+        var failures = new ConcurrentDictionary<string, SkippedProject>(PathComparer);
 
         var degree = GetLoadParallelism();
         var timeoutSec = GetOpenProjectTimeoutSec();
@@ -569,7 +574,7 @@ public class SolutionLoader
         // Re-stitch: rebuild every captured project into a single AdhocWorkspace,
         // re-wiring ProjectReferences from the on-disk graph (their original ids
         // were local to each worker workspace and are meaningless now).
-        var idByPath = new Dictionary<string, ProjectId>(StringComparer.OrdinalIgnoreCase);
+        var idByPath = new Dictionary<string, ProjectId>(PathComparer);
         foreach (var (path, info) in captured)
             idByPath[path] = info.Id;
 
@@ -616,7 +621,7 @@ public class SolutionLoader
     {
         int ClosureSize(string path)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<string>(PathComparer);
             var stack = new Stack<string>();
             stack.Push(path);
             while (stack.Count > 0)
@@ -704,7 +709,7 @@ public class SolutionLoader
         // Build a name -> referenced-project-names graph. References are read as
         // absolute paths and resolved back to project names via the classified set,
         // so only references that point at projects in this solution form edges.
-        var nameByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nameByPath = new Dictionary<string, string>(PathComparer);
         foreach (var entry in classified)
             nameByPath[entry.Path] = entry.Name;
 

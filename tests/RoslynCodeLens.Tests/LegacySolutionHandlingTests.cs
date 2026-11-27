@@ -254,6 +254,15 @@ public class LegacySolutionHandlingTests
     }
 
     [Fact]
+    public void PathComparer_FollowsTheCaseSensitivityOfTheFileSystem()
+    {
+        var sameProject = SolutionLoader.PathComparer.Equals("/src/App/App.csproj", "/src/app/app.csproj");
+
+        Assert.Equal(OperatingSystem.IsWindows(), sameProject);
+        Assert.True(SolutionLoader.PathComparer.Equals("/src/App/App.csproj", "/src/App/App.csproj"));
+    }
+
+    [Fact]
     public void IsPlaceholder_ProjectWithDocumentsOrOutputPath_IsNotAPlaceholder()
     {
         using var workspace = new AdhocWorkspace();
