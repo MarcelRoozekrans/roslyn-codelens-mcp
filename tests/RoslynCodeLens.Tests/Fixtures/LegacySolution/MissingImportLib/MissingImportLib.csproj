@@ -11,6 +11,7 @@
     <TargetFrameworkVersion>v9.9</TargetFrameworkVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System" />
     <Compile Include="MissingImportLib.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v99.0\WebApplications\Microsoft.WebApplication.targets" />

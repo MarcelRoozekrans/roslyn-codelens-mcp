@@ -177,10 +177,11 @@ public class LegacySolutionHandlingTests
     {
         var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "MissingImport.slnx");
 
-        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
+        var open = await new SolutionLoader().OpenAsync(solutionPath);
+        var (solution, workspace, skipped) = open;
         using var _ = workspace;
 
-        var diagnostic = string.Join("; ", solution.Projects.Select(p =>
+        var diagnostic = "failures=[" + string.Join(" | ", open.LoadDiagnostics) + "] " + string.Join("; ", solution.Projects.Select(p =>
             $"{p.Name}: docs={p.DocumentIds.Count} out={p.OutputFilePath} refs=[{string.Join(",", p.MetadataReferences.OfType<PortableExecutableReference>().Select(r => Path.GetFileName(r.FilePath)))}]"));
         Assert.True(solution.Projects.Count() == 1, diagnostic);
         Assert.Equal("LoadableLegacyLib", Assert.Single(solution.Projects).Name);
