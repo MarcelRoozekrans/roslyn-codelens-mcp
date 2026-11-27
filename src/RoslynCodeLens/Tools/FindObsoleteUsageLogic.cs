@@ -49,7 +49,11 @@ public static class FindObsoleteUsageLogic
         foreach (var s in targets)
             usagesByTarget[s] = new Dictionary<ObsoleteAttributeData, List<ObsoleteUsageSite>>();
 
-        var seen = new HashSet<(string, TextSpan)>();
+        // A call site is counted once per symbol and attribute group. When one source file is compiled for
+        // several target frameworks, the same location binds to instances that can carry different messages,
+        // and each of those groups reports the location.
+        var seenByGroup = new Dictionary<List<ObsoleteUsageSite>, HashSet<(string, TextSpan)>>(
+            ReferenceEqualityComparer.Instance);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
@@ -98,18 +102,19 @@ public static class FindObsoleteUsageLogic
                     var line = lineSpan.StartLinePosition.Line + 1;
                     var span = node.Span;
 
-                    if (!seen.Add((file, span))) continue;
-
-                    var callerName = GetCallerName(node);
-                    var snippet = node.ToString();
-
                     var usagesByAttribute = usagesByTarget[matched.Value.Symbol];
                     var data = ParseObsoleteAttribute(matched.Value.Attribute);
                     if (!usagesByAttribute.TryGetValue(data, out var usages))
                     {
                         usages = new List<ObsoleteUsageSite>();
                         usagesByAttribute[data] = usages;
+                        seenByGroup[usages] = new HashSet<(string, TextSpan)>();
                     }
+
+                    if (!seenByGroup[usages].Add((file, span))) continue;
+
+                    var callerName = GetCallerName(node);
+                    var snippet = node.ToString();
 
                     usages.Add(new ObsoleteUsageSite(
                         CallerName: callerName,

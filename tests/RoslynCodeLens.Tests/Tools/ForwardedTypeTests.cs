@@ -199,18 +199,22 @@ public class ForwardedTypeTests
             {
                 Assert.Equal(GetCurrentThreadIdMessage + ".  http://go.microsoft.com/fwlink/?linkid=14202", net48.DeprecationMessage);
                 Assert.False(net48.IsError);
-                Assert.Equal(2, net48.UsageCount);
+                Assert.Equal(3, net48.UsageCount);
                 Assert.Collection(
                     net48.Usages,
                     u => Assert.Equal("Net48LibUsages.ThreadId", u.CallerName),
-                    u => Assert.Equal("NetStdLibUsages.ThreadId", u.CallerName));
+                    u => Assert.Equal("NetStdLibUsages.ThreadId", u.CallerName),
+                    u => Assert.Equal("SharedUsages.ThreadId", u.CallerName));
             },
             net10 =>
             {
                 Assert.Equal(GetCurrentThreadIdMessage + " instead.", net10.DeprecationMessage);
                 Assert.False(net10.IsError);
-                Assert.Equal(1, net10.UsageCount);
-                Assert.Equal("Net10AppUsages.ThreadId", Assert.Single(net10.Usages).CallerName);
+                Assert.Equal(2, net10.UsageCount);
+                Assert.Collection(
+                    net10.Usages,
+                    u => Assert.Equal("Net10AppUsages.ThreadId", u.CallerName),
+                    u => Assert.Equal("SharedUsages.ThreadId", u.CallerName));
             });
     }
 
