@@ -17,12 +17,20 @@ public class LegacySolutionHandlingTests
     private static string ValidSolutionPath => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolution", "TestSolution.slnx"));
 
-    [Fact]
+    // The full-load path for legacy projects runs only on Windows with Visual Studio MSBuild; elsewhere the
+    // test is reported as Skipped, not as a pass that checked nothing.
+    private sealed class WindowsOnlyFactAttribute : FactAttribute
+    {
+        public WindowsOnlyFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows())
+                Skip = "Loading legacy non-SDK-style projects needs Visual Studio MSBuild on Windows.";
+        }
+    }
+
+    [WindowsOnlyFact]
     public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows()
     {
-        if (!OperatingSystem.IsWindows())
-            return;
-
         var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "LoadableLegacy.slnx");
 
         var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);

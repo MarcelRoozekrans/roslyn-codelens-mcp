@@ -96,4 +96,4 @@ jobs:
       - name: Test legacy solution loading
         run: >-
           dotnet test tests/RoslynCodeLens.Tests/RoslynCodeLens.Tests.csproj -c Release -m:1
-          --filter "FullyQualifiedName~OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows"
+          --filter "FullyQualifiedName~LegacySolutionHandlingTests"
