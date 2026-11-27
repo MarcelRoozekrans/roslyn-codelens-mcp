@@ -243,14 +243,15 @@ public class SolutionLoader
         return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
     }
 
-    internal static string UnresolvedFrameworkReason(string projectPath, IReadOnlyCollection<string> workspaceFailures)
-    {
-        const string Prefix = "The legacy non-SDK-style project loaded without its framework references, so its types would not resolve."
-            + " Check that the targeting pack for its target framework and any Visual Studio imports are installed";
-        var cause = workspaceFailures.FirstOrDefault(
-            message => message.Contains(projectPath, StringComparison.OrdinalIgnoreCase));
-        return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
-    }
+    // MSBuild falls back to the runtime directory for the framework assemblies when the targeting pack is missing,
+    // so the project keeps its references and only this workspace failure (MSB3644) says they are the wrong ones.
+    // The text is MSBuild's own and can be localised; an unmatched message leaves the project loaded and its
+    // failure is still reported as a load diagnostic.
+    internal static string? FindMissingReferenceAssembliesFailure(string projectPath, IReadOnlyCollection<string> workspaceFailures) =>
+        workspaceFailures.FirstOrDefault(message =>
+            message.Contains(projectPath, StringComparison.OrdinalIgnoreCase)
+            && message.Contains("reference assemblies", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("were not found", StringComparison.OrdinalIgnoreCase));
 
     internal static string PlaceholderReason(ProjectClassifier.ClassifiedProject entry, IReadOnlyCollection<string> workspaceFailures)
     {
@@ -262,14 +263,6 @@ public class SolutionLoader
         var reason = entry.Reason ?? "MSBuild could not evaluate the project and returned an empty placeholder.";
         return cause is null ? reason : $"{reason} {cause}";
     }
-
-    private static readonly string[] s_coreLibraryNames = ["mscorlib", "System.Runtime", "System.Private.CoreLib", "netstandard"];
-
-    // A project that resolved its framework references has a core library among its metadata references.
-    internal static bool HasFrameworkReference(Project project) =>
-        project.MetadataReferences.OfType<PortableExecutableReference>().Any(reference =>
-            reference.FilePath is { } path
-            && s_coreLibraryNames.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase));
 
     internal static SolutionOpen RemoveUnloadedProjects(
         SolutionOpen open,
@@ -289,14 +282,17 @@ public class SolutionLoader
             // Roslyn may return an empty placeholder if MSBuild could not evaluate the project. This holds for
             // SDK-style projects too, for example after a broken import or an invalid condition.
             var placeholder = !loaded.Any(p => p.OutputFilePath is not null || p.DocumentIds.Count > 0);
-            // Roslyn's design-time build ignores missing imports, so a legacy project can keep its documents while
-            // its framework references never resolve; every type in it would then fail with CS0246.
-            var unresolved = !placeholder && entry.Kind == ProjectClassifier.ProjectKind.Legacy
-                && !loaded.Any(HasFrameworkReference);
+            // Roslyn's design-time build ignores missing imports and falls back to the runtime's framework assemblies
+            // without a targeting pack, so a legacy project can keep its documents and references and still have
+            // every framework type resolve against the wrong assemblies.
+            var missingReferenceAssemblies = placeholder || entry.Kind != ProjectClassifier.ProjectKind.Legacy
+                ? null
+                : FindMissingReferenceAssembliesFailure(entry.Path, workspaceFailures);
             if (placeholder)
                 skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(), PlaceholderReason(entry, workspaceFailures)));
-            else if (unresolved)
-                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(), UnresolvedFrameworkReason(entry.Path, workspaceFailures)));
+            else if (missingReferenceAssemblies is not null)
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
+                    $"The legacy non-SDK-style project loaded without the reference assemblies of its target framework. Install its targeting pack: {missingReferenceAssemblies}"));
         }
 
         foreach (var entry in skipped)

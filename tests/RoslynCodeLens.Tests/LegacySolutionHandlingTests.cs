@@ -75,7 +75,7 @@ public class LegacySolutionHandlingTests
     {
         using var workspace = new AdhocWorkspace();
         var solution = workspace.CurrentSolution;
-        solution = AddProject(solution, "Loaded", "/src/Loaded/Loaded.csproj", withDocument: true, withFramework: true);
+        solution = AddProject(solution, "Loaded", "/src/Loaded/Loaded.csproj", withDocument: true);
         solution = AddProject(solution, "Legacy", "/src/Legacy/Legacy.csproj", withDocument: false);
         solution = AddProject(solution, "Odd", "/src/Odd/Odd.sqlproj", withDocument: false);
 
@@ -115,27 +115,49 @@ public class LegacySolutionHandlingTests
     }
 
     [Fact]
-    public void RemoveUnloadedProjects_LegacyProjectWithoutFrameworkReferences_IsSkippedWithTheCause()
+    public void RemoveUnloadedProjects_LegacyProjectWithMissingReferenceAssemblies_IsSkippedWithTheCause()
     {
         using var workspace = new AdhocWorkspace();
-        var solution = AddProject(workspace.CurrentSolution, "NoFramework", "/src/NoFramework/NoFramework.csproj", withDocument: true);
-        solution = AddProject(solution, "Resolved", "/src/Resolved/Resolved.csproj", withDocument: true, withFramework: true);
+        var solution = AddProject(workspace.CurrentSolution, "NoPack", "/src/NoPack/NoPack.csproj", withDocument: true);
+        solution = AddProject(solution, "Fine", "/src/Fine/Fine.csproj", withDocument: true);
         ProjectClassifier.ClassifiedProject[] projects =
         [
-            new("/src/NoFramework/NoFramework.csproj", "NoFramework", ProjectClassifier.ProjectKind.Legacy, null),
-            new("/src/Resolved/Resolved.csproj", "Resolved", ProjectClassifier.ProjectKind.Legacy, null),
+            new("/src/NoPack/NoPack.csproj", "NoPack", ProjectClassifier.ProjectKind.Legacy, null),
+            new("/src/Fine/Fine.csproj", "Fine", ProjectClassifier.ProjectKind.Legacy, null),
         ];
+        var failures = new[]
+        {
+            "Msbuild failed when processing the file '/src/NoPack/NoPack.csproj' with message: The reference assemblies for \".NETFramework,Version=v9.9\" were not found.",
+            "Msbuild failed when processing the file '/src/Fine/Fine.csproj' with message: There was a mismatch between the processor architecture.",
+        };
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects, failures);
+
+        Assert.Equal(["Fine"], result.Solution.Projects.Select(p => p.Name));
+        var skipped = Assert.Single(result.Skipped);
+        Assert.Equal("NoPack", skipped.Name);
+        Assert.Equal("Legacy", skipped.Kind);
+        Assert.Contains("reference assemblies", skipped.Reason, StringComparison.Ordinal);
+        Assert.Contains("v9.9", skipped.Reason, StringComparison.Ordinal);
+        // The kept project's unrelated warning still marks the load as degraded.
+        Assert.Contains(result.LoadDiagnostics, d => d.Contains("/src/Fine/Fine.csproj", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_SdkStyleProjectWithMissingReferenceAssemblies_IsKept()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Sdk", "/src/Sdk/Sdk.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+            [new("/src/Sdk/Sdk.csproj", "Sdk", ProjectClassifier.ProjectKind.SdkStyle, null)];
 
         var result = SolutionLoader.RemoveUnloadedProjects(
             new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects,
-            ["Msbuild failed when processing the file '/src/NoFramework/NoFramework.csproj': MSB3644."]);
+            ["'/src/Sdk/Sdk.csproj': The reference assemblies for \"x\" were not found."]);
 
-        Assert.Equal(["Resolved"], result.Solution.Projects.Select(p => p.Name));
-        var skipped = Assert.Single(result.Skipped);
-        Assert.Equal("NoFramework", skipped.Name);
-        Assert.Equal("Legacy", skipped.Kind);
-        Assert.Contains("framework references", skipped.Reason, StringComparison.Ordinal);
-        Assert.Contains("MSB3644", skipped.Reason, StringComparison.Ordinal);
+        Assert.Single(result.Solution.Projects);
+        Assert.Empty(result.Skipped);
     }
 
     [Fact]
@@ -161,33 +183,19 @@ public class LegacySolutionHandlingTests
         Assert.Contains("invalid condition", skipped.Reason, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void HasFrameworkReference_RecognisesCoreLibrariesByFileName()
-    {
-        using var workspace = new AdhocWorkspace();
-        var none = AddProject(workspace.CurrentSolution, "None", "/src/None.csproj", withDocument: true);
-        var with = AddProject(none, "With", "/src/With.csproj", withDocument: true, withFramework: true);
-
-        Assert.False(SolutionLoader.HasFrameworkReference(with.Projects.Single(p => p.Name == "None")));
-        Assert.True(SolutionLoader.HasFrameworkReference(with.Projects.Single(p => p.Name == "With")));
-    }
-
     [WindowsOnlyFact]
     public async Task OpenAsync_LegacyProjectWithMissingImportAndNoTargetingPack_IsReportedAsSkippedOnWindows()
     {
         var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "MissingImport.slnx");
 
-        var open = await new SolutionLoader().OpenAsync(solutionPath);
-        var (solution, workspace, skipped) = open;
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
         using var _ = workspace;
 
-        var diagnostic = "failures=[" + string.Join(" | ", open.LoadDiagnostics) + "] " + string.Join("; ", solution.Projects.Select(p =>
-            $"{p.Name}: docs={p.DocumentIds.Count} out={p.OutputFilePath} refs=[{string.Join(",", p.MetadataReferences.OfType<PortableExecutableReference>().Select(r => Path.GetFileName(r.FilePath)))}]"));
-        Assert.True(solution.Projects.Count() == 1, diagnostic);
         Assert.Equal("LoadableLegacyLib", Assert.Single(solution.Projects).Name);
         var entry = Assert.Single(skipped);
         Assert.Equal("MissingImportLib", entry.Name);
         Assert.Equal("Legacy", entry.Kind);
+        Assert.Contains("reference assemblies", entry.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -202,13 +210,11 @@ public class LegacySolutionHandlingTests
     }
 
     private static Solution AddProject(
-        Solution solution, string name, string filePath, bool withDocument, bool withFramework = false)
+        Solution solution, string name, string filePath, bool withDocument)
     {
         var projectId = ProjectId.CreateNewId(name);
         solution = solution.AddProject(ProjectInfo.Create(
             projectId, VersionStamp.Default, name, name, LanguageNames.CSharp, filePath));
-        if (withFramework)
-            solution = solution.AddMetadataReference(projectId, MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
         return withDocument ? solution.AddDocument(DocumentId.CreateNewId(projectId), "A.cs", "class A {}") : solution;
     }
 
