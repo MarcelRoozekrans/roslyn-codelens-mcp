@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using RoslynCodeLens.Metadata;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
@@ -10,6 +11,10 @@ public sealed class MultiSolutionManager : IDisposable
     private readonly ConcurrentDictionary<string, SolutionManager> _managers;
     private string? _activeKey;
     private readonly Lock _lock = new();
+
+    // Runs after an unload, once the unloaded manager is out of reach. Replaceable so a test can observe it
+    // without forcing a collection.
+    internal Action MemoryReleaser { get; set; } = MemoryRelease.CollectAndDecommit;
 
     private MultiSolutionManager(ConcurrentDictionary<string, SolutionManager> managers, string? activeKey)
     {
@@ -255,8 +260,19 @@ public sealed class MultiSolutionManager : IDisposable
     /// Unload a solution by partial name match, freeing its memory.
     /// If the unloaded solution is currently active, another loaded solution (if any)
     /// will become active; otherwise there will be no active solution.
+    /// The memory is handed back to the operating system afterwards (#595).
     /// </summary>
     public string UnloadSolution(string name)
+    {
+        var key = UnloadAndDispose(name);
+
+        // A separate method, so the disposed manager is no longer a live local when the collection runs.
+        MemoryReleaser();
+        return key;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private string UnloadAndDispose(string name)
     {
         SolutionManager? managerToDispose = null;
         string key;
