@@ -121,8 +121,6 @@ public class SolutionLoader
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var projectsToCheck = classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray();
-
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
         // Re-open on a fresh workspace when the design-time build drops a project's
@@ -133,12 +131,14 @@ public class SolutionLoader
         MSBuildWorkspace? bestWorkspace = null;
         Solution? bestSolution = null;
         IReadOnlyList<string> bestDropped = Array.Empty<string>();
-        // Workspace failures are kept so a project MSBuild could not load can report why, not only warn on stderr.
-        var workspaceFailures = new ConcurrentQueue<string>();
+        // Workspace failures are kept per attempt, so a project MSBuild could not load can report why and a message
+        // from a discarded attempt cannot decide the fate of a project in the attempt that is returned.
+        ConcurrentQueue<string> bestFailures = new();
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             var workspace = MSBuildWorkspace.Create();
+            var workspaceFailures = new ConcurrentQueue<string>();
             workspace.WorkspaceFailed += (_, e) =>
             {
                 workspaceFailures.Enqueue(e.Diagnostic.Message);
@@ -195,7 +195,7 @@ public class SolutionLoader
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
                 return await WithAnalyzerSkewAsync(
-                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), projectsToCheck, workspaceFailures))
+                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), classified, workspaceFailures))
                     .ConfigureAwait(false);
             }
 
@@ -206,6 +206,7 @@ public class SolutionLoader
                 bestWorkspace = workspace;
                 bestSolution = solution;
                 bestDropped = dropped;
+                bestFailures = workspaceFailures;
             }
             else
             {
@@ -226,7 +227,7 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), projectsToCheck, workspaceFailures))
+            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), classified, bestFailures))
             .ConfigureAwait(false);
     }
 
@@ -241,30 +242,91 @@ public class SolutionLoader
     {
         const string Prefix = "MSBuild could not load the legacy non-SDK-style project";
         var cause = workspaceFailures.FirstOrDefault(
-            message => message.Contains(projectPath, StringComparison.OrdinalIgnoreCase));
+            message => NamesProject(message, projectPath));
         return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
+    }
+
+    // File systems differ in case sensitivity: on Linux two project files whose paths differ only in case are
+    // different projects, so every path keyed map uses the comparer of the platform's file system.
+    internal static StringComparer PathComparer { get; } =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    // A workspace failure names a project by its full path. A plain substring test would also match a project whose
+    // path merely starts with this one, as Lib.csproj does in Lib.csproj.Legacy.csproj, so the path must not be
+    // followed by more of a file name.
+    internal static bool NamesProject(string message, string projectPath)
+    {
+        var from = 0;
+        while (from <= message.Length - projectPath.Length)
+        {
+            var index = message.IndexOf(projectPath, from, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+                return false;
+            var end = index + projectPath.Length;
+            if (end == message.Length
+                || !(char.IsLetterOrDigit(message[end]) || message[end] is '_' or '-'
+                    || (message[end] == '.' && end + 1 < message.Length && char.IsLetterOrDigit(message[end + 1]))))
+                return true;
+            from = index + 1;
+        }
+        return false;
+    }
+
+    // Roslyn returns an empty project for one MSBuild could not evaluate; a loaded project has documents or an output path.
+    internal static bool IsPlaceholder(Project project) =>
+        project.OutputFilePath is null && project.DocumentIds.Count == 0;
+
+    // MSBuild falls back to the runtime directory for the framework assemblies when the targeting pack is missing,
+    // so the project keeps its references and only this workspace failure (MSB3644) says they are the wrong ones.
+    // The text is MSBuild's own and can be localised; an unmatched message leaves the project loaded and its
+    // failure is still reported as a load diagnostic.
+    internal static string? FindMissingReferenceAssembliesFailure(string projectPath, IReadOnlyCollection<string> workspaceFailures) =>
+        workspaceFailures.FirstOrDefault(message =>
+            NamesProject(message, projectPath)
+            && message.Contains("reference assemblies", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("were not found", StringComparison.OrdinalIgnoreCase));
+
+    internal static string PlaceholderReason(ProjectClassifier.ClassifiedProject entry, IReadOnlyCollection<string> workspaceFailures)
+    {
+        if (entry.Kind == ProjectClassifier.ProjectKind.Legacy)
+            return LegacyLoadFailureReason(entry.Path, workspaceFailures);
+
+        var cause = workspaceFailures.FirstOrDefault(
+            message => NamesProject(message, entry.Path));
+        var reason = entry.Reason ?? "MSBuild could not evaluate the project and returned an empty placeholder.";
+        return cause is null ? reason : $"{reason} {cause}";
     }
 
     internal static SolutionOpen RemoveUnloadedProjects(
         SolutionOpen open,
-        IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck,
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> projects,
         IReadOnlyCollection<string> workspaceFailures)
     {
-        if (projectsToCheck.Count == 0)
+        if (projects.Count == 0)
             return open;
 
         var solution = open.Solution;
-        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var pathComparer = PathComparer;
         var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
-        // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
-        var skipped = projectsToCheck
-            .Where(entry => !projectsByPath[entry.Path].Any(p =>
-                p.OutputFilePath is not null || p.DocumentIds.Count > 0))
-            .Select(entry => new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
-                entry.Kind == ProjectClassifier.ProjectKind.Legacy
-                    ? LegacyLoadFailureReason(entry.Path, workspaceFailures)
-                    : entry.Reason ?? "Unsupported project format."))
-            .ToArray();
+        var skipped = new List<SkippedProject>();
+        foreach (var entry in projects)
+        {
+            var loaded = projectsByPath[entry.Path].ToArray();
+            // Roslyn may return an empty placeholder if MSBuild could not evaluate the project. This holds for
+            // SDK-style projects too, for example after a broken import or an invalid condition.
+            var placeholder = loaded.All(IsPlaceholder);
+            // Roslyn's design-time build ignores missing imports and falls back to the runtime's framework assemblies
+            // without a targeting pack, so a legacy project can keep its documents and references and still have
+            // every framework type resolve against the wrong assemblies.
+            var missingReferenceAssemblies = placeholder || entry.Kind != ProjectClassifier.ProjectKind.Legacy
+                ? null
+                : FindMissingReferenceAssembliesFailure(entry.Path, workspaceFailures);
+            if (placeholder)
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(), PlaceholderReason(entry, workspaceFailures)));
+            else if (missingReferenceAssemblies is not null)
+                skipped.Add(new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
+                    $"The legacy non-SDK-style project loaded without the reference assemblies of its target framework. Install its targeting pack: {missingReferenceAssemblies}"));
+        }
 
         foreach (var entry in skipped)
         {
@@ -275,16 +337,16 @@ public class SolutionLoader
         // A legacy project that stayed in the solution can still have failed partly, for example an unresolved
         // reference; its workspace failures mark the load as degraded instead of passing unnoticed.
         var skippedPaths = skipped.Select(entry => entry.Path).ToHashSet(pathComparer);
-        var keptLegacyPaths = projectsToCheck
+        var keptLegacyPaths = projects
             .Where(entry => entry.Kind == ProjectClassifier.ProjectKind.Legacy && !skippedPaths.Contains(entry.Path))
             .Select(entry => entry.Path)
             .ToArray();
         var diagnostics = new List<string>(open.LoadDiagnostics);
         diagnostics.AddRange(workspaceFailures
-            .Where(message => keptLegacyPaths.Any(path => message.Contains(path, StringComparison.OrdinalIgnoreCase)))
+            .Where(message => keptLegacyPaths.Any(path => NamesProject(message, path)))
             .Distinct(StringComparer.Ordinal));
 
-        return open with { Solution = solution, Skipped = skipped, LoadDiagnostics = diagnostics };
+        return open with { Solution = solution, Skipped = skipped.ToArray(), LoadDiagnostics = diagnostics };
     }
 
     /// <summary>
@@ -380,8 +442,12 @@ public class SolutionLoader
         // and the leaves are skipped before they are scheduled) and to re-wire
         // references after re-stitch. Reuses the same lightweight XML reader and
         // separator normalisation as the filter feature, so it is cross-platform.
-        var targetPaths = new HashSet<string>(targets.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
-        var graph = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var targetPaths = new HashSet<string>(targets.Select(t => t.Path), PathComparer);
+        // Keep the first entry per path, as the capture below does, so a duplicate entry cannot throw.
+        var targetsByPath = new Dictionary<string, ProjectClassifier.ClassifiedProject>(PathComparer);
+        foreach (var t in targets)
+            targetsByPath.TryAdd(t.Path, t);
+        var graph = new Dictionary<string, IReadOnlyList<string>>(PathComparer);
         foreach (var t in targets)
         {
             var refs = new List<string>();
@@ -396,8 +462,8 @@ public class SolutionLoader
         // path -> detached ProjectInfo (text materialised in-memory, ProjectReferences
         // stripped). Keep-first wins: a project pulled in transitively by an earlier
         // worker is captured once and not re-opened standalone.
-        var captured = new ConcurrentDictionary<string, ProjectInfo>(StringComparer.OrdinalIgnoreCase);
-        var failures = new ConcurrentDictionary<string, SkippedProject>(StringComparer.OrdinalIgnoreCase);
+        var captured = new ConcurrentDictionary<string, ProjectInfo>(PathComparer);
+        var failures = new ConcurrentDictionary<string, SkippedProject>(PathComparer);
 
         var degree = GetLoadParallelism();
         var timeoutSec = GetOpenProjectTimeoutSec();
@@ -425,8 +491,12 @@ public class SolutionLoader
                         $"[roslyn-codelens] Loading {index}/{targets.Count}: {entry.Name}").ConfigureAwait(false);
 
                     using var ws = MSBuildWorkspace.Create();
+                    var workerFailures = new ConcurrentQueue<string>();
                     ws.WorkspaceFailed += (_, e) =>
+                    {
+                        workerFailures.Enqueue(e.Diagnostic.Message);
                         Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
+                    };
 
                     Project? loaded;
                     try
@@ -479,6 +549,15 @@ public class SolutionLoader
                             continue;
                         if (captured.ContainsKey(p.FilePath))
                             continue;
+                        // An empty placeholder means MSBuild could not evaluate the project; report it instead of
+                        // keeping an empty project in the solution.
+                        if (IsPlaceholder(p))
+                        {
+                            var target = targetsByPath[p.FilePath];
+                            failures.TryAdd(p.FilePath, new SkippedProject(target.Path, target.Name,
+                                target.Kind.ToString(), PlaceholderReason(target, workerFailures)));
+                            continue;
+                        }
                         var info = await ToDetachedInfoAsync(p, analyzerLoader).ConfigureAwait(false);
                         captured.TryAdd(p.FilePath, info);
                     }
@@ -495,7 +574,7 @@ public class SolutionLoader
         // Re-stitch: rebuild every captured project into a single AdhocWorkspace,
         // re-wiring ProjectReferences from the on-disk graph (their original ids
         // were local to each worker workspace and are meaningless now).
-        var idByPath = new Dictionary<string, ProjectId>(StringComparer.OrdinalIgnoreCase);
+        var idByPath = new Dictionary<string, ProjectId>(PathComparer);
         foreach (var (path, info) in captured)
             idByPath[path] = info.Id;
 
@@ -542,7 +621,7 @@ public class SolutionLoader
     {
         int ClosureSize(string path)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<string>(PathComparer);
             var stack = new Stack<string>();
             stack.Push(path);
             while (stack.Count > 0)
@@ -630,7 +709,7 @@ public class SolutionLoader
         // Build a name -> referenced-project-names graph. References are read as
         // absolute paths and resolved back to project names via the classified set,
         // so only references that point at projects in this solution form edges.
-        var nameByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var nameByPath = new Dictionary<string, string>(PathComparer);
         foreach (var entry in classified)
             nameByPath[entry.Path] = entry.Name;
 
