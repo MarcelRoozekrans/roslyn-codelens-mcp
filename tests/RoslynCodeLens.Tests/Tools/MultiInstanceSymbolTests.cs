@@ -127,4 +127,55 @@ public class MultiInstanceSymbolTests
         Assert.Equal(AppProjects, results.Select(r => r.Project).Order(StringComparer.Ordinal), StringComparer.Ordinal);
         Assert.All(results, r => Assert.EndsWith("Usages", r.TargetName, StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void FindNamedTypes_FullNameDeclaredInTwoProjects_ReturnsBothTypesOrderedByProjectPath()
+    {
+        // Duplicate.Helper is declared in AppNet9 and in AppNet10: two distinct types that share a full name (#590).
+        // The order must not depend on the load, so it follows the project paths: AppNet10/ sorts before AppNet9/.
+        var types = _resolver.FindNamedTypes("Duplicate.Helper");
+
+        Assert.Equal(
+            ["RunNet10", "RunNet9"],
+            types.SelectMany(t => t.GetMembers()).Where(m => m.Name.StartsWith("Run", StringComparison.Ordinal)).Select(m => m.Name),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void GoToDefinition_FullNameDeclaredInTwoProjects_ReportsBothDeclarations()
+    {
+        var results = GoToDefinitionLogic.Execute(_resolver, _metadata, "Duplicate.Helper");
+
+        Assert.Equal(AppProjects, results.Select(r => r.Project).Order(StringComparer.Ordinal), StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void FindImplementations_SameNamedImplementationsInTwoProjects_ReportsBoth()
+    {
+        var results = FindImplementationsLogic.Execute(_loaded, _resolver, _metadata, "Shared.IRunner");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            results.Select(r => (r.Project, r.FullName)).Order());
+    }
+
+    [Fact]
+    public void GetTypeHierarchy_SameNamedDerivedTypesInTwoProjects_ReportsBoth()
+    {
+        var hierarchy = GetTypeHierarchyLogic.Execute(_resolver, _metadata, "Shared.IRunner");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            hierarchy.Derived.Select(r => (r.Project, r.FullName)).Order());
+    }
+
+    [Fact]
+    public void FindAttributeUsages_FullNameDeclaredInTwoProjects_ReportsUsagesOfBoth()
+    {
+        var results = FindAttributeUsagesLogic.Execute(_loaded, _resolver, _metadata, "Duplicate.MarkerAttribute");
+
+        Assert.Equal(
+            [("AppNet10", "Duplicate.Helper"), ("AppNet9", "Duplicate.Helper")],
+            results.Select(r => (r.Project, r.TargetName)).Order());
+    }
 }

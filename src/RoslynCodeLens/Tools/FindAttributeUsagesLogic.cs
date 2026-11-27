@@ -19,25 +19,31 @@ public static class FindAttributeUsagesLogic
         if (resolver.AttributeIndex.TryGetValue(attribute, out var entries))
             return BuildResults(resolver, entries, fallbackAttributeName: attribute);
 
-        // Fallback: the caller may have passed a fully-qualified metadata attribute
+        // Fallback: the caller may have passed a fully-qualified attribute
         // (e.g. "System.ObsoleteAttribute") that the simple-name index does not
-        // reach. Resolve the attribute type via the metadata resolver and then
-        // scan the existing index values for usages whose AttributeClass matches.
-        var resolved = metadata.Resolve(attribute);
-        if (resolved?.Symbol is not INamedTypeSymbol attributeType)
-            return [];
+        // reach. Resolve the attribute types — several projects may declare the
+        // same full name — and then scan the existing index values for usages
+        // whose AttributeClass matches one of them.
+        var attributeTypes = resolver.FindNamedTypes(attribute);
+        if (attributeTypes.Count == 0)
+        {
+            if (metadata.Resolve(attribute)?.Symbol is not INamedTypeSymbol resolved)
+                return [];
+            attributeTypes = [resolved];
+        }
 
+        var candidates = new HashSet<INamedTypeSymbol>(attributeTypes, resolver.TypeComparer);
         var matches = new List<(ISymbol Symbol, AttributeData Attribute)>();
         foreach (var list in resolver.AttributeIndex.Values)
         {
             foreach (ref readonly var entry in CollectionsMarshal.AsSpan(list))
             {
-                if (NamedTypeSignatureComparer.Instance.Equals(entry.Attribute.AttributeClass, attributeType))
+                if (entry.Attribute.AttributeClass is { } attributeClass && candidates.Contains(attributeClass))
                     matches.Add(entry);
             }
         }
 
-        return BuildResults(resolver, matches, fallbackAttributeName: attributeType.Name);
+        return BuildResults(resolver, matches, fallbackAttributeName: attributeTypes[0].Name);
     }
 
     private static IReadOnlyList<AttributeUsageInfo> BuildResults(

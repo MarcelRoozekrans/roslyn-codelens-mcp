@@ -60,7 +60,7 @@ public static class FindGodObjectsLogic
             return new GodObjectsResult([]);
 
         // Pass 2 — compute incoming-namespace coupling for each suspect with one solution-wide walk.
-        var incomingByType = ComputeIncomingNamespaces(loaded, suspects);
+        var incomingByType = ComputeIncomingNamespaces(loaded, resolver, suspects);
 
         // Pass 3 — compute outgoing-namespace coupling per suspect.
         var results = new List<GodObjectInfo>();
@@ -138,13 +138,13 @@ public static class FindGodObjectsLogic
     }
 
     private static Dictionary<INamedTypeSymbol, HashSet<string>> ComputeIncomingNamespaces(
-        LoadedSolution loaded, List<SizeSuspect> suspects)
+        LoadedSolution loaded, SymbolResolver resolver, List<SizeSuspect> suspects)
     {
-        var byType = new Dictionary<INamedTypeSymbol, HashSet<string>>(NamedTypeSignatureComparer.Instance);
+        var byType = new Dictionary<INamedTypeSymbol, HashSet<string>>(resolver.TypeComparer);
         foreach (var s in suspects)
             byType[s.Type] = new HashSet<string>(StringComparer.Ordinal);
 
-        var suspectSet = new HashSet<INamedTypeSymbol>(suspects.Select(s => s.Type), NamedTypeSignatureComparer.Instance);
+        var suspectSet = new HashSet<INamedTypeSymbol>(suspects.Select(s => s.Type), resolver.TypeComparer);
 
         foreach (var (_, compilation) in loaded.Compilations)
         {

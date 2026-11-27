@@ -50,6 +50,7 @@ jobs:
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/RazorFixture/RazorFixture.slnx
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/PropsFixture/PropsFixture.slnx
           dotnet restore tests/RoslynCodeLens.Tests/Fixtures/MultiInstanceSolution/MultiInstanceSolution.slnx
+          dotnet restore tests/RoslynCodeLens.Tests/Fixtures/ForwardedTypesSolution/ForwardedTypesSolution.slnx
 
       - name: Build
         run: dotnet build --no-restore -c Release

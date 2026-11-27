@@ -42,7 +42,7 @@ public static class FindTestsForSymbolLogic
         List<TestReference> transitiveTests)
     {
         // Report each test once, even when it exists as one instance per target framework...
-        var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
+        var seenTestSymbols = new HashSet<IMethodSymbol>(source.SymbolComparer);
         // ...but classify every instance: a test attribute may exist on one target framework only.
         var visited = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
 
@@ -104,6 +104,7 @@ public static class FindTestsForSymbolLogic
         // Two-pass scan: test projects (terminal lookups) and non-test projects
         // (helper hops in transitive mode). We need both because a helper might live
         // in TestLib2 (non-test project) and a test in NUnitFixture invokes it.
+        var comparer = source.SymbolComparer;
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
             var projectName = source.GetProjectName(projectId);
@@ -119,9 +120,9 @@ public static class FindTestsForSymbolLogic
                     if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
                         continue;
 
-                    if (!SymbolSignatureComparer.Instance.Equals(calledMethod, target) &&
-                        !SymbolSignatureComparer.Instance.Equals(calledMethod.OriginalDefinition, target) &&
-                        !SymbolSignatureComparer.Instance.Equals(calledMethod, target.OriginalDefinition))
+                    if (!comparer.Equals(calledMethod, target) &&
+                        !comparer.Equals(calledMethod.OriginalDefinition, target) &&
+                        !comparer.Equals(calledMethod, target.OriginalDefinition))
                         continue;
 
                     var enclosing = FindEnclosingMethodSymbol(invocation, semanticModel);

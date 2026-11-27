@@ -6,9 +6,12 @@ namespace RoslynCodeLens;
 
 public class SymbolResolver
 {
+    private readonly NamedTypeSignatureComparer _typeComparer;
+    private readonly SymbolSignatureComparer _symbolComparer;
     private readonly List<INamedTypeSymbol> _allTypes;
+    private readonly Dictionary<INamedTypeSymbol, INamedTypeSymbol[]> _typeInstances;
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesBySimpleName;
-    private readonly Dictionary<string, INamedTypeSymbol> _typesByFullName;
+    private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByFullName;
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByStrippedFullName;
     private readonly Dictionary<string, string> _fileToProjectName;
     private readonly Dictionary<ProjectId, string> _projectIdToName;
@@ -21,10 +24,14 @@ public class SymbolResolver
 
     public SymbolResolver(LoadedSolution loaded)
     {
-        _allTypes = CollectAllTypes(loaded);
+        var compilations = CompilationsInStableOrder(loaded);
+        _typeComparer = new NamedTypeSignatureComparer(TypeForwardingMap.Build(compilations));
+        _symbolComparer = new SymbolSignatureComparer(_typeComparer);
+
+        (_allTypes, _typeInstances) = CollectAllTypes(compilations, _typeComparer);
         (_typesBySimpleName, _typesByFullName, _typesByStrippedFullName) = BuildTypeLookups(_allTypes);
         (_fileToProjectName, _projectIdToName) = BuildProjectLookups(loaded);
-        (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes);
+        (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes, _typeComparer);
 
         _membersBySimpleName = new Dictionary<string, List<ISymbol>>(StringComparer.OrdinalIgnoreCase);
         _attributeIndex = new Dictionary<string, List<(ISymbol, AttributeData)>>(StringComparer.OrdinalIgnoreCase);
@@ -34,21 +41,72 @@ public class SymbolResolver
         _generatedToMarkup = Analysis.MarkupDocumentMap.BuildGeneratedToMarkup(loaded);
     }
 
-    private static List<INamedTypeSymbol> CollectAllTypes(LoadedSolution loaded)
+    // The compilation order decides which instance represents a type and the order of same-named types, so it must
+    // not depend on the load. Compilations is keyed by ProjectIds, which are new GUIDs on every load; Solution.Projects
+    // follows the load order, which for a solution opened project by project (legacy projects, fallbacks) is the
+    // enumeration order of a dictionary keyed by project path, whose string hashes are randomized per process. The
+    // project file path (and the name, which tells the target frameworks of one project apart) does not depend on
+    // the load.
+    private static List<Compilation> CompilationsInStableOrder(LoadedSolution loaded)
+    {
+        var projects = loaded.Solution.Projects
+            .Where(p => loaded.Compilations.ContainsKey(p.Id))
+            .OrderBy(p => p.FilePath ?? string.Empty, StringComparer.Ordinal)
+            .ThenBy(p => p.Name, StringComparer.Ordinal);
+
+        var compilations = new List<Compilation>(loaded.Compilations.Count);
+        foreach (var project in projects)
+            compilations.Add(loaded.Compilations[project.Id]);
+        return compilations;
+    }
+
+    // Every logical type once, represented by the instance found first. Same-named types of different assemblies
+    // stay separate entries unless type forwarding makes them one (see TypeForwardingMap).
+    // Per logical type the index also keeps one instance per distinct assembly — a forwarded framework type has
+    // one per target framework family — for the tools that must query each of them (see GetInstances).
+    private static (List<INamedTypeSymbol>, Dictionary<INamedTypeSymbol, INamedTypeSymbol[]>) CollectAllTypes(
+        List<Compilation> compilations, NamedTypeSignatureComparer comparer)
     {
         var allTypes = new List<INamedTypeSymbol>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var instances = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
 
-        foreach (var compilation in loaded.Compilations.Values)
+        foreach (var compilation in compilations)
+            Collect(compilation.GlobalNamespace);
+
+        var typeInstances = new Dictionary<INamedTypeSymbol, INamedTypeSymbol[]>(comparer);
+        foreach (var (type, list) in instances)
         {
-            foreach (var type in GetAllTypes(compilation.GlobalNamespace))
-            {
-                if (seen.Add(type.ToDisplayString()))
-                    allTypes.Add(type);
-            }
+            if (list.Count > 1)
+                typeInstances[type] = list.ToArray();
         }
 
-        return allTypes;
+        return (allTypes, typeInstances);
+
+        void Collect(INamespaceSymbol ns)
+        {
+            foreach (var type in GetAllTypes(ns))
+            {
+                if (!instances.TryGetValue(type, out var list))
+                {
+                    instances[type] = [type];
+                    allTypes.Add(type);
+                }
+                else if (!ContainsAssembly(list, type.ContainingAssembly?.Identity.Name))
+                {
+                    list.Add(type);
+                }
+            }
+        }
+    }
+
+    private static bool ContainsAssembly(List<INamedTypeSymbol> types, string? assemblyName)
+    {
+        foreach (var type in types)
+        {
+            if (string.Equals(type.ContainingAssembly?.Identity.Name, assemblyName, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -60,18 +118,24 @@ public class SymbolResolver
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
         genericsOptions: SymbolDisplayGenericsOptions.None);
 
-    private static (Dictionary<string, List<INamedTypeSymbol>>, Dictionary<string, INamedTypeSymbol>,
+    private static (Dictionary<string, List<INamedTypeSymbol>>, Dictionary<string, List<INamedTypeSymbol>>,
                      Dictionary<string, List<INamedTypeSymbol>>)
         BuildTypeLookups(List<INamedTypeSymbol> allTypes)
     {
         var bySimple = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
-        var byFull = new Dictionary<string, INamedTypeSymbol>(StringComparer.Ordinal);
+        var byFull = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
         var byStripped = new Dictionary<string, List<INamedTypeSymbol>>(StringComparer.Ordinal);
 
         foreach (ref readonly var type in CollectionsMarshal.AsSpan(allTypes))
         {
+            // Two projects may declare the same full name; both types stay reachable under it.
             var fullName = type.ToDisplayString();
-            byFull[fullName] = type;
+            if (!byFull.TryGetValue(fullName, out var fullList))
+            {
+                fullList = new List<INamedTypeSymbol>();
+                byFull[fullName] = fullList;
+            }
+            fullList.Add(type);
 
             // Generic types display with their type parameters ("Data.Repository<T>"),
             // so the documented qualified form "Data.Repository" misses byFull. Index
@@ -134,10 +198,10 @@ public class SymbolResolver
 
     private static (Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>,
                      Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>)
-        BuildInheritanceMaps(List<INamedTypeSymbol> allTypes)
+        BuildInheritanceMaps(List<INamedTypeSymbol> allTypes, NamedTypeSignatureComparer comparer)
     {
-        var implementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeSignatureComparer.Instance);
-        var derived = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeSignatureComparer.Instance);
+        var implementors = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
+        var derived = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(comparer);
 
         foreach (ref readonly var type in CollectionsMarshal.AsSpan(allTypes))
         {
@@ -195,6 +259,25 @@ public class SymbolResolver
                 memberList.Add(member);
             }
         }
+
+        // Attributes can differ per instance of a type, e.g. String.Copy(string) is [Obsolete] in System.Runtime of
+        // net10.0 but not in mscorlib of net48, and find_obsolete_usage reads metadata attributes from the index. The
+        // member index stays with the representative: its only consumer reports members with a source location.
+        foreach (var (type, instances) in _typeInstances)
+        {
+            foreach (var instance in instances)
+            {
+                if (SymbolEqualityComparer.Default.Equals(instance, type))
+                    continue;
+
+                IndexAttributes(instance);
+                foreach (var member in instance.GetMembers())
+                {
+                    if (!member.IsImplicitlyDeclared && !string.IsNullOrEmpty(member.Name))
+                        IndexAttributes(member);
+                }
+            }
+        }
     }
 
     private static HashSet<string> BuildGeneratedFileIndex(LoadedSolution loaded)
@@ -242,16 +325,31 @@ public class SymbolResolver
     }
 
     /// <summary>
-    /// All deduplicated types across all compilations, cached at construction.
+    /// Every logical type across all compilations once, cached at construction. Same-named types of different
+    /// assemblies are separate entries unless type forwarding makes them one type.
     /// </summary>
     public IReadOnlyList<INamedTypeSymbol> AllTypes => _allTypes;
 
+    /// <summary>
+    /// Compares types by signature and treats the instances of a forwarded framework type as one type.
+    /// </summary>
+    internal NamedTypeSignatureComparer TypeComparer => _typeComparer;
+
+    /// <summary>
+    /// Compares types and members by signature, with types compared as <see cref="TypeComparer"/> does.
+    /// </summary>
+    internal SymbolSignatureComparer SymbolComparer => _symbolComparer;
+
+    /// <summary>
+    /// The types a name refers to. A full name can match several types when projects declare the same name;
+    /// they are returned ordered by the path of their project file.
+    /// </summary>
     public IReadOnlyList<INamedTypeSymbol> FindNamedTypes(string symbol)
     {
         if (symbol.Contains('.', StringComparison.Ordinal))
         {
-            if (_typesByFullName.TryGetValue(symbol, out var type))
-                return [type];
+            if (_typesByFullName.TryGetValue(symbol, out var types))
+                return types;
 
             // Fall back to the arity-stripped index so the documented qualified form
             // ("Data.Repository") reaches generic types ("Data.Repository<T>").
@@ -276,7 +374,7 @@ public class SymbolResolver
 
         foreach (var type in FindNamedTypes(typeName))
         {
-            results.AddRange(type.GetMembers(methodName).OfType<IMethodSymbol>());
+            results.AddRange(GetMembersOfAllInstances(type, methodName).OfType<IMethodSymbol>());
         }
 
         return results;
@@ -293,10 +391,34 @@ public class SymbolResolver
 
         foreach (var type in FindNamedTypes(typeName))
         {
-            results.AddRange(type.GetMembers(eventName).OfType<IEventSymbol>());
+            results.AddRange(GetMembersOfAllInstances(type, eventName).OfType<IEventSymbol>());
         }
 
         return results;
+    }
+
+    // The members of a type merged over its instances: an instance can declare members the representative lacks, e.g.
+    // String.Contains(string, StringComparison) exists in System.Runtime of net10.0 but not in mscorlib of net48.
+    private IReadOnlyList<ISymbol> GetMembersOfAllInstances(INamedTypeSymbol type, string name)
+    {
+        var members = type.GetMembers(name);
+        if (!_typeInstances.TryGetValue(type, out var instances))
+            return members;
+
+        var result = new List<ISymbol>(members);
+        foreach (var instance in instances)
+        {
+            if (SymbolEqualityComparer.Default.Equals(instance, type))
+                continue;
+
+            foreach (var member in instance.GetMembers(name))
+            {
+                if (!result.Contains(member, _symbolComparer))
+                    result.Add(member);
+            }
+        }
+
+        return result;
     }
 
     public static IEnumerable<INamedTypeSymbol> GetAllTypes(INamespaceSymbol ns)
@@ -350,10 +472,7 @@ public class SymbolResolver
         var memberName = parts[^1];
 
         foreach (var type in FindNamedTypes(typeName))
-        {
-            foreach (var m in type.GetMembers(memberName))
-                results.Add(m);
-        }
+            results.AddRange(GetMembersOfAllInstances(type, memberName));
 
         return results;
     }
@@ -391,6 +510,52 @@ public class SymbolResolver
     public IReadOnlyList<INamedTypeSymbol> GetDerivedTypes(INamedTypeSymbol baseType)
     {
         return _derivedTypes.TryGetValue(baseType, out var list) ? list : [];
+    }
+
+    /// <summary>
+    /// <paramref name="symbol"/> followed by its instances in the other assemblies of its logical type. A framework
+    /// type that type forwarding unites across target frameworks has one instance per assembly (System.IDisposable
+    /// in mscorlib, netstandard and System.Runtime); members are mapped to their counterparts by signature. Every
+    /// other symbol yields just itself.
+    /// </summary>
+    /// <remarks>
+    /// Roslyn's SymbolFinder matches a symbol only in compilations that can see its assembly: a start symbol from
+    /// System.Runtime finds no usage in a net48 project. Tools built on it query every instance and merge the results.
+    /// </remarks>
+    public IReadOnlyList<ISymbol> GetInstances(ISymbol symbol)
+    {
+        var type = symbol as INamedTypeSymbol ?? symbol.ContainingType;
+        if (type is null
+            || !SymbolEqualityComparer.Default.Equals(type, type.OriginalDefinition)
+            || !_typeInstances.TryGetValue(type, out var instances))
+        {
+            return [symbol];
+        }
+
+        var assembly = type.ContainingAssembly?.Identity.Name;
+        var result = new List<ISymbol>(instances.Length) { symbol };
+        foreach (var instance in instances)
+        {
+            if (string.Equals(instance.ContainingAssembly?.Identity.Name, assembly, StringComparison.Ordinal))
+                continue;
+
+            if (symbol is INamedTypeSymbol)
+            {
+                result.Add(instance);
+                continue;
+            }
+
+            foreach (var member in instance.GetMembers(symbol.Name))
+            {
+                if (_symbolComparer.Equals(member, symbol))
+                {
+                    result.Add(member);
+                    break;
+                }
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

@@ -71,7 +71,7 @@ public static class FindUnusedSymbolsLogic
     {
         foreach (var member in type.GetMembers())
         {
-            if (ShouldSkipMember(member, type, includeInternal)) continue;
+            if (ShouldSkipMember(member, type, includeInternal, resolver.SymbolComparer)) continue;
 
             var memberReason = DeadCodeFilters.Classify(member);
             if (memberReason != DeadCodeFilters.Reason.None)
@@ -140,7 +140,7 @@ public static class FindUnusedSymbolsLogic
     /// </summary>
     private static HashSet<ISymbol> CollectReferencedSymbols(LoadedSolution loaded, SymbolResolver resolver)
     {
-        var referencedSymbols = new HashSet<ISymbol>(SymbolSignatureComparer.Instance);
+        var referencedSymbols = new HashSet<ISymbol>(resolver.SymbolComparer);
 
         foreach (var (_, compilation) in loaded.Compilations)
         {
@@ -243,7 +243,8 @@ public static class FindUnusedSymbolsLogic
         return false;
     }
 
-    private static bool ShouldSkipMember(ISymbol member, INamedTypeSymbol containingType, bool includeInternal)
+    private static bool ShouldSkipMember(
+        ISymbol member, INamedTypeSymbol containingType, bool includeInternal, SymbolSignatureComparer comparer)
     {
         // Skip implicitly declared
         if (member.IsImplicitlyDeclared)
@@ -271,7 +272,7 @@ public static class FindUnusedSymbolsLogic
             foreach (var iface in containingType.AllInterfaces)
             {
                 var impl = containingType.FindImplementationForInterfaceMember(method);
-                if (impl != null && SymbolSignatureComparer.Instance.Equals(impl, method))
+                if (impl != null && comparer.Equals(impl, method))
                     return true;
             }
         }
@@ -286,7 +287,7 @@ public static class FindUnusedSymbolsLogic
             foreach (var iface in containingType.AllInterfaces)
             {
                 var impl = containingType.FindImplementationForInterfaceMember(prop);
-                if (impl != null && SymbolSignatureComparer.Instance.Equals(impl, prop))
+                if (impl != null && comparer.Equals(impl, prop))
                     return true;
             }
         }
