@@ -28,6 +28,16 @@ public class LegacySolutionHandlingTests
         }
     }
 
+    // On Windows the legacy project loads in the solution-level pass, so the per-project path is not taken.
+    private sealed class NonWindowsFactAttribute : FactAttribute
+    {
+        public NonWindowsFactAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "The per-project path for a solution with a legacy project runs only off Windows.";
+        }
+    }
+
     [WindowsOnlyFact]
     public async Task OpenAsync_MixedLegacyProjects_LoadsBuildableAndReportsSkippedOnWindows()
     {
@@ -115,6 +125,155 @@ public class LegacySolutionHandlingTests
     }
 
     [Fact]
+    public void RemoveUnloadedProjects_LegacyProjectWithMissingReferenceAssemblies_IsSkippedWithTheCause()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "NoPack", "/src/NoPack/NoPack.csproj", withDocument: true);
+        solution = AddProject(solution, "Fine", "/src/Fine/Fine.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+        [
+            new("/src/NoPack/NoPack.csproj", "NoPack", ProjectClassifier.ProjectKind.Legacy, null),
+            new("/src/Fine/Fine.csproj", "Fine", ProjectClassifier.ProjectKind.Legacy, null),
+        ];
+        var failures = new[]
+        {
+            "Msbuild failed when processing the file '/src/NoPack/NoPack.csproj' with message: The reference assemblies for \".NETFramework,Version=v9.9\" were not found.",
+            "Msbuild failed when processing the file '/src/Fine/Fine.csproj' with message: There was a mismatch between the processor architecture.",
+        };
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects, failures);
+
+        Assert.Equal(["Fine"], result.Solution.Projects.Select(p => p.Name));
+        var skipped = Assert.Single(result.Skipped);
+        Assert.Equal("NoPack", skipped.Name);
+        Assert.Equal("Legacy", skipped.Kind);
+        Assert.Contains("reference assemblies", skipped.Reason, StringComparison.Ordinal);
+        Assert.Contains("v9.9", skipped.Reason, StringComparison.Ordinal);
+        // The kept project's unrelated warning still marks the load as degraded.
+        Assert.Contains(result.LoadDiagnostics, d => d.Contains("/src/Fine/Fine.csproj", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_SdkStyleProjectWithMissingReferenceAssemblies_IsKept()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Sdk", "/src/Sdk/Sdk.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+            [new("/src/Sdk/Sdk.csproj", "Sdk", ProjectClassifier.ProjectKind.SdkStyle, null)];
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects,
+            ["'/src/Sdk/Sdk.csproj': The reference assemblies for \"x\" were not found."]);
+
+        Assert.Single(result.Solution.Projects);
+        Assert.Empty(result.Skipped);
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_SdkStylePlaceholder_IsSkippedWhileLoadedSdkStyleProjectIsKept()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Broken", "/src/Broken/Broken.csproj", withDocument: false);
+        solution = AddProject(solution, "Sdk", "/src/Sdk/Sdk.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+        [
+            new("/src/Broken/Broken.csproj", "Broken", ProjectClassifier.ProjectKind.SdkStyle, null),
+            new("/src/Sdk/Sdk.csproj", "Sdk", ProjectClassifier.ProjectKind.SdkStyle, null),
+        ];
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects,
+            ["Msbuild failed when processing the file '/src/Broken/Broken.csproj': invalid condition."]);
+
+        Assert.Equal(["Sdk"], result.Solution.Projects.Select(p => p.Name));
+        var skipped = Assert.Single(result.Skipped);
+        Assert.Equal("Broken", skipped.Name);
+        Assert.Equal("SdkStyle", skipped.Kind);
+        Assert.Contains("invalid condition", skipped.Reason, StringComparison.Ordinal);
+    }
+
+    [WindowsOnlyFact]
+    public async Task OpenAsync_LegacyProjectWithMissingImportAndNoTargetingPack_IsReportedAsSkippedOnWindows()
+    {
+        var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "MissingImport.slnx");
+
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
+        using var _ = workspace;
+
+        Assert.Equal("LoadableLegacyLib", Assert.Single(solution.Projects).Name);
+        var entry = Assert.Single(skipped);
+        Assert.Equal("MissingImportLib", entry.Name);
+        Assert.Equal("Legacy", entry.Kind);
+        Assert.Contains("reference assemblies", entry.Reason, StringComparison.Ordinal);
+    }
+
+    [NonWindowsFact]
+    public async Task OpenAsync_PerProjectPath_ReportsSdkStyleProjectMsBuildCouldNotEvaluate()
+    {
+        var solutionPath = Path.Combine(Path.GetDirectoryName(LegacySolutionPath)!, "BrokenSdkWithLegacy.slnx");
+
+        var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
+        using var _ = workspace;
+
+        Assert.Empty(solution.Projects);
+        Assert.Contains(skipped, entry => entry is { Name: "BrokenSdkLib", Kind: "SdkStyle" });
+        Assert.Contains(skipped, entry => entry.Name == "LegacyLib");
+    }
+
+    [Theory]
+    [InlineData("failed for '/src/Lib.csproj' with message", true)]
+    [InlineData("failed for /src/Lib.csproj.", true)]
+    [InlineData("failed for /src/Lib.csproj", true)]
+    [InlineData("failed for '/src/Lib.csproj.Legacy.csproj' with message", false)]
+    [InlineData("failed for '/src/Lib.csproj2'", false)]
+    [InlineData("failed for '/src/Other.csproj'", false)]
+    public void NamesProject_MatchesTheWholePathOnly(string message, bool expected)
+    {
+        Assert.Equal(expected, SolutionLoader.NamesProject(message, "/src/Lib.csproj"));
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_PathThatIsAPrefixOfAnotherProject_KeepsTheHealthyProject()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Lib", "/src/Lib.csproj", withDocument: true);
+        solution = AddProject(solution, "Other", "/src/Lib.csproj.Legacy.csproj", withDocument: true);
+        ProjectClassifier.ClassifiedProject[] projects =
+        [
+            new("/src/Lib.csproj", "Lib", ProjectClassifier.ProjectKind.Legacy, null),
+            new("/src/Lib.csproj.Legacy.csproj", "Other", ProjectClassifier.ProjectKind.Legacy, null),
+        ];
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), projects,
+            ["Msbuild failed when processing the file '/src/Lib.csproj.Legacy.csproj' with message: The reference assemblies were not found."]);
+
+        Assert.Equal(["Lib"], result.Solution.Projects.Select(p => p.Name));
+        Assert.Equal("Other", Assert.Single(result.Skipped).Name);
+    }
+
+    [Fact]
+    public void PathComparer_FollowsTheCaseSensitivityOfTheFileSystem()
+    {
+        var sameProject = SolutionLoader.PathComparer.Equals("/src/App/App.csproj", "/src/app/app.csproj");
+
+        Assert.Equal(OperatingSystem.IsWindows(), sameProject);
+        Assert.True(SolutionLoader.PathComparer.Equals("/src/App/App.csproj", "/src/App/App.csproj"));
+    }
+
+    [Fact]
+    public void IsPlaceholder_ProjectWithDocumentsOrOutputPath_IsNotAPlaceholder()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = AddProject(workspace.CurrentSolution, "Empty", "/src/Empty.csproj", withDocument: false);
+        solution = AddProject(solution, "Docs", "/src/Docs.csproj", withDocument: true);
+
+        Assert.True(SolutionLoader.IsPlaceholder(solution.Projects.Single(p => p.Name == "Empty")));
+        Assert.False(SolutionLoader.IsPlaceholder(solution.Projects.Single(p => p.Name == "Docs")));
+    }
+
+    [Fact]
     public void RemoveUnloadedProjects_NothingToCheck_ReturnsTheSolutionUnchanged()
     {
         using var workspace = new AdhocWorkspace();
@@ -125,7 +284,8 @@ public class LegacySolutionHandlingTests
         Assert.Equal(open, result);
     }
 
-    private static Solution AddProject(Solution solution, string name, string filePath, bool withDocument)
+    private static Solution AddProject(
+        Solution solution, string name, string filePath, bool withDocument)
     {
         var projectId = ProjectId.CreateNewId(name);
         solution = solution.AddProject(ProjectInfo.Create(

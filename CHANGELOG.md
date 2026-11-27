@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.20.4](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.3...v2.20.4) (2026-11-27)
+
+
+### Bug Fixes
+
+* report legacy and SDK-style projects MSBuild could not resolve ([72ae60e](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/72ae60e21edbbd5709730c36fc39322fabd2eb91)), closes [#599](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/599)
+
 ## [2.20.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.2...v2.20.3) (2026-11-27)
 
 

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Fixture: an SDK-style project whose evaluation fails because of an invalid condition. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Broken Condition="'$(Configuration)' === 'Debug'">true</Broken>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,20 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Fixture for the scenario from issue 175: a legacy project that imports a Visual Studio only targets file.
+    Roslyn's design-time build ignores the missing import, so the project still evaluates its Compile items.
+    The framework version below has no targeting pack on any machine. MSBuild then falls back to the runtime
+    framework assemblies, so the project keeps its references and only reports that the reference assemblies
+    were not found. The loader must report the project as skipped.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <TargetFrameworkVersion>v9.9</TargetFrameworkVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Compile Include="MissingImportLib.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v99.0\WebApplications\Microsoft.WebApplication.targets" />
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
