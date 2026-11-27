@@ -245,7 +245,7 @@ public class SolutionLoader
         return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
     }
 
-    private static SolutionOpen RemoveUnloadedProjects(
+    internal static SolutionOpen RemoveUnloadedProjects(
         SolutionOpen open,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck,
         IReadOnlyCollection<string> workspaceFailures)

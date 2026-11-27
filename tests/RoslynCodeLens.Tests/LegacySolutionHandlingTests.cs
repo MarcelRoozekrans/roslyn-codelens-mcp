@@ -71,6 +71,62 @@ public class LegacySolutionHandlingTests
     }
 
     [Fact]
+    public void RemoveUnloadedProjects_DropsEmptyPlaceholdersAndKeepsLoadedProjects()
+    {
+        using var workspace = new AdhocWorkspace();
+        var solution = workspace.CurrentSolution;
+        solution = AddProject(solution, "Loaded", "/src/Loaded/Loaded.csproj", withDocument: true);
+        solution = AddProject(solution, "Legacy", "/src/Legacy/Legacy.csproj", withDocument: false);
+        solution = AddProject(solution, "Odd", "/src/Odd/Odd.sqlproj", withDocument: false);
+
+        ProjectClassifier.ClassifiedProject[] toCheck =
+        [
+            new("/src/Loaded/Loaded.csproj", "Loaded", ProjectClassifier.ProjectKind.Legacy, "classifier reason"),
+            new("/src/Legacy/Legacy.csproj", "Legacy", ProjectClassifier.ProjectKind.Legacy, "classifier reason"),
+            new("/src/Odd/Odd.sqlproj", "Odd", ProjectClassifier.ProjectKind.Unknown, "Unrecognised project format."),
+        ];
+        var failures = new[] { "Msbuild failed when processing the file '/src/Legacy/Legacy.csproj': MSB3644." };
+
+        var result = SolutionLoader.RemoveUnloadedProjects(
+            new SolutionLoader.SolutionOpen(solution, workspace, [], []), toCheck, failures);
+
+        Assert.Equal(["Loaded"], result.Solution.Projects.Select(p => p.Name));
+        Assert.Collection(
+            result.Skipped.OrderBy(e => e.Name, StringComparer.Ordinal),
+            legacy =>
+            {
+                Assert.Equal("Legacy", legacy.Name);
+                Assert.Equal("Legacy", legacy.Kind);
+                Assert.Contains("MSB3644", legacy.Reason, StringComparison.Ordinal);
+            },
+            odd =>
+            {
+                Assert.Equal("Odd", odd.Name);
+                Assert.Equal("Unknown", odd.Kind);
+                Assert.Equal("Unrecognised project format.", odd.Reason);
+            });
+    }
+
+    [Fact]
+    public void RemoveUnloadedProjects_NothingToCheck_ReturnsTheSolutionUnchanged()
+    {
+        using var workspace = new AdhocWorkspace();
+        var open = new SolutionLoader.SolutionOpen(workspace.CurrentSolution, workspace, [], []);
+
+        var result = SolutionLoader.RemoveUnloadedProjects(open, [], []);
+
+        Assert.Equal(open, result);
+    }
+
+    private static Solution AddProject(Solution solution, string name, string filePath, bool withDocument)
+    {
+        var projectId = ProjectId.CreateNewId(name);
+        solution = solution.AddProject(ProjectInfo.Create(
+            projectId, VersionStamp.Default, name, name, LanguageNames.CSharp, filePath));
+        return withDocument ? solution.AddDocument(DocumentId.CreateNewId(projectId), "A.cs", "class A {}") : solution;
+    }
+
+    [Fact]
     public void LegacyFallbackReason_NamesTheCauseAndDoesNotAskForAnotherUnfilteredLoad()
     {
         var reason = SolutionLoader.LegacyFallbackReason("the solution-level load timed out");
