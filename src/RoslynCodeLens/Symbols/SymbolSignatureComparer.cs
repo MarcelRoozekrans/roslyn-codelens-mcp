@@ -11,19 +11,31 @@ namespace RoslynCodeLens.Symbols;
 // Overloads are told apart by their full signature: parameter types and ref kinds for methods and
 // indexers, plus the generic arity of methods and the return type of conversion operators, which C#
 // may overload on.
-// Assembly version and type-parameter names are ignored — see NamedTypeSignatureComparer.
+// Assembly version and type-parameter names are ignored, and containing types are compared through the
+// solution's NamedTypeSignatureComparer — see there.
 // Parameter types and the conversion return type are compared by display string, which leaves out the
 // assembly on purpose: a framework type lives in a different assembly per target framework (System.String
 // is in mscorlib for net48 and in System.Runtime for net8.0, reached through type forwarding), so comparing
 // assemblies would split a method of a net48 or netstandard project from its view in a net8.0 project.
 // Roslyn's own Find References ignores assemblies for the same reason
 // (SymbolEquivalenceComparer.IgnoreAssembliesInstance).
+// The display string also leaves out nullable reference annotations, which C# cannot overload on: the .NET
+// reference assemblies declare Console.WriteLine(string? value), net48's mscorlib Console.WriteLine(string value).
 // Known limitation: two overloads in the same type whose parameter types share a full name but come from
 // different assemblies are treated as one symbol. C# can declare them only through extern aliases, since
 // referencing both types otherwise makes the name ambiguous (CS0433).
 internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 {
-	public static readonly SymbolSignatureComparer Instance = new();
+	// See the header comment.
+	private static readonly SymbolDisplayFormat TypeFormat = SymbolDisplayFormat.CSharpErrorMessageFormat
+		.RemoveMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
+	private readonly NamedTypeSignatureComparer _typeComparer;
+
+	public SymbolSignatureComparer(NamedTypeSignatureComparer typeComparer)
+	{
+		_typeComparer = typeComparer;
+	}
 
 	public bool Equals(ISymbol? x, ISymbol? y)
 	{
@@ -33,7 +45,7 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 
 		return x switch
 		{
-			INamedTypeSymbol nt => NamedTypeSignatureComparer.Instance.Equals(nt, y as INamedTypeSymbol),
+			INamedTypeSymbol nt => _typeComparer.Equals(nt, y as INamedTypeSymbol),
 			IMethodSymbol m => MethodEquals(m, y as IMethodSymbol),
 			_ => MemberEquals(x, y)
 		};
@@ -43,46 +55,46 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 	{
 		return obj switch
 		{
-			INamedTypeSymbol nt => NamedTypeSignatureComparer.Instance.GetHashCode(nt),
+			INamedTypeSymbol nt => _typeComparer.GetHashCode(nt),
 			IMethodSymbol m => MethodHashCode(m),
 			_ => MemberHashCode(obj)
 		};
 	}
 
-	private static bool MethodEquals(IMethodSymbol? x, IMethodSymbol? y)
+	private bool MethodEquals(IMethodSymbol? x, IMethodSymbol? y)
 	{
 		if (x is null || y is null) return false;
 		if (!string.Equals(x.MetadataName, y.MetadataName, StringComparison.Ordinal)) return false;
 		if (x.Arity != y.Arity) return false;
-		if (!NamedTypeSignatureComparer.Instance.Equals(x.ContainingType, y.ContainingType)) return false;
+		if (!_typeComparer.Equals(x.ContainingType, y.ContainingType)) return false;
 		if (!ParametersEqual(x.Parameters, y.Parameters)) return false;
 
 		return x.MethodKind != MethodKind.Conversion
-			|| string.Equals(x.ReturnType.ToDisplayString(), y.ReturnType.ToDisplayString(), StringComparison.Ordinal);
+			|| string.Equals(x.ReturnType.ToDisplayString(TypeFormat), y.ReturnType.ToDisplayString(TypeFormat), StringComparison.Ordinal);
 	}
 
-	private static int MethodHashCode(IMethodSymbol m)
+	private int MethodHashCode(IMethodSymbol m)
 	{
 		var hc = new HashCode();
 		hc.Add(m.MetadataName, StringComparer.Ordinal);
 		hc.Add(m.Arity);
-		hc.Add(NamedTypeSignatureComparer.Instance.GetHashCode(m.ContainingType));
+		hc.Add(_typeComparer.GetHashCode(m.ContainingType));
 		AddParameters(ref hc, m.Parameters);
 		if (m.MethodKind == MethodKind.Conversion)
-			hc.Add(m.ReturnType.ToDisplayString(), StringComparer.Ordinal);
+			hc.Add(m.ReturnType.ToDisplayString(TypeFormat), StringComparer.Ordinal);
 		return hc.ToHashCode();
 	}
 
 	// Indexers are the only overloadable members besides methods; for every other member the
 	// parameter lists are empty.
-	private static bool MemberEquals(ISymbol x, ISymbol y)
+	private bool MemberEquals(ISymbol x, ISymbol y)
 	{
 		if (!string.Equals(x.MetadataName, y.MetadataName, StringComparison.Ordinal)) return false;
 		if (!ContainerEquals(x, y)) return false;
 		return ParametersEqual(IndexerParameters(x), IndexerParameters(y));
 	}
 
-	private static int MemberHashCode(ISymbol s)
+	private int MemberHashCode(ISymbol s)
 	{
 		var hc = new HashCode();
 		hc.Add(s.MetadataName, StringComparer.Ordinal);
@@ -91,17 +103,17 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		return hc.ToHashCode();
 	}
 
-	private static bool ContainerEquals(ISymbol x, ISymbol y)
+	private bool ContainerEquals(ISymbol x, ISymbol y)
 	{
 		if (x.ContainingType is not null || y.ContainingType is not null)
-			return NamedTypeSignatureComparer.Instance.Equals(x.ContainingType, y.ContainingType);
+			return _typeComparer.Equals(x.ContainingType, y.ContainingType);
 		return string.Equals(NamespaceKey(x), NamespaceKey(y), StringComparison.Ordinal);
 	}
 
-	private static int ContainerHashCode(ISymbol symbol)
+	private int ContainerHashCode(ISymbol symbol)
 	{
 		return symbol.ContainingType is { } containingType
-			? NamedTypeSignatureComparer.Instance.GetHashCode(containingType)
+			? _typeComparer.GetHashCode(containingType)
 			: StringComparer.Ordinal.GetHashCode(NamespaceKey(symbol));
 	}
 
@@ -124,7 +136,7 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		{
 			if (x[i].RefKind != y[i].RefKind)
 				return false;
-			if (!string.Equals(x[i].Type.ToDisplayString(), y[i].Type.ToDisplayString(), StringComparison.Ordinal))
+			if (!string.Equals(x[i].Type.ToDisplayString(TypeFormat), y[i].Type.ToDisplayString(TypeFormat), StringComparison.Ordinal))
 				return false;
 		}
 
@@ -137,7 +149,7 @@ internal sealed class SymbolSignatureComparer : IEqualityComparer<ISymbol>
 		foreach (var p in parameters)
 		{
 			hc.Add(p.RefKind);
-			hc.Add(p.Type.ToDisplayString(), StringComparer.Ordinal);
+			hc.Add(p.Type.ToDisplayString(TypeFormat), StringComparer.Ordinal);
 		}
 	}
 }

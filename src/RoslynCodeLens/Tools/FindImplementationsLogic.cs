@@ -20,7 +20,8 @@ public static class FindImplementationsLogic
         }
 
         var results = new List<SymbolLocation>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // By type identity, not by name: same-named types of different projects are different implementations.
+        var seen = new HashSet<INamedTypeSymbol>(source.TypeComparer);
 
         foreach (var target in targetTypes)
         {
@@ -33,10 +34,10 @@ public static class FindImplementationsLogic
 
             foreach (var candidate in candidates)
             {
-                var fullName = candidate.ToDisplayString();
-                if (!seen.Add(fullName))
+                if (!seen.Add(candidate))
                     continue;
 
+                var fullName = candidate.ToDisplayString();
                 var (file, line) = source.GetFileAndLine(candidate);
                 var project = source.GetProjectName(candidate);
                 var kind = candidate.TypeKind switch

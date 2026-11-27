@@ -28,3 +28,8 @@ public interface INotifier
 {
     event EventHandler? Notified;
 }
+
+// Implemented by the same-named Duplicate.Helper types of AppNet9 and AppNet10.
+public interface IRunner
+{
+}

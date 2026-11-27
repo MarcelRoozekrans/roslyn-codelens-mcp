@@ -41,7 +41,8 @@ public static class GoToDefinitionLogic
         SymbolResolver resolver, IReadOnlyList<ISymbol> symbols)
     {
         var results = new List<SymbolLocation>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // One result per declaration: same-named types of different projects are distinct declarations.
+        var seen = new HashSet<(string Name, string File, int Line)>();
 
         foreach (var s in symbols)
         {
@@ -50,7 +51,7 @@ public static class GoToDefinitionLogic
                 continue;
 
             var fullName = s.ToDisplayString();
-            if (!seen.Add(fullName))
+            if (!seen.Add((fullName, file, line)))
                 continue;
 
             var project = resolver.GetProjectName(s);

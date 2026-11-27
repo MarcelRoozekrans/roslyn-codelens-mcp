@@ -25,30 +25,35 @@ public static class FindObsoleteUsageLogic
         // SymbolResolver.AttributeIndex is keyed by simple attribute name; entries are
         // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by signature, which
         // also matches usages bound to another compilation's instance of the same symbol.
-        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(SymbolSignatureComparer.Instance);
+        var targets = new List<ISymbol>();
+        var targetSet = new HashSet<ISymbol>(resolver.SymbolComparer);
         foreach (var key in new[] { "Obsolete", "ObsoleteAttribute" })
         {
             if (!resolver.AttributeIndex.TryGetValue(key, out var entries)) continue;
 
             foreach (var (symbol, attr) in entries)
             {
-                if (attr.AttributeClass?.ToDisplayString() != "System.ObsoleteAttribute") continue;
-                if (obsoleteSymbols.ContainsKey(symbol)) continue;
-
-                obsoleteSymbols[symbol] = ParseObsoleteAttribute(attr);
+                if (IsObsoleteAttribute(attr) && targetSet.Add(symbol))
+                    targets.Add(symbol);
             }
         }
 
-        if (obsoleteSymbols.Count == 0)
+        if (targets.Count == 0)
             return new FindObsoleteUsageResult([]);
 
-        // Step 2: walk all production syntax trees and collect usages per obsolete symbol.
-        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, SymbolSignatureComparer.Instance);
-        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(SymbolSignatureComparer.Instance);
-        foreach (var s in obsoleteSymbols.Keys)
-            usagesByTarget[s] = new List<ObsoleteUsageSite>();
+        // Step 2: walk all production syntax trees and collect usages per obsolete symbol and attribute.
+        // The instances of a framework member can carry different messages or severities per target
+        // framework, so each usage is filed under the attribute of the instance it binds to.
+        var usagesByTarget = new Dictionary<ISymbol, Dictionary<ObsoleteAttributeData, List<ObsoleteUsageSite>>>(
+            resolver.SymbolComparer);
+        foreach (var s in targets)
+            usagesByTarget[s] = new Dictionary<ObsoleteAttributeData, List<ObsoleteUsageSite>>();
 
-        var seen = new HashSet<(string, TextSpan)>();
+        // A call site is counted once per symbol and attribute group. When one source file is compiled for
+        // several target frameworks, the same location binds to instances that can carry different messages,
+        // and each of those groups reports the location.
+        var seenByGroup = new Dictionary<List<ObsoleteUsageSite>, HashSet<(string, TextSpan)>>(
+            ReferenceEqualityComparer.Instance);
 
         foreach (var (projectId, compilation) in loaded.Compilations)
         {
@@ -97,12 +102,21 @@ public static class FindObsoleteUsageLogic
                     var line = lineSpan.StartLinePosition.Line + 1;
                     var span = node.Span;
 
-                    if (!seen.Add((file, span))) continue;
+                    var usagesByAttribute = usagesByTarget[matched.Value.Symbol];
+                    var data = ParseObsoleteAttribute(matched.Value.Attribute);
+                    if (!usagesByAttribute.TryGetValue(data, out var usages))
+                    {
+                        usages = new List<ObsoleteUsageSite>();
+                        usagesByAttribute[data] = usages;
+                        seenByGroup[usages] = new HashSet<(string, TextSpan)>();
+                    }
+
+                    if (!seenByGroup[usages].Add((file, span))) continue;
 
                     var callerName = GetCallerName(node);
                     var snippet = node.ToString();
 
-                    usagesByTarget[matched].Add(new ObsoleteUsageSite(
+                    usages.Add(new ObsoleteUsageSite(
                         CallerName: callerName,
                         FilePath: file,
                         Line: line,
@@ -113,37 +127,40 @@ public static class FindObsoleteUsageLogic
             }
         }
 
-        // Step 3: build groups, drop zero-usage symbols.
+        // Step 3: build one group per symbol and attribute; symbols without usages have no attribute entries.
         var groups = new List<ObsoleteSymbolGroup>();
-        foreach (var (symbol, data) in obsoleteSymbols)
+        foreach (var symbol in targets)
         {
-            var usages = usagesByTarget[symbol];
-            if (usages.Count == 0) continue;
-
-            if (errorOnly && !data.IsError) continue;
-
-            usages.Sort((a, b) =>
+            foreach (var (data, usages) in usagesByTarget[symbol])
             {
-                var fileCmp = string.CompareOrdinal(a.FilePath, b.FilePath);
-                return fileCmp != 0 ? fileCmp : a.Line.CompareTo(b.Line);
-            });
+                if (errorOnly && !data.IsError) continue;
 
-            groups.Add(new ObsoleteSymbolGroup(
-                SymbolName: symbol.ToDisplayString(),
-                DeprecationMessage: data.Message,
-                IsError: data.IsError,
-                UsageCount: usages.Count,
-                Usages: usages));
+                usages.Sort((a, b) =>
+                {
+                    var fileCmp = string.CompareOrdinal(a.FilePath, b.FilePath);
+                    return fileCmp != 0 ? fileCmp : a.Line.CompareTo(b.Line);
+                });
+
+                groups.Add(new ObsoleteSymbolGroup(
+                    SymbolName: symbol.ToDisplayString(),
+                    DeprecationMessage: data.Message,
+                    IsError: data.IsError,
+                    UsageCount: usages.Count,
+                    Usages: usages));
+            }
         }
 
-        // Step 4: sort groups: errors desc, usage count desc, name asc.
+        // Step 4: sort groups: errors desc, usage count desc, name asc, message asc. The message keeps the
+        // groups of one symbol in a stable order, because List.Sort does not preserve the order of equal items.
         groups.Sort((a, b) =>
         {
             var bySeverity = b.IsError.CompareTo(a.IsError);
             if (bySeverity != 0) return bySeverity;
             var byCount = b.UsageCount.CompareTo(a.UsageCount);
             if (byCount != 0) return byCount;
-            return string.CompareOrdinal(a.SymbolName, b.SymbolName);
+            var byName = string.CompareOrdinal(a.SymbolName, b.SymbolName);
+            if (byName != 0) return byName;
+            return string.CompareOrdinal(a.DeprecationMessage, b.DeprecationMessage);
         });
 
         return new FindObsoleteUsageResult(groups);
@@ -160,22 +177,39 @@ public static class FindObsoleteUsageLogic
         return new ObsoleteAttributeData(message, isError);
     }
 
-    private static ISymbol? MatchObsoleteSymbol(ISymbol referenced, HashSet<ISymbol> targetSet)
+    // The target set matches by signature, which unifies the instances of a framework member across
+    // target frameworks; the attribute can differ between them (String.Copy(string) is [Obsolete] on
+    // net10.0, not on net48). Like the compiler, only a bound symbol that carries the attribute itself counts,
+    // and its own attribute supplies the message and severity.
+    private static (ISymbol Symbol, AttributeData Attribute)? MatchObsoleteSymbol(ISymbol referenced, HashSet<ISymbol> targetSet)
     {
-        if (targetSet.Contains(referenced)) return referenced;
-        if (targetSet.Contains(referenced.OriginalDefinition)) return referenced.OriginalDefinition;
+        if (MatchTarget(referenced, targetSet) is { } direct) return direct;
+        if (MatchTarget(referenced.OriginalDefinition, targetSet) is { } original) return original;
 
         // Constructor calls: also match the containing type (when the type itself has [Obsolete]).
-        if (referenced is IMethodSymbol m && m.MethodKind == MethodKind.Constructor)
+        if (referenced is IMethodSymbol { MethodKind: MethodKind.Constructor, ContainingType: { } type })
         {
-            if (m.ContainingType is not null && targetSet.Contains(m.ContainingType))
-                return m.ContainingType;
-            if (m.ContainingType?.OriginalDefinition is { } ctorTypeOrig && targetSet.Contains(ctorTypeOrig))
-                return ctorTypeOrig;
+            if (MatchTarget(type, targetSet) is { } ctorType) return ctorType;
+            if (MatchTarget(type.OriginalDefinition, targetSet) is { } ctorTypeOrig) return ctorTypeOrig;
         }
 
         return null;
     }
+
+    private static (ISymbol Symbol, AttributeData Attribute)? MatchTarget(ISymbol candidate, HashSet<ISymbol> targetSet)
+    {
+        if (!targetSet.Contains(candidate)) return null;
+
+        foreach (var attr in candidate.GetAttributes())
+        {
+            if (IsObsoleteAttribute(attr)) return (candidate, attr);
+        }
+
+        return null;
+    }
+
+    private static bool IsObsoleteAttribute(AttributeData attr)
+        => string.Equals(attr.AttributeClass?.ToDisplayString(), "System.ObsoleteAttribute", StringComparison.Ordinal);
 
     // Returns true when `node` is a child of another node that the caller will already process
     // and that resolves to the same target symbol. Keeps usage counts at one-per-call-site.
