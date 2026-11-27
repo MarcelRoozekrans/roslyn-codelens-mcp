@@ -272,7 +272,19 @@ public class SolutionLoader
                 solution = solution.RemoveProject(project.Id);
         }
 
-        return open with { Solution = solution, Skipped = skipped };
+        // A legacy project that stayed in the solution can still have failed partly, for example an unresolved
+        // reference; its workspace failures mark the load as degraded instead of passing unnoticed.
+        var skippedPaths = skipped.Select(entry => entry.Path).ToHashSet(pathComparer);
+        var keptLegacyPaths = projectsToCheck
+            .Where(entry => entry.Kind == ProjectClassifier.ProjectKind.Legacy && !skippedPaths.Contains(entry.Path))
+            .Select(entry => entry.Path)
+            .ToArray();
+        var diagnostics = new List<string>(open.LoadDiagnostics);
+        diagnostics.AddRange(workspaceFailures
+            .Where(message => keptLegacyPaths.Any(path => message.Contains(path, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.Ordinal));
+
+        return open with { Solution = solution, Skipped = skipped, LoadDiagnostics = diagnostics };
     }
 
     /// <summary>

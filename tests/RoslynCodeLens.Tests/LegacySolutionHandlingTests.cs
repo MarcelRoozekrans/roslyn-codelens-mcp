@@ -85,12 +85,19 @@ public class LegacySolutionHandlingTests
             new("/src/Legacy/Legacy.csproj", "Legacy", ProjectClassifier.ProjectKind.Legacy, "classifier reason"),
             new("/src/Odd/Odd.sqlproj", "Odd", ProjectClassifier.ProjectKind.Unknown, "Unrecognised project format."),
         ];
-        var failures = new[] { "Msbuild failed when processing the file '/src/Legacy/Legacy.csproj': MSB3644." };
+        var failures = new[]
+        {
+            "Msbuild failed when processing the file '/src/Legacy/Legacy.csproj': MSB3644.",
+            "Unresolved reference in '/src/Loaded/Loaded.csproj'.",
+            "Unrelated warning.",
+        };
 
         var result = SolutionLoader.RemoveUnloadedProjects(
             new SolutionLoader.SolutionOpen(solution, workspace, [], []), toCheck, failures);
 
         Assert.Equal(["Loaded"], result.Solution.Projects.Select(p => p.Name));
+        // Only the failure of the legacy project that stayed loaded marks the load degraded.
+        Assert.Equal(["Unresolved reference in '/src/Loaded/Loaded.csproj'."], result.LoadDiagnostics);
         Assert.Collection(
             result.Skipped.OrderBy(e => e.Name, StringComparer.Ordinal),
             legacy =>
