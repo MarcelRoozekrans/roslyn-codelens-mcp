@@ -273,4 +273,38 @@ public class MultiSolutionManagerTests : IAsyncLifetime
         multi.EnsureLoaded(); // must not throw
         multi.Dispose();
     }
+
+    [Fact]
+    public async Task UnloadSolution_ReleasesMemoryAfterTheManagerIsDisposed()
+    {
+        var multi = MultiSolutionManager.CreateEmpty();
+        var releases = 0;
+        var loadedWhenReleased = -1;
+        multi.MemoryReleaser = () =>
+        {
+            releases++;
+            loadedWhenReleased = multi.ListSolutions().Count;
+        };
+        await multi.LoadSolutionAsync(_solutionPath);
+
+        multi.UnloadSolution("TestSolution");
+
+        Assert.Equal(1, releases);
+        Assert.Equal(0, loadedWhenReleased);
+        multi.Dispose();
+    }
+
+    [Fact]
+    public async Task UnloadSolution_UnknownName_DoesNotReleaseMemory()
+    {
+        var multi = MultiSolutionManager.CreateEmpty();
+        var releases = 0;
+        multi.MemoryReleaser = () => releases++;
+        await multi.LoadSolutionAsync(_solutionPath);
+
+        Assert.Throws<McpToolException>(() => multi.UnloadSolution("NoSuchSolution"));
+
+        Assert.Equal(0, releases);
+        multi.Dispose();
+    }
 }
