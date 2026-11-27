@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.20.3](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.2...v2.20.3) (2026-11-27)
+
+
+### Bug Fixes
+
+* return memory to the OS after unload_solution ([c9fe93b](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/c9fe93b675993944d7e7bb902e35a82240027dd7)), closes [#595](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/595)
+
 ## [2.20.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.1...v2.20.2) (2026-11-27)
 
 
