@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.20.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.0...v2.20.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* unify type identity across target frameworks and keep same-named types ([0a8a5dc](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/0a8a5dcfe4b7e23f4d53f40b57f2c5a671c46c82)), closes [#589](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/589) [#590](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/590)
+
 ## [2.20.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.19.2...v2.20.0) (2026-11-25)
 
 
