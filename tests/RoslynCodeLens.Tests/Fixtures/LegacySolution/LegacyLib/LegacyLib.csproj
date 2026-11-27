@@ -2,14 +2,11 @@
 <Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!--
     Deliberately broken legacy (non-SDK-style) csproj used as a fixture.
-    The Import path resolves to a file that does not exist, which causes
-    MSBuild to throw FileNotFoundException during project evaluation.
-    This is the exact failure mode reported in
-    https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/175
+    The invalid MSBuild condition forces evaluation to fail. Missing imports
+    are ignored by Roslyn's design-time build.
   -->
-  <Import Project="$(MSBuildExtensionsPath)\RoslynCodeLens.LegacyFixture.DoesNotExist\Microsoft.Common.props" />
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Configuration Condition=" '$(Configuration)' = '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{B0F4F1C1-1234-5678-9ABC-DEF012345678}</ProjectGuid>
     <OutputType>Library</OutputType>

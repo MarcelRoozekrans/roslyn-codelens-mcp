@@ -112,20 +112,16 @@ public class SolutionLoader
             return await OpenFilteredAsync(solutionPath, classified, filter, analyzerLoader, ct).ConfigureAwait(false);
         }
 
-        var legacyOrMissing = classified
-            .Where(p => p.Kind is ProjectClassifier.ProjectKind.Legacy
-                     or ProjectClassifier.ProjectKind.Missing
-                     or ProjectClassifier.ProjectKind.Unknown)
-            .ToList();
-
-        var preFilter = legacyOrMissing.Any(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
-        if (preFilter)
+        var legacyCount = classified.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy);
+        if (legacyCount > 0 && !OperatingSystem.IsWindows())
         {
             await Console.Error.WriteLineAsync(
-                $"[roslyn-codelens] Detected {legacyOrMissing.Count(p => p.Kind == ProjectClassifier.ProjectKind.Legacy)} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
+                $"[roslyn-codelens] Detected {legacyCount} legacy non-SDK project(s) in {Path.GetFileName(solutionPath)}; loading SDK-style projects only.")
                 .ConfigureAwait(false);
             return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
         }
+
+        var projectsToCheck = classified.Where(p => p.Kind != ProjectClassifier.ProjectKind.SdkStyle).ToArray();
 
         await Console.Error.WriteLineAsync($"[roslyn-codelens] Loading solution: {Path.GetFileName(solutionPath)}").ConfigureAwait(false);
 
@@ -137,12 +133,17 @@ public class SolutionLoader
         MSBuildWorkspace? bestWorkspace = null;
         Solution? bestSolution = null;
         IReadOnlyList<string> bestDropped = Array.Empty<string>();
+        // Workspace failures are kept so a project MSBuild could not load can report why, not only warn on stderr.
+        var workspaceFailures = new ConcurrentQueue<string>();
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
             var workspace = MSBuildWorkspace.Create();
             workspace.WorkspaceFailed += (_, e) =>
+            {
+                workspaceFailures.Enqueue(e.Diagnostic.Message);
                 Console.Error.WriteLine($"[roslyn-codelens] Warning: {e.Diagnostic.Message}");
+            };
 
             Solution? solution;
             try
@@ -170,7 +171,9 @@ public class SolutionLoader
                 await Console.Error.WriteLineAsync(
                     $"[roslyn-codelens] Solution-level load failed ({ex.GetType().Name}: {ex.Message}); falling back to per-project loading.")
                     .ConfigureAwait(false);
-                return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+                return await OpenPerProjectAsync(
+                    solutionPath, classified, analyzerLoader, ct,
+                    fallbackCause: $"the solution-level load failed with {ex.GetType().Name}").ConfigureAwait(false);
             }
 
             if (solution is null)
@@ -180,7 +183,9 @@ public class SolutionLoader
                 await Console.Error.WriteLineAsync(
                     $"[roslyn-codelens] Solution-level load timed out; falling back to per-project loading.")
                     .ConfigureAwait(false);
-                return await OpenPerProjectAsync(solutionPath, classified, analyzerLoader, ct).ConfigureAwait(false);
+                return await OpenPerProjectAsync(
+                    solutionPath, classified, analyzerLoader, ct,
+                    fallbackCause: "the solution-level load timed out").ConfigureAwait(false);
             }
 
             var dropped = FindProjectsWithDroppedReferences(solution);
@@ -189,7 +194,9 @@ public class SolutionLoader
                 bestWorkspace?.Dispose();
                 if (analyzerLoader is not null)
                     solution = RemapSolutionAnalyzers(solution, analyzerLoader);
-                return await WithAnalyzerSkewAsync(new SolutionOpen(solution, workspace, [], [])).ConfigureAwait(false);
+                return await WithAnalyzerSkewAsync(
+                    RemoveUnloadedProjects(new SolutionOpen(solution, workspace, [], []), projectsToCheck, workspaceFailures))
+                    .ConfigureAwait(false);
             }
 
             // Degraded: retain the attempt with the fewest dropped projects.
@@ -219,7 +226,65 @@ public class SolutionLoader
             ? RemapSolutionAnalyzers(bestSolution!, analyzerLoader)
             : bestSolution!;
         return await WithAnalyzerSkewAsync(
-            new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped)).ConfigureAwait(false);
+            RemoveUnloadedProjects(new SolutionOpen(finalSolution, bestWorkspace!, [], bestDropped), projectsToCheck, workspaceFailures))
+            .ConfigureAwait(false);
+    }
+
+    // The first workspace failure that names the project says what MSBuild is missing, for example a
+    // targeting pack (MSB3644) or an import, so list_solutions shows the prerequisite.
+    // A legacy project reaches the per-project path after an unfiltered Windows load only through a fallback;
+    // telling that user to do an unfiltered load again would be wrong, so the reason names the fallback cause.
+    internal static string LegacyFallbackReason(string fallbackCause) =>
+        $"Legacy (non-SDK-style) project; it was not loaded because {fallbackCause}.";
+
+    internal static string LegacyLoadFailureReason(string projectPath, IReadOnlyCollection<string> workspaceFailures)
+    {
+        const string Prefix = "MSBuild could not load the legacy non-SDK-style project";
+        var cause = workspaceFailures.FirstOrDefault(
+            message => message.Contains(projectPath, StringComparison.OrdinalIgnoreCase));
+        return cause is null ? Prefix + "." : $"{Prefix}: {cause}";
+    }
+
+    internal static SolutionOpen RemoveUnloadedProjects(
+        SolutionOpen open,
+        IReadOnlyList<ProjectClassifier.ClassifiedProject> projectsToCheck,
+        IReadOnlyCollection<string> workspaceFailures)
+    {
+        if (projectsToCheck.Count == 0)
+            return open;
+
+        var solution = open.Solution;
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var projectsByPath = solution.Projects.ToLookup(p => p.FilePath, pathComparer);
+        // Roslyn may return an empty placeholder if MSBuild could not evaluate the project.
+        var skipped = projectsToCheck
+            .Where(entry => !projectsByPath[entry.Path].Any(p =>
+                p.OutputFilePath is not null || p.DocumentIds.Count > 0))
+            .Select(entry => new SkippedProject(entry.Path, entry.Name, entry.Kind.ToString(),
+                entry.Kind == ProjectClassifier.ProjectKind.Legacy
+                    ? LegacyLoadFailureReason(entry.Path, workspaceFailures)
+                    : entry.Reason ?? "Unsupported project format."))
+            .ToArray();
+
+        foreach (var entry in skipped)
+        {
+            foreach (var project in projectsByPath[entry.Path])
+                solution = solution.RemoveProject(project.Id);
+        }
+
+        // A legacy project that stayed in the solution can still have failed partly, for example an unresolved
+        // reference; its workspace failures mark the load as degraded instead of passing unnoticed.
+        var skippedPaths = skipped.Select(entry => entry.Path).ToHashSet(pathComparer);
+        var keptLegacyPaths = projectsToCheck
+            .Where(entry => entry.Kind == ProjectClassifier.ProjectKind.Legacy && !skippedPaths.Contains(entry.Path))
+            .Select(entry => entry.Path)
+            .ToArray();
+        var diagnostics = new List<string>(open.LoadDiagnostics);
+        diagnostics.AddRange(workspaceFailures
+            .Where(message => keptLegacyPaths.Any(path => message.Contains(path, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.Ordinal));
+
+        return open with { Solution = solution, Skipped = skipped, LoadDiagnostics = diagnostics };
     }
 
     /// <summary>
@@ -279,7 +344,8 @@ public class SolutionLoader
         string solutionPath,
         IReadOnlyList<ProjectClassifier.ClassifiedProject> classified,
         ShadowCopyAnalyzerAssemblyLoader? analyzerLoader,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? fallbackCause = null)
     {
         var skipped = new List<SkippedProject>();
 
@@ -295,7 +361,9 @@ public class SolutionLoader
             else
             {
                 var kind = entry.Kind.ToString();
-                var reason = entry.Reason ?? "Unsupported project format.";
+                var reason = fallbackCause is not null && entry.Kind == ProjectClassifier.ProjectKind.Legacy
+                    ? LegacyFallbackReason(fallbackCause)
+                    : entry.Reason ?? "Unsupported project format.";
                 await Console.Error.WriteLineAsync(
                     $"[roslyn-codelens] Skipping {kind} project {entry.Name}: {reason}").ConfigureAwait(false);
                 skipped.Add(new SkippedProject(entry.Path, entry.Name, kind, reason));

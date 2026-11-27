@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../FilterableSolution/Sample.Unrelated/Sample.Unrelated.csproj" />
+  <Project Path="MissingProject.csproj" />
+  <Project Path="UnsupportedProject.sqlproj" />
+</Solution>
