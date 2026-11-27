@@ -14,12 +14,18 @@ public sealed class CliOptions
     public int Port { get; }
     public string HttpHost { get; }
 
-    private CliOptions(IReadOnlyList<string> solutionPaths, bool useHttp, int port, string httpHost)
+    /// <summary>
+    /// Tools to register, from <c>--tools</c>; <see langword="null"/> registers all tools.
+    /// </summary>
+    public IReadOnlySet<string>? Tools { get; }
+
+    private CliOptions(IReadOnlyList<string> solutionPaths, bool useHttp, int port, string httpHost, IReadOnlySet<string>? tools)
     {
         SolutionPaths = solutionPaths;
         UseHttp = useHttp;
         Port = port;
         HttpHost = httpHost;
+        Tools = tools;
     }
 
     public bool BindsLoopbackOnly =>
@@ -31,6 +37,7 @@ public sealed class CliOptions
         var useHttp = false;
         var port = DefaultPort;
         var httpHost = DefaultHttpHost;
+        HashSet<string>? tools = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -61,14 +68,32 @@ public sealed class CliOptions
                         throw new ArgumentException("Invalid value for --host: value is empty.");
                     break;
 
+                case "--tools":
+                    tools ??= new HashSet<string>(StringComparer.Ordinal);
+                    AddToolNames(inlineValue ?? NextValue(args, ref i, name), tools);
+                    break;
+
                 default:
                     throw new ArgumentException(
-                        $"Unknown option '{arg}'. Supported options: --http, --port <1-65535>, --host <address>. " +
-                        "Positional arguments are .sln/.slnx paths.");
+                        $"Unknown option '{arg}'. Supported options: --http, --port <1-65535>, --host <address>, " +
+                        "--tools <name>[,<name>...]. Positional arguments are .sln/.slnx paths.");
             }
         }
 
-        return new CliOptions(paths, useHttp, port, httpHost);
+        return new CliOptions(paths, useHttp, port, httpHost, tools);
+    }
+
+    private static void AddToolNames(string value, HashSet<string> tools)
+    {
+        var names = value.Split(',', StringSplitOptions.TrimEntries);
+        if (names.Any(n => n.Length == 0))
+            throw new ArgumentException($"Invalid value for --tools: '{value}'. Expected a comma-separated list of tool names.");
+
+        var unknown = names.Where(n => !ToolSelection.KnownToolNames.Contains(n)).Distinct(StringComparer.Ordinal).ToList();
+        if (unknown.Count > 0)
+            throw new ArgumentException($"Unknown tool(s) for --tools: {string.Join(", ", unknown)}.");
+
+        tools.UnionWith(names);
     }
 
     private static (string Name, string? InlineValue) SplitFlag(string arg)

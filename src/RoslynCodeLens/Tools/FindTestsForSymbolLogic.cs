@@ -41,7 +41,9 @@ public static class FindTestsForSymbolLogic
         List<TestReference> directTests,
         List<TestReference> transitiveTests)
     {
-        var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        // Report each test once, even when it exists as one instance per target framework...
+        var seenTestSymbols = new HashSet<IMethodSymbol>(SymbolSignatureComparer.Instance);
+        // ...but classify every instance: a test attribute may exist on one target framework only.
         var visited = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
 
         // BFS: each entry is (method we want callers for, chain so far ending with the target method's short name)
@@ -117,9 +119,9 @@ public static class FindTestsForSymbolLogic
                     if (symbolInfo.Symbol is not IMethodSymbol calledMethod)
                         continue;
 
-                    if (!SymbolEqualityComparer.Default.Equals(calledMethod, target) &&
-                        !SymbolEqualityComparer.Default.Equals(calledMethod.OriginalDefinition, target) &&
-                        !SymbolEqualityComparer.Default.Equals(calledMethod, target.OriginalDefinition))
+                    if (!SymbolSignatureComparer.Instance.Equals(calledMethod, target) &&
+                        !SymbolSignatureComparer.Instance.Equals(calledMethod.OriginalDefinition, target) &&
+                        !SymbolSignatureComparer.Instance.Equals(calledMethod, target.OriginalDefinition))
                         continue;
 
                     var enclosing = FindEnclosingMethodSymbol(invocation, semanticModel);

@@ -2,10 +2,12 @@ using Microsoft.CodeAnalysis;
 
 namespace RoslynCodeLens.Symbols;
 
-// Compares INamedTypeSymbol by signature (namespace, name, arity, assembly name) rather than
-// object identity. Roslyn creates a separate symbol object for each Compilation, so the same
+// Compares INamedTypeSymbol by signature (namespace, containing types, name, arity, assembly name)
+// rather than object identity. Roslyn creates a separate symbol object for each Compilation, so the same
 // type appears as a different object in the declaring project versus any referencing project.
 // SymbolEqualityComparer.Default treats those as different, breaking cross-project index lookups.
+// The containing-type chain keeps nested types apart from top-level types and from nested types of
+// the same name in other outer types.
 // Intentional omissions: type-parameter names (may differ between source and metadata) and
 // assembly version (to tolerate multi-targeting and binding redirects).
 // Null-safe on ContainingNamespace and ContainingAssembly to tolerate ErrorTypeSymbol
@@ -22,7 +24,8 @@ internal sealed class NamedTypeSignatureComparer : IEqualityComparer<INamedTypeS
 		return x.Arity == y.Arity
 			&& string.Equals(x.Name, y.Name, StringComparison.Ordinal)
 			&& string.Equals(x.ContainingNamespace?.ToDisplayString(), y.ContainingNamespace?.ToDisplayString(), StringComparison.Ordinal)
-			&& string.Equals(x.ContainingAssembly?.Identity.Name, y.ContainingAssembly?.Identity.Name, StringComparison.Ordinal);
+			&& string.Equals(x.ContainingAssembly?.Identity.Name, y.ContainingAssembly?.Identity.Name, StringComparison.Ordinal)
+			&& Equals(x.ContainingType, y.ContainingType);
 	}
 
 	public int GetHashCode(INamedTypeSymbol obj)
@@ -31,6 +34,7 @@ internal sealed class NamedTypeSignatureComparer : IEqualityComparer<INamedTypeS
 			obj.Name,
 			obj.Arity,
 			obj.ContainingNamespace?.ToDisplayString(),
-			obj.ContainingAssembly?.Identity.Name);
+			obj.ContainingAssembly?.Identity.Name,
+			obj.ContainingType is { } containingType ? GetHashCode(containingType) : 0);
 	}
 }

@@ -32,7 +32,7 @@ because the test project targets both. The benchmarks need the .NET 10 runtime, 
 Development:
 
 - Build: `dotnet build`
-- Test: `dotnet test`, after the fixture `global.json` and the four fixture restores from the CI
+- Test: `dotnet test`, after the fixture `global.json` and the five fixture restores from the CI
   block below. Without that SDK pin the Razor fixtures get no generated code on a host with the
   .NET 11 SDK ([#560](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/560)).
 - Benchmarks: `dotnet run --project benchmarks/RoslynCodeLens.Benchmarks -c Release`
@@ -48,6 +48,7 @@ dotnet restore tests/RoslynCodeLens.Tests/Fixtures/TestSolution/TestSolution.sln
 dotnet restore tests/RoslynCodeLens.Tests/Fixtures/FilterableSolution/FilterableSolution.slnx
 dotnet restore tests/RoslynCodeLens.Tests/Fixtures/RazorFixture/RazorFixture.slnx
 dotnet restore tests/RoslynCodeLens.Tests/Fixtures/PropsFixture/PropsFixture.slnx
+dotnet restore tests/RoslynCodeLens.Tests/Fixtures/MultiInstanceSolution/MultiInstanceSolution.slnx
 dotnet build --no-restore -c Release
 dotnet test --no-build -c Release --verbosity normal --collect "XPlat Code Coverage" --settings coverage.runsettings --results-directory TestResults
 ```

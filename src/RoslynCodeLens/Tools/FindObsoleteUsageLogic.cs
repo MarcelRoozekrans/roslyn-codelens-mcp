@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using RoslynCodeLens.Models;
+using RoslynCodeLens.Symbols;
 using RoslynCodeLens.TestDiscovery;
 
 namespace RoslynCodeLens.Tools;
@@ -22,8 +23,9 @@ public static class FindObsoleteUsageLogic
         // won't search test-project syntax trees for usages, so it'll get omitted by the
         // zero-usage filter in Step 3 unless production code calls it.
         // SymbolResolver.AttributeIndex is keyed by simple attribute name; entries are
-        // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by symbol identity.
-        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(SymbolEqualityComparer.Default);
+        // duplicated under both "Obsolete" and "ObsoleteAttribute" — dedup by signature, which
+        // also matches usages bound to another compilation's instance of the same symbol.
+        var obsoleteSymbols = new Dictionary<ISymbol, ObsoleteAttributeData>(SymbolSignatureComparer.Instance);
         foreach (var key in new[] { "Obsolete", "ObsoleteAttribute" })
         {
             if (!resolver.AttributeIndex.TryGetValue(key, out var entries)) continue;
@@ -41,8 +43,8 @@ public static class FindObsoleteUsageLogic
             return new FindObsoleteUsageResult([]);
 
         // Step 2: walk all production syntax trees and collect usages per obsolete symbol.
-        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, SymbolEqualityComparer.Default);
-        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(SymbolEqualityComparer.Default);
+        var targetSet = new HashSet<ISymbol>(obsoleteSymbols.Keys, SymbolSignatureComparer.Instance);
+        var usagesByTarget = new Dictionary<ISymbol, List<ObsoleteUsageSite>>(SymbolSignatureComparer.Instance);
         foreach (var s in obsoleteSymbols.Keys)
             usagesByTarget[s] = new List<ObsoleteUsageSite>();
 

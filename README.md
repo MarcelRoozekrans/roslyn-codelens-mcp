@@ -293,6 +293,25 @@ connected clients share the same solution state (`set_active_solution` affects e
 there is no authentication. `--host` can widen the binding, but the server will warn — its tools
 can read and modify source files, so only do this on networks you fully trust.
 
+### Restricting the tool set
+
+Pass `--tools` with a comma-separated list of tool names to register only those tools. The others
+are not listed by `tools/list` and cannot be called. This keeps the tool descriptions an agent has
+to load small, and it keeps tools such as the refactoring tools away from agents that should only
+navigate. Unlike the tool picker of an MCP client, the restriction travels with the server
+configuration. The option may be repeated; an unknown name stops the server with an error.
+
+```json
+{
+  "mcpServers": {
+    "roslyn-codelens": {
+      "command": "roslyn-codelens-mcp",
+      "args": ["/path/to/MySolution.sln", "--tools", "find_references,find_callers,go_to_definition"]
+    }
+  }
+}
+```
+
 ## Performance
 
 All type lookups use pre-built reverse inheritance maps, member indexes, and attribute indexes for O(1) access. Benchmarked on an i9-12900HK with .NET 10.0.7:

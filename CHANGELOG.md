@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.20.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.19.2...v2.20.0) (2026-11-25)
+
+
+### Features
+
+* add --tools option to register only selected tools ([#592](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/592)) ([6f9cab9](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/6f9cab9fa10fc8fdd8a5a92a04369af8df795b21))
+
+## [2.19.2](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.19.1...v2.19.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* match symbols across compilations in five tools ([#587](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/587)) ([dc45178](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/dc45178f1cf56885f1f675a0cff19b8f977da1b6))
+
 ## [2.19.1](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.19.0...v2.19.1) (2026-11-17)
 
 

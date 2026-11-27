@@ -22,7 +22,7 @@ public static class FindEventSubscribersLogic
                 return [];
         }
 
-        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolEqualityComparer.Default);
+        var targetSet = new HashSet<IEventSymbol>(targetEvents, SymbolSignatureComparer.Instance);
         var targetMetadataKeys = BuildMetadataKeys(targetEvents);
         var results = new List<EventSubscriberInfo>();
         var seen = new HashSet<(string, TextSpan)>();
@@ -128,34 +128,26 @@ public static class FindEventSubscribersLogic
 
     private static bool IsInterfaceImplementation(IEventSymbol called, IEventSymbol target)
     {
-        if (target.ContainingType.TypeKind == TypeKind.Interface)
-        {
-            if (SymbolEqualityComparer.Default.Equals(called, target))
-                return true;
+        if (target.ContainingType.TypeKind != TypeKind.Interface)
+            return false;
 
-            var containingType = called.ContainingType;
-            var implementation = containingType.FindImplementationForInterfaceMember(target);
-            if (implementation != null &&
-                SymbolEqualityComparer.Default.Equals(implementation, called))
-                return true;
-        }
-
-        if (called.ContainingType.TypeKind == TypeKind.Interface &&
-            target.ContainingType.TypeKind == TypeKind.Interface)
+        // A subscription through the interface itself already matched the target set in IsEventMatch(),
+        // so this is one through an implementing type. The target may be another compilation's instance of
+        // the interface event, which FindImplementationForInterfaceMember() does not recognize, so ask with
+        // the interface instance the implementing type itself binds to. Only the actual implementation
+        // matches, not an unrelated event of the same name beside an explicit implementation.
+        var implementingType = called.ContainingType;
+        foreach (var iface in implementingType.AllInterfaces)
         {
-            return SymbolEqualityComparer.Default.Equals(
-                       called.ContainingType, target.ContainingType) &&
-                   string.Equals(called.Name, target.Name, StringComparison.Ordinal);
-        }
+            if (!NamedTypeSignatureComparer.Instance.Equals(iface, target.ContainingType))
+                continue;
 
-        // Last-resort: target is interface event, called is a non-interface event whose containing type
-        // implements the interface (covers explicit re-declarations of interface events).
-        if (target.ContainingType.TypeKind == TypeKind.Interface &&
-            called.ContainingType.TypeKind != TypeKind.Interface &&
-            string.Equals(called.Name, target.Name, StringComparison.Ordinal) &&
-            called.ContainingType.AllInterfaces.Contains(target.ContainingType, SymbolEqualityComparer.Default))
-        {
-            return true;
+            foreach (var interfaceEvent in iface.GetMembers(target.Name).OfType<IEventSymbol>())
+            {
+                var implementation = implementingType.FindImplementationForInterfaceMember(interfaceEvent);
+                if (implementation is not null && SymbolSignatureComparer.Instance.Equals(implementation, called))
+                    return true;
+            }
         }
 
         return false;
