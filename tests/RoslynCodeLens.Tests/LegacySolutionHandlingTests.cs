@@ -180,6 +180,9 @@ public class LegacySolutionHandlingTests
         var (solution, workspace, skipped) = await new SolutionLoader().OpenAsync(solutionPath);
         using var _ = workspace;
 
+        var diagnostic = string.Join("; ", solution.Projects.Select(p =>
+            $"{p.Name}: docs={p.DocumentIds.Count} out={p.OutputFilePath} refs=[{string.Join(",", p.MetadataReferences.OfType<PortableExecutableReference>().Select(r => Path.GetFileName(r.FilePath)))}]"));
+        Assert.True(solution.Projects.Count() == 1, diagnostic);
         Assert.Equal("LoadableLegacyLib", Assert.Single(solution.Projects).Name);
         var entry = Assert.Single(skipped);
         Assert.Equal("MissingImportLib", entry.Name);
