@@ -186,8 +186,20 @@ internal static class LogicalMemberGroups
         };
     }
 
-    // GeneratedIn is the assembly of a generated document and empty for a project document, which a link can share.
-    private readonly record struct DeclarationKey(string FilePath, TextSpan Span, string SynthesizedSignature, string GeneratedIn);
+    // GeneratedIn is the assembly of a generated document and empty for a project document, which a link can share. Paths
+    // compare as the file system does: on Windows, links that differ only in casing name one file. Generated paths need no
+    // exception, because a generator's hint names are unique regardless of casing.
+    private readonly record struct DeclarationKey(string FilePath, TextSpan Span, string SynthesizedSignature, string GeneratedIn)
+    {
+        public bool Equals(DeclarationKey other)
+            => SolutionLoader.PathComparer.Equals(FilePath, other.FilePath)
+                && Span == other.Span
+                && SynthesizedSignature == other.SynthesizedSignature
+                && GeneratedIn == other.GeneratedIn;
+
+        public override int GetHashCode()
+            => HashCode.Combine(SolutionLoader.PathComparer.GetHashCode(FilePath), Span, SynthesizedSignature, GeneratedIn);
+    }
 
     private sealed class LogicalTargetComparer(SymbolResolver resolver) : IEqualityComparer<ISymbol>
     {

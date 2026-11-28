@@ -231,6 +231,35 @@ public class RenameSymbolLogicTests
     }
 
     [Fact]
+    public void ResolveSingleTarget_FileLinkedWithDifferentPathCasing_IsOneTargetWhereFilePathsIgnoreCase()
+    {
+        // Two projects link the same file under differently cased paths. Windows paths ignore case, so both projects
+        // compile one declaration; on a case-sensitive file system the paths name two files, and the name is ambiguous.
+        const string source = "namespace Duplicate; public class Helper { public int Common() => 1; }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", source)]),
+            ("Beta", [("shared/helper.cs", source)]));
+
+        if (OperatingSystem.IsWindows())
+        {
+            var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common");
+
+            Assert.Equal("Duplicate.Helper.Common()", target.ToDisplayString());
+        }
+        else
+        {
+            var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common"));
+
+            Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+            Assert.Equal(
+                "Symbol 'Duplicate.Helper.Common' matched 2 distinct symbols: Duplicate.Helper.Common() (project Alpha), "
+                    + "Duplicate.Helper.Common() (project Beta). Symbols that share a full name in different projects or "
+                    + "assemblies cannot be selected by name.",
+                ex.Message);
+        }
+    }
+
+    [Fact]
     public void ResolveSingleTarget_FullNameOfARetargetedProjectAndAnotherProject_NamesBothProjects()
     {
         // App comes first, so the index holds Lib's type as App sees it: through a retargeted assembly symbol, which is
