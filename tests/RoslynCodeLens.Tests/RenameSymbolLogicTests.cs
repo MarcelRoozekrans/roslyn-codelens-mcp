@@ -53,26 +53,31 @@ public class RenameSymbolLogicTests
     }
 
     /// <summary>
-    /// Adds a tree to every compilation of a workspace without adding it to the solution's documents, the way a source
-    /// generator's output appears.
+    /// Adds a tree to the compilations of the given <paramref name="projects"/> (all when none are given) without adding it
+    /// to the solution's documents, the way a source generator's output appears.
     /// </summary>
     private static (LoadedSolution Loaded, SymbolResolver Resolver) WithGeneratedTree(
-        (LoadedSolution Loaded, SymbolResolver Resolver) workspace, string filePath, string source)
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace, string filePath, string source, params string[] projects)
     {
         var generated = new LoadedSolution
         {
             Solution = workspace.Loaded.Solution,
             Compilations = new ConcurrentDictionary<ProjectId, Compilation>(workspace.Loaded.Compilations.Select(
-                pair => KeyValuePair.Create(pair.Key, pair.Value.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source, path: filePath))))),
+                pair => KeyValuePair.Create(pair.Key,
+                    projects.Length == 0 || projects.Contains(workspace.Loaded.Solution.GetProject(pair.Key)!.Name)
+                        ? pair.Value.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source, path: filePath))
+                        : pair.Value))),
         };
         return (generated, new SymbolResolver(generated));
     }
 
     /// <summary>
     /// Lib declares <paramref name="libSource"/> against version 1 of an assembly Dep; App references Lib and version 2 of
-    /// Dep, so App sees Lib through a retargeted assembly symbol. Gamma, unrelated, declares <paramref name="gammaSource"/>.
+    /// Dep, so App sees Lib through a retargeted assembly symbol. Gamma, unrelated, also references version 1 of Dep and
+    /// declares <paramref name="gammaSource"/> in <paramref name="gammaPath"/>.
     /// </summary>
-    private static (LoadedSolution Loaded, SymbolResolver Resolver) WithRetargetedProject(string libSource, string gammaSource)
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) WithRetargetedProject(
+        string libSource, string gammaSource, string gammaPath = "Gamma/Helper.cs")
     {
         var corlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
         var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
@@ -82,7 +87,7 @@ public class RenameSymbolLogicTests
         [
             ("Lib", [corlib, Dep("1.0.0.0")], "Lib/Helper.cs", libSource),
             ("App", [corlib, Dep("2.0.0.0")], "App/App.cs", "namespace App; public class Consumer { }"),
-            ("Gamma", [corlib], "Gamma/Helper.cs", gammaSource),
+            ("Gamma", [corlib, Dep("1.0.0.0")], gammaPath, gammaSource),
         ];
         foreach (var (name, references, path, source) in projects)
         {
@@ -213,18 +218,48 @@ public class RenameSymbolLogicTests
     [NonWindowsFact]
     public void ResolveSingleTarget_GeneratedMemberWhosePathDiffersFromAProjectDocumentOnlyInCasing_NamesEachProject()
     {
-        // Same generated member as in the previous test, but Alpha also has a document whose path differs from the generated
-        // one only in casing. On a case-sensitive file system that is another file, so the generated document must not be
-        // taken for a project document, which a link could share; the members would then merge into one target.
+        // Same generated member as in the previous test, but both projects also link a document whose path differs from
+        // the generated one only in casing. On a case-sensitive file system that is another file, so the generated
+        // documents must not be taken for project documents, which a link could share; the members would then merge into
+        // one target.
         var (_, resolver) = WithGeneratedTree(
             RenameTestWorkspace.Create(
                 ("Alpha", [
                     ("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }"),
                     ("gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }"),
                 ]),
-                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")])),
+                ("Beta", [
+                    ("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }"),
+                    ("gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }"),
+                ])),
             "Gen/Gen.Generator/Helper.g.cs",
             "namespace Duplicate; partial class Helper { public int Generated() => 1; }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Generated' matched 2 distinct symbols: Duplicate.Helper.Generated() (project Alpha), "
+                + "Duplicate.Helper.Generated() (project Beta). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_GeneratedMemberAtThePathOfAnotherProjectsDocument_NamesEachProject()
+    {
+        // Same generated member as in ResolveSingleTarget_GeneratedMemberInTwoProjects_NamesEachProject, but an unrelated
+        // project Gamma has a regular document at exactly the generated path (e.g. generator output compiled explicitly).
+        // That document is not part of Alpha or Beta, so their generated documents must not be taken for project
+        // documents, which a link could share; the members would then merge into one target.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Gamma", [("Gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { public int Generated() => 1; }",
+            "Alpha", "Beta");
 
         var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
 
@@ -302,6 +337,19 @@ public class RenameSymbolLogicTests
                 + "Duplicate.Helper.Common() (project Gamma). Symbols that share a full name in different projects or "
                 + "assemblies cannot be selected by name.",
             ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FileLinkedIntoARetargetedProjectAndAnotherProject_IsOneTarget()
+    {
+        // Lib and Gamma link the same file. The index holds Lib's type as App sees it, through a retargeted assembly
+        // symbol; the linked file is still a regular document of Lib, so both projects compile one declaration.
+        const string source = "namespace Duplicate; public class Helper { public Dep.D Use() => null; public int Common() => 1; }";
+        var (_, resolver) = WithRetargetedProject(source, source, gammaPath: "Lib/Helper.cs");
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common");
+
+        Assert.Equal("Duplicate.Helper.Common()", target.ToDisplayString());
     }
 
     // A partial member whose definition each project declares itself, with the implementation in a linked file: the

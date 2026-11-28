@@ -162,7 +162,7 @@ internal static class LogicalMemberGroups
                 l.SourceTree!.FilePath,
                 l.SourceSpan,
                 synthesized,
-                resolver.IsProjectDocument(l.SourceTree.FilePath) ? "" : symbol.ContainingAssembly?.Name ?? ""));
+                resolver.IsProjectDocument(symbol, l.SourceTree.FilePath) ? "" : symbol.ContainingAssembly?.Name ?? ""));
     }
 
     // The name a caller can type: containing type + name for methods (shared by all overloads), the

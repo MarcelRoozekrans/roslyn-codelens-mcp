@@ -14,7 +14,7 @@ public class SymbolResolver
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByFullName;
     private readonly Dictionary<string, List<INamedTypeSymbol>> _typesByStrippedFullName;
     private readonly Dictionary<string, string> _fileToProjectName;
-    private readonly HashSet<string> _projectDocumentPaths;
+    private readonly Dictionary<IAssemblySymbol, HashSet<string>> _documentPathsByAssembly;
     private readonly Dictionary<ProjectId, string> _projectIdToName;
     private readonly Dictionary<IAssemblySymbol, string> _assemblyToProjectName;
     private readonly Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> _interfaceImplementors;
@@ -32,7 +32,7 @@ public class SymbolResolver
 
         (_allTypes, _typeInstances) = CollectAllTypes(compilations, _typeComparer);
         (_typesBySimpleName, _typesByFullName, _typesByStrippedFullName) = BuildTypeLookups(_allTypes);
-        (_fileToProjectName, _projectDocumentPaths, _projectIdToName, _assemblyToProjectName) = BuildProjectLookups(loaded);
+        (_fileToProjectName, _documentPathsByAssembly, _projectIdToName, _assemblyToProjectName) = BuildProjectLookups(loaded);
         (_interfaceImplementors, _derivedTypes) = BuildInheritanceMaps(_allTypes, _typeComparer);
 
         _membersBySimpleName = new Dictionary<string, List<ISymbol>>(StringComparer.OrdinalIgnoreCase);
@@ -165,17 +165,18 @@ public class SymbolResolver
         return (bySimple, byFull, byStripped);
     }
 
-    private static (Dictionary<string, string>, HashSet<string>, Dictionary<ProjectId, string>, Dictionary<IAssemblySymbol, string>)
-        BuildProjectLookups(LoadedSolution loaded)
+    private static (Dictionary<string, string>, Dictionary<IAssemblySymbol, HashSet<string>>, Dictionary<ProjectId, string>,
+        Dictionary<IAssemblySymbol, string>) BuildProjectLookups(LoadedSolution loaded)
     {
         var fileToProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var documentPaths = new HashSet<string>(SolutionLoader.PathComparer);
+        var documentPathsByAssembly = new Dictionary<IAssemblySymbol, HashSet<string>>(SymbolEqualityComparer.Default);
         var idToName = new Dictionary<ProjectId, string>();
         var assemblyToProject = new Dictionary<IAssemblySymbol, string>(SymbolEqualityComparer.Default);
 
         foreach (var project in loaded.Solution.Projects)
         {
             idToName[project.Id] = project.Name;
+            var documentPaths = new HashSet<string>(SolutionLoader.PathComparer);
             foreach (var doc in project.Documents)
             {
                 if (doc.FilePath != null)
@@ -193,6 +194,7 @@ public class SymbolResolver
             if (loaded.Compilations.TryGetValue(project.Id, out var compilation))
             {
                 assemblyToProject[compilation.Assembly] = project.Name;
+                documentPathsByAssembly[compilation.Assembly] = documentPaths;
                 foreach (var tree in compilation.SyntaxTrees)
                 {
                     if (!string.IsNullOrEmpty(tree.FilePath))
@@ -212,11 +214,12 @@ public class SymbolResolver
                     && assemblyToProject.TryGetValue(reference.Compilation.Assembly, out var name))
                 {
                     assemblyToProject.TryAdd(seen, name);
+                    documentPathsByAssembly.TryAdd(seen, documentPathsByAssembly[reference.Compilation.Assembly]);
                 }
             }
         }
 
-        return (fileToProject, documentPaths, idToName, assemblyToProject);
+        return (fileToProject, documentPathsByAssembly, idToName, assemblyToProject);
     }
 
     private static (Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>,
@@ -602,11 +605,15 @@ public class SymbolResolver
         filePath is not null && _generatedToMarkup.TryGetValue(filePath, out var markup) ? markup : null;
 
     /// <summary>
-    /// True when <paramref name="filePath"/> is a regular document of a loaded project. Source-generated documents are
-    /// not: they exist only in the compilation, and the same generator can give them the same path in every project.
+    /// True when <paramref name="filePath"/> is a regular document of the project whose compilation declares
+    /// <paramref name="symbol"/>. Source-generated documents are not: they exist only in the compilation, and the same
+    /// generator can give them the same path in every project, even the path of another project's regular document.
     /// </summary>
-    public bool IsProjectDocument(string? filePath) =>
-        !string.IsNullOrEmpty(filePath) && _projectDocumentPaths.Contains(filePath);
+    public bool IsProjectDocument(ISymbol symbol, string? filePath) =>
+        !string.IsNullOrEmpty(filePath)
+        && symbol.ContainingAssembly is { } assembly
+        && _documentPathsByAssembly.TryGetValue(assembly, out var documentPaths)
+        && documentPaths.Contains(filePath);
 
     public bool IsGenerated(string? filePath)
     {
