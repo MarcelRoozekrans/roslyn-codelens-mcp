@@ -33,10 +33,12 @@ public static class GetInstantiationOptionsTool
             string symbol,
         [Description("Optional project name whose viewpoint decides `accessible` (e.g. `MyApp.Tests`).")]
             string? fromProject = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken cancellationToken = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetInstantiationOptionsLogic.Execute(
             context.Loaded, context.Resolver, symbol, fromProject, cancellationToken);
     }

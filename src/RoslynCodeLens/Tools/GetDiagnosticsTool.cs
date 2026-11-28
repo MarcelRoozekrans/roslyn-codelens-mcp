@@ -23,10 +23,12 @@ public static class GetDiagnosticsTool
             bool includeAnalyzers = false,
         [Description("Maximum number of items to return (default: 1000). Items are sorted severity-desc, then file, then line.")]
             int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = await GetDiagnosticsLogic.ExecuteAsync(
             context.Loaded, context.Resolver,
             project, severity, includeAnalyzers, trustStore, allowlist, ct).ConfigureAwait(false);

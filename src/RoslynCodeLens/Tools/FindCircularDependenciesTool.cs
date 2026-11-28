@@ -16,10 +16,12 @@ public static class FindCircularDependenciesTool
         MultiSolutionManager manager,
         [Description("Level: 'project' or 'namespace' (default: project)")] string level = "project",
         [Description("Maximum number of items to return (default: 100). Items are sorted by cycle length desc.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindCircularDependenciesLogic.Execute(context.Loaded, context.Resolver, level);
 
         var sorted = Sort(raw);

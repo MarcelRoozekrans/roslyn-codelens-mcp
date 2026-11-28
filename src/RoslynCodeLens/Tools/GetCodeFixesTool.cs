@@ -21,10 +21,12 @@ public static class GetCodeFixesTool
         [Description("Line number where the diagnostic occurs")] int line,
         [Description("Maximum number of items to return (default: 100). Items are sorted by title.")]
             int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = await GetCodeFixesLogic.ExecuteAsync(context.Loaded, context.Resolver, diagnosticId, filePath, line, trustStore, allowlist, ct).ConfigureAwait(false);
 
         var sorted = Sort(raw);

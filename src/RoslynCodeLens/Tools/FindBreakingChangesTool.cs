@@ -20,10 +20,12 @@ public static class FindBreakingChangesTool
     public static FindBreakingChangesResult Execute(
         MultiSolutionManager manager,
         [Description("Path to a baseline .json snapshot (from a prior get_public_api_surface call) or a baseline .dll file.")]
-        string baselinePath)
+        string baselinePath,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindBreakingChangesLogic.Execute(
             context.Loaded,
             context.Resolver,

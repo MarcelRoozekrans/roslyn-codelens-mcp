@@ -36,10 +36,12 @@ public static class FindGodObjectsTool
         [Description("Min incoming-namespace count for coupling axis. Default 5.")]
         int minIncomingNamespaces = 5,
         [Description("Min outgoing-namespace count for coupling axis. Default 5.")]
-        int minOutgoingNamespaces = 5)
+        int minOutgoingNamespaces = 5,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindGodObjectsLogic.Execute(
             context.Loaded,
             context.Resolver,

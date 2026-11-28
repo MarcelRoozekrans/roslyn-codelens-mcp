@@ -21,14 +21,16 @@ public static class ApplyCodeActionTool
         [Description("End line for text selection (1-based, optional)")] int? endLine = null,
         [Description("End column for text selection (1-based, optional)")] int? endColumn = null,
         [Description("Preview only — return diff without writing to disk (default: true)")] bool preview = true,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
         return await ApplyCodeActionLogic.ExecuteAsync(
-            manager.GetLoadedSolution(), filePath, line, column,
+            sm.GetLoadedSolution(), filePath, line, column,
             endLine, endColumn, actionTitle, preview,
             // After a successful apply, push the written texts into the in-memory snapshot so
             // follow-up queries see them immediately (no watcher-debounce stale window).
-            manager.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
+            sm.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
     }
 }

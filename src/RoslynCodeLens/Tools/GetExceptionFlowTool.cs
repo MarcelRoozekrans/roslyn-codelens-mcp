@@ -35,10 +35,12 @@ public static class GetExceptionFlowTool
         bool includeDocumented = true,
         [Description("Hard cap on methods visited. Default 500.")]
         int maxNodes = 500,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken cancellationToken = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
 
         return GetExceptionFlowLogic.Execute(
             context.Loaded,

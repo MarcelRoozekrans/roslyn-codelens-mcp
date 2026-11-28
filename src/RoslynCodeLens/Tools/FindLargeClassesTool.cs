@@ -18,10 +18,12 @@ public static class FindLargeClassesTool
         [Description("Maximum members before flagging (default: 20)")] int maxMembers = 20,
         [Description("Maximum lines before flagging (default: 500)")] int maxLines = 500,
         [Description("Maximum number of items to return (default: 100). Items are sorted by size desc (worst first).")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindLargeClassesLogic.Execute(context.Loaded, context.Resolver, project, maxMembers, maxLines);
 
         var sorted = Sort(raw);

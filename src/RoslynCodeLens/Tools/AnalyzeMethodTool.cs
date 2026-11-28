@@ -13,10 +13,12 @@ public static class AnalyzeMethodTool
                  "More efficient than calling find_callers separately.")]
     public static MethodAnalysis Execute(
         MultiSolutionManager manager,
-        [Description("Method symbol (e.g. 'Greeter.Greet' or 'MyNamespace.MyClass.MyMethod')")] string symbol)
+        [Description("Method symbol (e.g. 'Greeter.Greet' or 'MyNamespace.MyClass.MyMethod')")] string symbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return AnalyzeMethodLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
     }
 }

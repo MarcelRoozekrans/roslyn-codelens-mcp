@@ -14,10 +14,13 @@ public static class FindUncoveredSymbolsTool
         "with a coverage summary including a riskHotspotCount (uncovered with " +
         "complexity >= 5). Recognises xUnit, NUnit, MSTest. Reference-based static " +
         "analysis — does not parse runtime coverage data.")]
-    public static FindUncoveredSymbolsResult Execute(MultiSolutionManager manager)
+    public static FindUncoveredSymbolsResult Execute(
+        MultiSolutionManager manager,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindUncoveredSymbolsLogic.Execute(
             context.Loaded,
             context.Resolver);

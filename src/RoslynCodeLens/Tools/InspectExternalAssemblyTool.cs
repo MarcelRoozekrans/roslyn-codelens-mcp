@@ -13,10 +13,12 @@ public static class InspectExternalAssemblyTool
         MultiSolutionManager manager,
         [Description("Assembly name, e.g. 'Newtonsoft.Json' or 'Microsoft.Extensions.DependencyInjection.Abstractions'")] string assemblyName,
         [Description("'summary' (default) or 'namespace'")] string mode = "summary",
-        [Description("Required when mode='namespace'")] string? namespaceFilter = null)
+        [Description("Required when mode='namespace'")] string? namespaceFilter = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
         return InspectExternalAssemblyLogic.Execute(
-            manager.GetMetadataResolver(), assemblyName, mode, namespaceFilter);
+            sm.GetMetadataResolver(), assemblyName, mode, namespaceFilter);
     }
 }

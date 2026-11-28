@@ -24,10 +24,12 @@ public static class FindObsoleteUsageTool
         [Description("Optional: restrict to a single project by name (case-insensitive).")]
         string? project = null,
         [Description("If true, only [Obsolete(..., true)] error-level deprecations are returned. Default false.")]
-        bool errorOnly = false)
+        bool errorOnly = false,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindObsoleteUsageLogic.Execute(
             context.Loaded,
             context.Resolver,

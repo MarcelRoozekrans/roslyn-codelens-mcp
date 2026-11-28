@@ -16,10 +16,12 @@ public static class FindReflectionUsageTool
         MultiSolutionManager manager,
         [Description("Optional type name to filter results (omit to scan entire solution)")] string? symbol = null,
         [Description("Maximum number of items to return (default: 500). Items are sorted by file, then line.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindReflectionUsageLogic.Execute(context.Loaded, context.Resolver, symbol);
 
         var sorted = Sort(raw);

@@ -19,10 +19,12 @@ public static class GetOperatorsTool
         "Sort: kind ordinal ASC, then parameter count ASC, then signature ordinal ASC.")]
     public static GetOperatorsResult Execute(
         MultiSolutionManager manager,
-        [Description("Type name (simple or fully qualified) — e.g. Vector2, MyApp.Money")] string symbol)
+        [Description("Type name (simple or fully qualified) — e.g. Vector2, MyApp.Money")] string symbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetOperatorsLogic.Execute(context.Resolver, context.Metadata, symbol);
     }
 }

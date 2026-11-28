@@ -31,13 +31,15 @@ public static class FindReferencesTool
         [Description("Optional kind filter - only references of these kinds are returned (see the kind list above)")]
             string[]? kinds = null,
         [Description("Maximum number of items to return (default: 500). Items are sorted by file, line, column.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
         // Before EnsureLoaded: a typo should not pay for a cold solution load first.
         ValidateKinds(kinds);
 
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindReferencesLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
 
         return BuildResult(raw, kinds, limit ?? DefaultLimit);

@@ -13,7 +13,7 @@ public class MultiSolutionManagerResolveTests
         var a = SolutionManager.CreateEmpty();
         var b = SolutionManager.CreateEmpty();
         var multi = MultiSolutionManager.CreateForTesting(
-            new Dictionary<string, SolutionManager> { [AKey] = a, [BKey] = b }, activeKey);
+            new Dictionary<string, SolutionManager>(StringComparer.Ordinal) { [AKey] = a, [BKey] = b }, activeKey);
         return (multi, a, b);
     }
 

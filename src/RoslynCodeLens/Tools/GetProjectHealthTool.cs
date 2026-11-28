@@ -25,10 +25,12 @@ public static class GetProjectHealthTool
         [Description("Optional: restrict to a single project by name. Default: whole solution, grouped per project.")]
         string? project = null,
         [Description("How many hotspots to include per dimension. Default: 5. Pass 0 for counts-only output.")]
-        int hotspotsPerDimension = 5)
+        int hotspotsPerDimension = 5,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetProjectHealthLogic.Execute(
             context.Loaded,
             context.Resolver,

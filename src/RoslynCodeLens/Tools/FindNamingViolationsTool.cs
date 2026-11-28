@@ -16,10 +16,12 @@ public static class FindNamingViolationsTool
         MultiSolutionManager manager,
         [Description("Optional project name filter")] string? project = null,
         [Description("Maximum number of items to return (default: 500). Items are sorted by rule, then file.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindNamingViolationsLogic.Execute(context.Loaded, context.Resolver, project);
 
         var sorted = Sort(raw);

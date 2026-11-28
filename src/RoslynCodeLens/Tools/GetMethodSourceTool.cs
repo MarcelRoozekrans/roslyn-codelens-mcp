@@ -22,10 +22,12 @@ public static class GetMethodSourceTool
     public static ToolListResult<MemberSourceInfo> Execute(
         MultiSolutionManager manager,
         [Description("Member names: simple (`MyClass.MyMethod`) or fully qualified (`Ns.MyClass.MyMethod`)")] string[] symbols,
-        [Description("Maximum number of items to return (default: 100)")] int? limit = null)
+        [Description("Maximum number of items to return (default: 100)")] int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var items = GetMethodSourceLogic.Execute(context.Resolver, context.Metadata, symbols);
 
         int ok = 0, notFound = 0, ambiguous = 0, metadata = 0, unsupportedKind = 0;

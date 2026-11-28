@@ -11,14 +11,16 @@ public static class PeekIlTool
      Description("Return ilasm-style IL for a single method in a referenced closed-source assembly. Input must be a fully-qualified method name with parameter types.")]
     public static IlPeekResult Execute(
         MultiSolutionManager manager,
-        [Description("Fully-qualified method name with parameter types, e.g. 'Newtonsoft.Json.JsonConvert.SerializeObject(object)'")] string methodSymbol)
+        [Description("Fully-qualified method name with parameter types, e.g. 'Newtonsoft.Json.JsonConvert.SerializeObject(object)'")] string methodSymbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return PeekIlLogic.Execute(
             context.Loaded,
             context.Metadata,
-            manager.GetIlDisassembler(),
+            sm.GetIlDisassembler(),
             methodSymbol);
     }
 }

@@ -16,10 +16,13 @@ public static class GetPublicApiSurfaceTool
         "Skips test projects, generated code, compiler-generated members, internal " +
         "symbols, and protected members on sealed types (unreachable). Inherited " +
         "members are not repeated under derived types — only declared members appear.")]
-    public static GetPublicApiSurfaceResult Execute(MultiSolutionManager manager)
+    public static GetPublicApiSurfaceResult Execute(
+        MultiSolutionManager manager,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetPublicApiSurfaceLogic.Execute(
             context.Loaded,
             context.Resolver);
