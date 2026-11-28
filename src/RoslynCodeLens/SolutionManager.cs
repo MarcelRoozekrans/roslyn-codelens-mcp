@@ -515,6 +515,8 @@ public sealed class SolutionManager : IDisposable
         await _rebuildGate.WaitAsync().ConfigureAwait(false);
         try
         {
+            // A queued rebuild keeps the manager it was queued for, which may since have been unloaded.
+            ThrowIfDisposed();
             return await ReloadAndSwapAsync().ConfigureAwait(false);
         }
         finally
@@ -557,17 +559,13 @@ public sealed class SolutionManager : IDisposable
         var newResolver = new SymbolResolver(newLoaded);
         var newMetadataResolver = new MetadataSymbolResolver(newLoaded, newResolver);
 
-        ShadowCopyAnalyzerAssemblyLoader? oldLoader;
-        Workspace? oldWorkspace;
-        lock (_lock)
+        if (!TrySwapIn(newLoaded, newResolver, newMetadataResolver, analyzerLoader, workspace,
+                out var oldLoader, out var oldWorkspace))
         {
-            _loaded = newLoaded;
-            _resolver = newResolver;
-            _metadataResolver = newMetadataResolver;
-            oldLoader = _analyzerLoader;
-            oldWorkspace = _workspace;
-            _analyzerLoader = analyzerLoader;
-            _workspace = workspace;
+            // Disposed while reloading: nothing would ever release the new workspace or its analyzers.
+            workspace.Dispose();
+            analyzerLoader.Dispose();
+            throw new ObjectDisposedException(nameof(SolutionManager), "The solution was unloaded while it was being rebuilt.");
         }
 
         _tracker?.UpdateMappings(newLoaded);
@@ -579,6 +577,41 @@ public sealed class SolutionManager : IDisposable
 
         sw.Stop();
         return (newLoaded.Compilations.Count, sw.Elapsed);
+    }
+
+    /// <summary>
+    /// Installs a freshly loaded state unless the manager was disposed meanwhile. Returns false, and
+    /// changes nothing, when it was; the caller then owns the new workspace and loader.
+    /// </summary>
+    private bool TrySwapIn(
+        LoadedSolution loaded, SymbolResolver resolver, MetadataSymbolResolver metadataResolver,
+        ShadowCopyAnalyzerAssemblyLoader analyzerLoader, Workspace workspace,
+        out ShadowCopyAnalyzerAssemblyLoader? oldLoader, out Workspace? oldWorkspace)
+    {
+        lock (_lock)
+        {
+            oldLoader = null;
+            oldWorkspace = null;
+            if (_disposed)
+                return false;
+
+            _loaded = loaded;
+            _resolver = resolver;
+            _metadataResolver = metadataResolver;
+            oldLoader = _analyzerLoader;
+            oldWorkspace = _workspace;
+            _analyzerLoader = analyzerLoader;
+            _workspace = workspace;
+            return true;
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+        }
     }
 
     public void Dispose()
