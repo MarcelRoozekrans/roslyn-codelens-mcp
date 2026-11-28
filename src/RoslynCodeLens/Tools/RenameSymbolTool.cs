@@ -22,15 +22,17 @@ public static class RenameSymbolTool
         [Description("Also rewrite occurrences inside comments (default: true)")] bool renameInComments = true,
         [Description("Preview only — return edits without writing to disk (default: true)")] bool preview = true,
         [Description("Apply even when Conflicts are reported (default: false)")] bool force = false,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return await RenameSymbolLogic.ExecuteAsync(
             context.Loaded, context.Resolver, symbol, newName,
             renameOverloads, renameInStrings, renameInComments, preview, force,
             // After a successful apply, push the written texts into the in-memory snapshot so
             // follow-up queries see the new name immediately (no watcher-debounce stale window).
-            manager.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
+            sm.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
     }
 }

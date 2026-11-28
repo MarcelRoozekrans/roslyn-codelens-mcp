@@ -17,10 +17,12 @@ public static class SearchSymbolsTool
         MultiSolutionManager manager,
         [Description("Search query (substring match against symbol names)")] string query,
         [Description("Maximum number of items to return (default: 200). Items are sorted by match quality.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = SearchSymbolsLogic.Execute(context.Resolver, context.Metadata, query);
 
         var sorted = SortByMatchQuality(query, raw);

@@ -15,7 +15,8 @@ public static class StartBackgroundTaskTool
         MultiSolutionManager manager,
         BackgroundTaskStore store,
         [Description("Tool name to run in the background. Currently allowed: rebuild_solution.")]
-            string toolName)
+            string toolName,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
         if (!BackgroundTaskAllowlist.AllowedTools.Contains(toolName))
         {
@@ -26,12 +27,16 @@ public static class StartBackgroundTaskTool
                 new { allowedTools = BackgroundTaskAllowlist.AllowedTools.ToArray() });
         }
 
+        // Resolved now, not when the task runs: a later set_active_solution from another
+        // caller must not redirect a rebuild that was queued for this solution.
+        var sm = manager.Resolve(solution);
+
         return toolName switch
         {
             "rebuild_solution" => store.Start("rebuild_solution",
                 async _ =>
                 {
-                    var (count, elapsed) = await manager.ForceReloadAsync().ConfigureAwait(false);
+                    var (count, elapsed) = await sm.ForceReloadAsync().ConfigureAwait(false);
                     return new { projectCount = count, elapsedMs = elapsed.TotalMilliseconds };
                 }),
             _ => throw new McpToolException(

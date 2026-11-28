@@ -24,15 +24,18 @@ public static class LoadSolutionTool
                  "For very large solutions (hundreds of projects) that take minutes to open, pass " +
                  "`background: true` to return a taskId immediately instead of blocking; wait on it with " +
                  "get_task_status and waitSeconds until it succeeds (its result carries the loaded/skipped counts). " +
-                 "The new solution only becomes active once the background load finishes, so other " +
-                 "tools keep working against the current solution meanwhile.")]
+                 "Unless `activate` is false, the new solution only becomes active once the background load finishes, so other " +
+                 "tools keep working against the current solution meanwhile. " +
+                 "Pass `activate: false` to load without switching the active solution for other callers. " +
+                 "A filtered re-load of an already-loaded solution unloads it until the new load finishes.")]
     public static async Task<object> Execute(
         MultiSolutionManager manager,
         BackgroundTaskStore store,
         [Description("Full path to the .sln or .slnx file to load")] string path,
         [Description("Optional case-insensitive glob patterns against project file name without extension (e.g. 'MyApp.*')")] string[]? include = null,
         [Description("Optional exact project file names without extension; both arrays act as seeds for a transitive ProjectReference closure")] string[]? rootProjects = null,
-        [Description("If true, load on a background task and return a taskId immediately (wait with get_task_status and waitSeconds) instead of blocking until the solution is ready. Default false.")] bool background = false)
+        [Description("If true, load on a background task and return a taskId immediately (wait with get_task_status and waitSeconds) instead of blocking until the solution is ready. Default false.")] bool background = false,
+        [Description("If false, load without changing the active solution for other callers; pass the returned path as `solution` on later calls. Default true. When no solution is active, it becomes active anyway.")] bool activate = true)
     {
         // Validate up front in both modes so a bad path fails fast rather than
         // surfacing only when the caller polls the background task.
@@ -47,10 +50,10 @@ public static class LoadSolutionTool
         {
             return store.Start("load_solution", async _ =>
             {
-                var loadedPath = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
-                var skippedProjects = manager.GetActiveSkippedProjects();
-                var degraded = manager.GetActiveLoadDiagnostics();
-                var projectCount = manager.GetLoadedSolution().Solution.Projects.Count();
+                var loadedPath = await manager.LoadSolutionAsync(path, filter, activate).ConfigureAwait(false);
+                var skippedProjects = manager.GetSkippedProjects(loadedPath);
+                var degraded = manager.GetLoadDiagnostics(loadedPath);
+                var projectCount = manager.Resolve(loadedPath).GetLoadedSolution().Solution.Projects.Count();
                 return new
                 {
                     path = loadedPath,
@@ -66,10 +69,12 @@ public static class LoadSolutionTool
             });
         }
 
-        var normalised = await manager.LoadSolutionAsync(path, filter).ConfigureAwait(false);
-        var skipped = manager.GetActiveSkippedProjects();
-        var degraded = manager.GetActiveLoadDiagnostics();
-        var loadedCount = manager.GetLoadedSolution().Solution.Projects.Count();
+        // Read the result from the solution just loaded, not from the active one: with
+        // activate: false, or a concurrent switch by another caller, those differ.
+        var normalised = await manager.LoadSolutionAsync(path, filter, activate).ConfigureAwait(false);
+        var skipped = manager.GetSkippedProjects(normalised);
+        var degraded = manager.GetLoadDiagnostics(normalised);
+        var loadedCount = manager.Resolve(normalised).GetLoadedSolution().Solution.Projects.Count();
 
         // A degraded load means MSBuildWorkspace dropped a project's references under
         // contention; results from those projects may be incomplete. Warn rather than

@@ -31,10 +31,12 @@ public static class FindCatchBlocksTool
         bool includeBaseClauses = false,
         [Description("Maximum number of items to return (default: 500).")]
         int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken cancellationToken = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
 
         var raw = FindCatchBlocksLogic.Execute(
             context.Loaded,

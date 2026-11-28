@@ -17,7 +17,7 @@ Use `peek_il` when you need to understand what a closed-source method actually d
 ## Notes
 
 - Output is MSIL, not C#. For C# decompilation, use a tool like ILSpy or dnSpy directly.
-- The assembly must be referenced by at least one project in the active solution.
+- The assembly must be referenced by at least one project in the solution the call runs against: the active one, or the one named by `solution`.
 - The IL cache is invalidated automatically when the DLL changes on disk.
 
 ## See also

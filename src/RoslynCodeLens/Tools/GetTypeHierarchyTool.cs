@@ -11,10 +11,12 @@ public static class GetTypeHierarchyTool
      Description("Walk up (base classes, interfaces) and down (derived types) from a type")]
     public static TypeHierarchy Execute(
         MultiSolutionManager manager,
-        [Description("Type name (simple or fully qualified)")] string symbol)
+        [Description("Type name (simple or fully qualified)")] string symbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetTypeHierarchyLogic.Execute(context.Resolver, context.Metadata, symbol);
     }
 }

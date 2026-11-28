@@ -13,10 +13,12 @@ public static class FindTestsForSymbolTool
         MultiSolutionManager manager,
         [Description("Symbol name as Type.Method (simple or fully qualified)")] string symbol,
         [Description("Walk through helper methods to find indirect tests. Default false.")] bool transitive = false,
-        [Description("Maximum walk depth when transitive=true. Clamped to [1, 5]. Default 3.")] int maxDepth = 3)
+        [Description("Maximum walk depth when transitive=true. Clamped to [1, 5]. Default 3.")] int maxDepth = 3,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindTestsForSymbolLogic.Execute(
             context.Loaded,
             context.Resolver,

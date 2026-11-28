@@ -13,10 +13,12 @@ public static class GetTypeOverviewTool
                  "More efficient than calling get_symbol_context + get_type_hierarchy + get_diagnostics separately.")]
     public static TypeOverview Execute(
         MultiSolutionManager manager,
-        [Description("Type name (simple name or fully qualified)")] string typeName)
+        [Description("Type name (simple name or fully qualified)")] string typeName,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetTypeOverviewLogic.Execute(context.Loaded, context.Resolver, context.Metadata, typeName);
     }
 }

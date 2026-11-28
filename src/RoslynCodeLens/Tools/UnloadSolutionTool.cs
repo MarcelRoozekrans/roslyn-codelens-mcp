@@ -13,7 +13,7 @@ public static class UnloadSolutionTool
                  "Use this when you're done analyzing a codebase and want to reclaim memory.")]
     public static string Execute(
         MultiSolutionManager manager,
-        [Description("Partial or full solution name/path to match")] string name)
+        [Description("Solution to match: an absolute path matches exactly; otherwise an exact file name (e.g. `App.sln`) wins, then a case-insensitive substring of the path")] string name)
     {
         var unloaded = manager.UnloadSolution(name);
         return $"Unloaded: {unloaded}";

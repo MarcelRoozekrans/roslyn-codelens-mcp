@@ -39,10 +39,12 @@ public static class GetExtensionMethodsTool
         [Description("Optional case-insensitive substring filter on the member name — e.g. `chunk`")]
             string? nameFilter = null,
         [Description("Maximum number of items to return (default: 100)")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var items = GetExtensionMethodsLogic.Execute(
             context.Loaded, context.Resolver, context.Metadata, type, nameFilter);
 

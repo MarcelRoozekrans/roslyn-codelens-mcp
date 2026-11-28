@@ -11,9 +11,11 @@ public static class GetProjectDependenciesTool
      Description("Return the project reference graph (direct and transitive dependencies)")]
     public static ProjectDependencyGraph? Execute(
         MultiSolutionManager manager,
-        [Description("Project name or .csproj filename")] string project)
+        [Description("Project name or .csproj filename")] string project,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        return GetProjectDependenciesLogic.Execute(manager.GetLoadedSolution(), project);
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        return GetProjectDependenciesLogic.Execute(sm.GetLoadedSolution(), project);
     }
 }

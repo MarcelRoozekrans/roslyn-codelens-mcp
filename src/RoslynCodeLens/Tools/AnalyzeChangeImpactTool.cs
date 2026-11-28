@@ -13,10 +13,12 @@ public static class AnalyzeChangeImpactTool
                  "Use before renaming, changing signatures, or removing a type/method.")]
     public static ChangeImpact? Execute(
         MultiSolutionManager manager,
-        [Description("Symbol name to analyze (type name, 'Type.Method', etc.)")] string symbol)
+        [Description("Symbol name to analyze (type name, 'Type.Method', etc.)")] string symbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return AnalyzeChangeImpactLogic.Execute(context.Loaded, context.Resolver, context.Metadata, symbol);
     }
 }

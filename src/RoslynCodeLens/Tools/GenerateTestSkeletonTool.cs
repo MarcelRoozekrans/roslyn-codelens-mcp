@@ -28,10 +28,12 @@ public static class GenerateTestSkeletonTool
         [Description("FQN of a type or method to generate a test skeleton for.")]
         string symbol,
         [Description("Optional framework override: 'xunit', 'nunit', or 'mstest'. Auto-detected if null.")]
-        string? framework = null)
+        string? framework = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GenerateTestSkeletonLogic.Execute(
             context.Loaded,
             context.Resolver,

@@ -20,10 +20,12 @@ public static class ResolveStackTraceTool
     public static ToolListResult<StackFrameInfo> Execute(
         MultiSolutionManager manager,
         [Description("The stack trace text, pasted as-is (multi-line)")] string stackTrace,
-        [Description("Maximum number of items to return (default: 500)")] int? limit = null)
+        [Description("Maximum number of items to return (default: 500)")] int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var result = ResolveStackTraceLogic.Execute(
             context.Resolver, context.Metadata, stackTrace);
         var frames = result.Frames;

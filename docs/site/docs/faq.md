@@ -10,7 +10,7 @@ Grep finds text patterns. `roslyn-codelens-mcp` understands semantic structure â
 
 ## Does it support multiple solutions?
 
-Yes. Use `list_solutions`, `set_active_solution`, `load_solution`, and `unload_solution` to manage multiple solutions. Only one is active at a time for tool calls.
+Yes. Use `list_solutions`, `set_active_solution`, `load_solution`, and `unload_solution` to manage multiple solutions. Only one is active at a time. Every tool that works on a solution also takes an optional `solution` argument, so several agents sharing one server can each target their own solution without switching the active one.
 
 ## How does hot reload work?
 

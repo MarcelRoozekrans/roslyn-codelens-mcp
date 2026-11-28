@@ -23,11 +23,13 @@ public static class GetCodeActionsTool
         [Description("End column for text selection (1-based, optional)")] int? endColumn = null,
         [Description("Maximum number of items to return (default: 100). Items are sorted by kind then title.")]
             int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
         var raw = await GetCodeActionsLogic.ExecuteAsync(
-            manager.GetLoadedSolution(), filePath, line, column,
+            sm.GetLoadedSolution(), filePath, line, column,
             endLine, endColumn, ct).ConfigureAwait(false);
 
         var sorted = Sort(raw);

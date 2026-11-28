@@ -32,5 +32,5 @@ Use peek_il for IServiceCollection.Add
 Returns the disassembled MSIL. Useful for understanding non-obvious behavior — e.g. whether an extension method is thread-safe.
 
 :::note
-`peek_il` works for NuGet packages restored to the local package cache. The assembly must be referenced by at least one project in the active solution.
+`peek_il` works for NuGet packages restored to the local package cache. The assembly must be referenced by at least one project in the solution the call runs against: the active one, or the one named by `solution`.
 :::

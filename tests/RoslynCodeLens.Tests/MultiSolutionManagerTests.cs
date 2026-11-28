@@ -23,7 +23,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task CreateAsync_SinglePath_DelegatesEnsureLoaded()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        multi.EnsureLoaded(); // must not throw
+        multi.Resolve(null).EnsureLoaded(); // must not throw
         multi.Dispose();
     }
 
@@ -31,8 +31,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task GetLoadedSolution_ReturnsSolution()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        await multi.WaitForWarmupAsync();
-        Assert.False(multi.GetLoadedSolution().IsEmpty);
+        await multi.Resolve(null).WaitForWarmupAsync();
+        Assert.False(multi.Resolve(null).GetLoadedSolution().IsEmpty);
         multi.Dispose();
     }
 
@@ -40,8 +40,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task GetResolver_ReturnsResolver()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        await multi.WaitForWarmupAsync();
-        Assert.NotNull(multi.GetResolver());
+        await multi.Resolve(null).WaitForWarmupAsync();
+        Assert.NotNull(multi.Resolve(null).GetResolver());
         multi.Dispose();
     }
 
@@ -49,7 +49,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public void CreateEmpty_EnsureLoaded_Throws()
     {
         var multi = MultiSolutionManager.CreateEmpty();
-        var ex = Assert.Throws<McpToolException>((Action)(() => multi.EnsureLoaded()));
+        var ex = Assert.Throws<McpToolException>((Action)(() => multi.Resolve(null).EnsureLoaded()));
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
         multi.Dispose();
     }
@@ -58,7 +58,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task CreateAsync_DuplicatePaths_DoesNotThrow()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath, _solutionPath]);
-        multi.EnsureLoaded();
+        multi.Resolve(null).EnsureLoaded();
         multi.Dispose();
     }
 
@@ -120,8 +120,8 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task ForceReloadAsync_ReturnsPositiveProjectCount()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        await multi.WaitForWarmupAsync();
-        var (projectCount, elapsed) = await multi.ForceReloadAsync();
+        await multi.Resolve(null).WaitForWarmupAsync();
+        var (projectCount, elapsed) = await multi.Resolve(null).ForceReloadAsync();
         Assert.True(projectCount > 0);
         Assert.True(elapsed > TimeSpan.Zero);
         multi.Dispose();
@@ -150,7 +150,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
         var loaded = await multi.LoadSolutionAsync(_solutionPath);
 
         Assert.Contains("TestSolution", loaded, StringComparison.OrdinalIgnoreCase);
-        multi.EnsureLoaded(); // must not throw — solution is active
+        multi.Resolve(null).EnsureLoaded(); // must not throw — solution is active
         var list = multi.ListSolutions();
         Assert.Single(list);
         Assert.True(list[0].IsActive);
@@ -161,7 +161,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     public async Task LoadSolutionAsync_AlreadyLoaded_JustActivates()
     {
         var multi = await MultiSolutionManager.CreateAsync([_solutionPath]);
-        await multi.WaitForWarmupAsync();
+        await multi.Resolve(null).WaitForWarmupAsync();
 
         // Load the same solution again — should not throw, just activate
         var loaded = await multi.LoadSolutionAsync(_solutionPath);
@@ -177,13 +177,13 @@ public class MultiSolutionManagerTests : IAsyncLifetime
     {
         var multi = MultiSolutionManager.CreateEmpty();
         await multi.LoadSolutionAsync(_solutionPath);
-        await multi.WaitForWarmupAsync();
+        await multi.Resolve(null).WaitForWarmupAsync();
 
         // The resolver should work against the dynamically loaded solution
-        var resolver = multi.GetResolver();
+        var resolver = multi.Resolve(null).GetResolver();
         Assert.NotNull(resolver);
 
-        var solution = multi.GetLoadedSolution();
+        var solution = multi.Resolve(null).GetLoadedSolution();
         Assert.False(solution.IsEmpty);
         Assert.True(solution.Compilations.Count > 0);
         multi.Dispose();
@@ -270,7 +270,7 @@ public class MultiSolutionManagerTests : IAsyncLifetime
         // Load again
         await multi.LoadSolutionAsync(_solutionPath);
         Assert.Single(multi.ListSolutions());
-        multi.EnsureLoaded(); // must not throw
+        multi.Resolve(null).EnsureLoaded(); // must not throw
         multi.Dispose();
     }
 

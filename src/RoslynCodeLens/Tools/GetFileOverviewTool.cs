@@ -14,10 +14,12 @@ public static class GetFileOverviewTool
     public static async Task<FileOverview> Execute(
         MultiSolutionManager manager,
         [Description("Full path to the source file (.cs, or .razor/.cshtml)")] string filePath,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return await GetFileOverviewLogic.ExecuteAsync(context.Loaded, context.Resolver, filePath, ct).ConfigureAwait(false);
     }
 }

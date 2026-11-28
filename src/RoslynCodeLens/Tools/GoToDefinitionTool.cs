@@ -16,10 +16,12 @@ public static class GoToDefinitionTool
         MultiSolutionManager manager,
         [Description("Symbol name: simple type (MyClass), fully qualified (Namespace.MyClass), or member (MyClass.DoWork)")] string symbol,
         [Description("Maximum number of items to return (default: 50). Items are sorted by file, then line.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = GoToDefinitionLogic.Execute(context.Resolver, context.Metadata, symbol);
 
         var sorted = Sort(raw);
