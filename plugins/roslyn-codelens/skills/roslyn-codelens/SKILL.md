@@ -42,9 +42,9 @@ When a tool can't proceed, the response is `isError: true` with content carrying
 |---|---|---|
 | `SymbolNotFound` | type/method/property not resolved | `analyze_method`, `get_symbol_context`, `get_type_overview`, `get_type_hierarchy`, `generate_test_skeleton` |
 | `SolutionNotTrusted` | analyzers blocked until `trust_solution` is called | `get_diagnostics` (`includeAnalyzers: true`), `get_code_fixes` |
-| `AmbiguousMatch` | name matched multiple solutions; `details.matches` lists candidates | `set_active_solution`, `unload_solution` |
+| `AmbiguousMatch` | name matched multiple solutions; `details.matches` lists candidates | `set_active_solution`, `unload_solution`, any tool's `solution` argument |
 | `FileNotFound` | file path / baseline doesn't exist or isn't in solution | `get_file_overview`, `find_breaking_changes` |
-| `ProjectNotFound` | solution name didn't match | `set_active_solution`, `unload_solution` |
+| `ProjectNotFound` | solution name didn't match | `set_active_solution`, `unload_solution`, any tool's `solution` argument |
 | `InvalidArgument` | malformed / unsupported caller input | various |
 | `Internal` | unexpected; `message` carries exception text | fallback |
 
@@ -307,7 +307,8 @@ Limitations: abstract methods, interface instance members, and properties-as-who
 
 ### Solution Management
 - `list_solutions` — loaded solutions, which is active. Includes a `SkippedProjects` array per solution: projects MSBuildWorkspace could not load (legacy non-SDK-style csproj, missing files), with `Kind` and `Reason`.
-- `set_active_solution` — switch active solution by partial name.
+- `set_active_solution` — switch active solution by partial name. The active solution is shared by every caller.
+- **Several agents on one server:** pass `solution` on every call instead of `set_active_solution`. Every tool that works on a solution accepts it, matched by exact path, then file name, then substring. It never falls back to the active solution. Load with `load_solution(activate: false)` so the active solution stays as it is for other callers.
 - `load_solution` — load a `.sln`/`.slnx` at runtime. Returns a confirmation; when projects were skipped, the message summarises them and points to `list_solutions` for per-project reasons. For very large solutions (hundreds of projects) that take minutes to open, pass `background: true` to get a `taskId` back immediately and wait with one `get_task_status` call and `waitSeconds: 50` (it returns as soon as the task finishes; repeat only if it is still Running) instead of blocking or polling — the new solution becomes active only once that task succeeds, so other tools keep working against the current solution meanwhile.
 - `unload_solution` — free memory.
 - `rebuild_solution` — full reload (after `Directory.Build.props` changes, new analyzers/packages, or stale diagnostics).

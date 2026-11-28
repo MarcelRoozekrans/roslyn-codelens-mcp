@@ -75,7 +75,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **change_signature** — Add, remove, and reorder the parameters of a method or constructor, a positional record's primary constructor included, and rewrite every call site; handles named/optional arguments, `params` and extension methods, reports the overrides and interface implementations it cascaded to, and warns about record properties, deconstructions and positional patterns the rewrite does not reach
 - **list_solutions** — List all loaded solutions and which one is currently active
 - **set_active_solution** — Switch the active solution by partial name (all subsequent tools operate on it)
-- **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution
+- **load_solution** — Load an additional .sln/.slnx at runtime and make it the active solution; pass `activate: false` to load it without switching
 - **unload_solution** — Unload a loaded solution to free memory
 - **rebuild_solution** — Force a full reload of the analyzed solution
 - **start_background_task** — Queue a long-running tool (currently `rebuild_solution`) to run in the background; returns a `taskId` to poll
@@ -139,9 +139,9 @@ Error codes (switch on `code` to handle each):
 
 - `SymbolNotFound` — type / method / property could not be resolved.
 - `SolutionNotTrusted` — `get_diagnostics` or `get_code_fixes` requested analyzers but the solution hasn't been authorized via `trust_solution`.
-- `AmbiguousMatch` — `set_active_solution` / `unload_solution` matched multiple solutions; `details.matches` lists them.
+- `AmbiguousMatch` — `set_active_solution`, `unload_solution` or a tool's `solution` argument matched multiple solutions; `details.matches` lists them.
 - `FileNotFound` — file path or baseline doesn't exist (or isn't in any loaded project).
-- `ProjectNotFound` — solution name didn't match any loaded solution.
+- `ProjectNotFound` — the name given to `set_active_solution`, `unload_solution` or a tool's `solution` argument didn't match any loaded solution.
 - `InvalidArgument` — caller-supplied input was malformed, unsupported, or out of range.
 - `Internal` — unexpected error not modeled above; `message` carries the underlying exception text.
 
@@ -265,6 +265,23 @@ roslyn-codelens-mcp /path/to/A.sln /path/to/B.sln
 
 When multiple solutions are loaded, use `list_solutions` to see what's available and `set_active_solution("B")` to switch context. The first path is active by default.
 
+### Parallel agents on one server
+
+The active solution is shared by every caller. When several agents use one server, each on its own
+solution, pass `solution` on each call instead of switching. Every tool that works on a solution
+accepts it. It is matched by exact path first, then by exact file name, then by a case-insensitive
+substring, the same way `set_active_solution` matches. A name that matches nothing fails with
+`ProjectNotFound`, and a name that matches several fails with `AmbiguousMatch`. Neither falls back
+to the active solution.
+
+```
+load_solution(path: "/repos/orders/Orders.sln", activate: false)
+find_callers(symbol: "OrderService.Submit", solution: "Orders.sln")
+```
+
+`load_solution` with `activate: false` loads a solution without changing the active one. If no
+solution is active yet, it becomes active anyway.
+
 ### HTTP transport
 
 By default the server speaks stdio. Pass `--http` to expose the same tools over
@@ -289,7 +306,8 @@ roslyn-codelens-mcp /path/to/MySolution.sln --http --port 8080
 ```
 
 The HTTP endpoint binds to `127.0.0.1` only and is intended for **single-user, local use**: all
-connected clients share the same solution state (`set_active_solution` affects everyone), and
+connected clients share the same solution state (`set_active_solution` affects everyone; pass
+`solution` per call to avoid that, see [Parallel agents on one server](#parallel-agents-on-one-server)), and
 there is no authentication. `--host` can widen the binding, but the server will warn — its tools
 can read and modify source files, so only do this on networks you fully trust.
 
