@@ -97,6 +97,12 @@ public sealed class SolutionManager : IDisposable
         return new SolutionManager(LoadedSolution.Empty, null);
     }
 
+    /// <summary>
+    /// A manager over an already-compiled solution, with no solution file, file watcher or warm-up.
+    /// For tests that need a loaded solution without opening one through MSBuild.
+    /// </summary>
+    internal static SolutionManager CreateFromLoaded(LoadedSolution loaded) => new(loaded, null);
+
     private async Task WarmupAsync(SolutionLoader loader, Solution solution, IReadOnlyList<SkippedProject> skipped, IReadOnlyList<string> loadDiagnostics)
     {
         try

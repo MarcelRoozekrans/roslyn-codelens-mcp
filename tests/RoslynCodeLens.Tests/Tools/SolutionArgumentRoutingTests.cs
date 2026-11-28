@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Reflection;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using ModelContextProtocol.Server;
 using RoslynCodeLens;
 using RoslynCodeLens.BackgroundTasks;
@@ -59,15 +62,32 @@ public class SolutionArgumentRoutingTests
     public async Task NamedSolution_IsUsedWhenNoneIsActive(string tool)
     {
         using var multi = MultiSolutionManager.CreateForTesting(
-            new Dictionary<string, SolutionManager>(StringComparer.Ordinal) { [LoadedKey] = SolutionManager.CreateEmpty() },
+            new Dictionary<string, SolutionManager>(StringComparer.Ordinal) { [LoadedKey] = SolutionManager.CreateFromLoaded(OneProject()) },
             activeKey: null);
 
         var ex = await Invoke(tool, multi, solution: "Loaded.sln");
 
         // Without the argument this would fail with "No solution loaded". Anything else, including a
-        // tool error about the placeholder arguments on an empty solution, means the call reached it.
+        // tool error about the placeholder arguments, means the call reached the named solution.
         if (ex is McpToolException toolEx)
             Assert.DoesNotContain("No solution loaded", toolEx.Message, StringComparison.Ordinal);
+    }
+
+    // A compiled one-project solution in memory: loaded, so EnsureLoaded passes and each tool runs
+    // past it, but with no solution file, watcher or warm-up. Its documents have no path on disk.
+    private static LoadedSolution OneProject()
+    {
+        var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject("Placeholder", LanguageNames.CSharp)
+            .WithCompilationOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .AddMetadataReference(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+        project = project.AddDocument("Placeholder.cs", "public class Placeholder { public void Run() { } }").Project;
+        var compilation = project.GetCompilationAsync().GetAwaiter().GetResult()!;
+        return new LoadedSolution
+        {
+            Solution = project.Solution,
+            Compilations = new ConcurrentDictionary<ProjectId, Compilation> { [project.Id] = compilation },
+        };
     }
 
     private static IEnumerable<(MethodInfo Method, string Name)> Tools() =>
