@@ -193,7 +193,131 @@ public class DeadCodeFiltersTests
         Assert.Equal(DeadCodeFilters.Reason.TestMethod, DeadCodeFilters.Classify(method));
     }
 
+    [Theory]
+    [InlineData("Benchmark")]
+    [InlineData("GlobalSetup")]
+    [InlineData("GlobalCleanup")]
+    [InlineData("IterationSetup")]
+    [InlineData("IterationCleanup")]
+    [InlineData("Arguments")]
+    [InlineData("ArgumentsSource")]
+    [InlineData("BenchmarkCategory")]
+    public void Classify_BenchmarkMethodAttribute_ReturnsBenchmark(string attrName)
+    {
+        var src = $$"""
+            namespace BenchmarkDotNet.Attributes { class {{attrName}}Attribute : System.Attribute {} }
+            class C { [BenchmarkDotNet.Attributes.{{attrName}}] public void M() {} }
+            """;
+        var method = GetMethod(src, "C", "M");
+        Assert.Equal(DeadCodeFilters.Reason.Benchmark, DeadCodeFilters.Classify(method));
+    }
+
+    [Theory]
+    [InlineData("Params")]
+    [InlineData("ParamsSource")]
+    [InlineData("ParamsAllValues")]
+    public void Classify_BenchmarkParameterAttribute_ReturnsBenchmark(string attrName)
+    {
+        var src = $$"""
+            namespace BenchmarkDotNet.Attributes { class {{attrName}}Attribute : System.Attribute {} }
+            class C { [BenchmarkDotNet.Attributes.{{attrName}}] public int P { get; set; } }
+            """;
+        var property = GetType(src, "C").GetMembers("P").Single();
+        Assert.Equal(DeadCodeFilters.Reason.Benchmark, DeadCodeFilters.Classify(property));
+    }
+
+    [Fact]
+    public void Classify_BenchmarkCategoryOnClass_LeavesTheClassToIsBenchmarkType()
+    {
+        var src = """
+            class BenchmarkCategoryAttribute : System.Attribute {}
+            [BenchmarkCategory] class C { public void M() {} }
+            """;
+        Assert.Equal(DeadCodeFilters.Reason.None, DeadCodeFilters.Classify(GetType(src, "C")));
+        Assert.Equal(DeadCodeFilters.Reason.None, DeadCodeFilters.Classify(GetMethod(src, "C", "M")));
+    }
+
+    [Fact]
+    public void IsBenchmarkType_TypeWithBenchmarkMethodOrDerivedFromOne_ReturnsTrue()
+    {
+        var src = """
+            class BenchmarkAttribute : System.Attribute {}
+            abstract class BaseBenchmarks { [Benchmark] public void Run() {} }
+            class DerivedBenchmarks : BaseBenchmarks {}
+            class Plain { public void M() {} }
+            """;
+        Assert.True(DeadCodeFilters.IsBenchmarkType(GetType(src, "BaseBenchmarks")));
+        Assert.True(DeadCodeFilters.IsBenchmarkType(GetType(src, "DerivedBenchmarks")));
+        Assert.False(DeadCodeFilters.IsBenchmarkType(GetType(src, "Plain")));
+    }
+
+    [Theory]
+    [InlineData("[ArgumentsSource(\"Data\")]", "C.Data")]
+    [InlineData("[ArgumentsSource(nameof(Data))]", "C.Data")]
+    [InlineData("[ArgumentsSourceAttribute(\"Data\")]", "C.Data")]
+    [InlineData("[BenchmarkDotNet.Attributes.ArgumentsSource(\"Data\")]", "C.Data")]
+    [InlineData("[global::BenchmarkDotNet.Attributes.ArgumentsSource(\"Data\")]", "C.Data")]
+    [InlineData("[ArgumentsSource(DataName)]", "C.Data")]
+    [InlineData("[ArgumentsSource(\"Inherited\")]", "Base.Inherited")]
+    [InlineData("[ArgumentsSource(typeof(Other), \"Values\")]", "Other.Values")]
+    public void AddBenchmarkSourceMembers_ResolvesTheNamedMember(string attribute, string expected)
+    {
+        var referenced = CollectSourceMembers(attribute);
+        Assert.Equal([expected], referenced);
+    }
+
+    [Theory]
+    [InlineData("[ArgumentsSource(\"Missing\")]")]
+    [InlineData("[ArgumentsSource]")]
+    [InlineData("[ArgumentsSource(NotConstant)]")]
+    [InlineData("[Arguments(\"Data\")]")]
+    public void AddBenchmarkSourceMembers_NamesNoMember_AddsNothing(string attribute)
+    {
+        Assert.Empty(CollectSourceMembers(attribute));
+    }
+
     // --- Helpers ---
+
+    private static List<string> CollectSourceMembers(string attribute)
+    {
+        var src = $$"""
+            namespace BenchmarkDotNet.Attributes
+            {
+                class ArgumentsSourceAttribute : System.Attribute
+                {
+                    public ArgumentsSourceAttribute() {}
+                    public ArgumentsSourceAttribute(string name) {}
+                    public ArgumentsSourceAttribute(System.Type type, string name) {}
+                }
+                class ArgumentsAttribute : System.Attribute { public ArgumentsAttribute(params object[] values) {} }
+            }
+            namespace N
+            {
+                using BenchmarkDotNet.Attributes;
+                class Base { public int[] Inherited() => new int[0]; }
+                class Other { public static int[] Values() => new int[0]; }
+                class C : Base
+                {
+                    const string DataName = "Data";
+                    public static string NotConstant = "Data";
+                    public int[] Data() => new int[0];
+                    {{attribute}} public void M(int value) {}
+                }
+            }
+            """;
+        var compilation = Compile(src);
+        var tree = compilation.SyntaxTrees.Single();
+        var model = compilation.GetSemanticModel(tree);
+        var into = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+
+        foreach (var node in tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.AttributeSyntax>())
+            DeadCodeFilters.AddBenchmarkSourceMembers(node, model, into);
+
+        return into
+            .Select(s => $"{s.ContainingType.Name}.{s.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
 
     private static INamedTypeSymbol GetType(string source, string typeName)
     {

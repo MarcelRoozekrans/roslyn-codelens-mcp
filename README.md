@@ -63,7 +63,7 @@ A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/marcel
 - **find_disposable_misuse** — `IDisposable`/`IAsyncDisposable` instances not wrapped in `using`/`await using`/returned/assigned to field; severity error/warning per violation.
 - **find_large_classes** — Find oversized types by member or line count
 - **find_god_objects** — Types combining high size with high cross-namespace coupling; sharper signal than raw size for SRP violations
-- **find_unused_symbols** — Dead code detection via reference analysis. Auto-filters test methods (xUnit/NUnit/MSTest), MCP tool entry points, source-generator output, MEF-composed services, and interop-laid-out fields; filter counts surface in `summary.filteredOut`
+- **find_unused_symbols** — Dead code detection via reference analysis. Auto-filters test methods (xUnit/NUnit/MSTest), MCP tool entry points, source-generator output, MEF-composed services, interop-laid-out fields, and BenchmarkDotNet entry points; filter counts surface in `summary.filteredOut`
 - **get_project_health** — Composite audit aggregating 7 quality dimensions per project (complexity, large classes, naming, unused symbols, reflection, async violations, disposable misuse) with counts and top-N hotspots inline
 - **get_source_generators** — List source generators and their output per project
 - **get_generated_code** — Inspect generated source code from source generators
@@ -117,7 +117,7 @@ Tools that include a `summary` aggregate today:
 - `find_references` — `{ byProject: { name: count }, byKind: { kind: count } }`
 - `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
 - `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
-- `find_unused_symbols` — `{ byKind, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
+- `find_unused_symbols` — `{ byKind, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop, benchmark } }`
 - `find_naming_violations` — `{ byRule: {...} }`
 - `get_complexity_metrics` — `{ max, avg, overThreshold, maxCognitive }` (the first three describe the selected `metric`)
 

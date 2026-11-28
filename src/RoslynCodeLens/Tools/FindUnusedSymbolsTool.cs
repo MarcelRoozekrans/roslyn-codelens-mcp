@@ -11,7 +11,7 @@ public static class FindUnusedSymbolsTool
 
     [McpServerTool(Name = "find_unused_symbols"),
      Description("Find potentially unused types and members (dead code detection). Checks public symbols for references across the solution. " +
-                 "Filters out test methods, MCP tools, source-generator output, MEF-composed services, and interop-laid-out fields. " +
+                 "Filters out test methods, MCP tools, source-generator output, MEF-composed services, interop-laid-out fields, and BenchmarkDotNet entry points. " +
                  "Returns an envelope with items, totalCount, truncated, limit (default 500), and a summary including byKind + filteredOut counts.")]
     public static ToolListResult<UnusedSymbolInfo> Execute(
         MultiSolutionManager manager,
@@ -55,6 +55,7 @@ public static class FindUnusedSymbolsTool
             generated = filteredCounts.GetValueOrDefault("generated", 0),
             composition = filteredCounts.GetValueOrDefault("composition", 0),
             interop = filteredCounts.GetValueOrDefault("interop", 0),
+            benchmark = filteredCounts.GetValueOrDefault("benchmark", 0),
         };
 
         return new { byKind, filteredOut };

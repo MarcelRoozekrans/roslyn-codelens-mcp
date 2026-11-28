@@ -51,6 +51,15 @@ public static class FindUnusedSymbolsLogic
 
             if (!referencedSymbols.Contains(type))
             {
+                // BenchmarkDotNet discovers a benchmark class by reflection. Count it as filtered,
+                // then still walk its members so a dead helper inside it is reported.
+                if (DeadCodeFilters.IsBenchmarkType(type))
+                {
+                    counts[KeyFor(DeadCodeFilters.Reason.Benchmark)]++;
+                    CollectUnusedMembers(type, referencedSymbols, includeInternal, projectName, resolver, results, counts);
+                    continue;
+                }
+
                 results.Add(new UnusedSymbolInfo(
                     type.ToDisplayString(), type.TypeKind.ToString(),
                     typeFile, typeLine, projectName, resolver.IsGenerated(typeFile),
@@ -107,6 +116,7 @@ public static class FindUnusedSymbolsLogic
         ["generated"] = 0,
         ["composition"] = 0,
         ["interop"] = 0,
+        ["benchmark"] = 0,
     };
 
     private static string KeyFor(DeadCodeFilters.Reason reason) => reason switch
@@ -117,6 +127,7 @@ public static class FindUnusedSymbolsLogic
         DeadCodeFilters.Reason.Generated => "generated",
         DeadCodeFilters.Reason.Composition => "composition",
         DeadCodeFilters.Reason.Interop => "interop",
+        DeadCodeFilters.Reason.Benchmark => "benchmark",
         _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
 
@@ -153,6 +164,12 @@ public static class FindUnusedSymbolsLogic
 
                 foreach (var node in root.DescendantNodes())
                 {
+                    if (node is AttributeSyntax attribute)
+                    {
+                        DeadCodeFilters.AddBenchmarkSourceMembers(attribute, semanticModel, referencedSymbols);
+                        continue;
+                    }
+
                     ISymbol? symbol = node switch
                     {
                         IdentifierNameSyntax identifier => semanticModel.GetSymbolInfo(identifier).Symbol,
