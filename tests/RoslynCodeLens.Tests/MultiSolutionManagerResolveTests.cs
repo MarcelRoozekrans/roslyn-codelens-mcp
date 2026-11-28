@@ -56,4 +56,16 @@ public class MultiSolutionManagerResolveTests
         var ex = Assert.Throws<McpToolException>(() => multi.Resolve(null));
         Assert.Equal(ToolErrorCode.InvalidArgument, ex.Code);
     }
+
+    [Fact]
+    public void NextActiveKey_ActivateTrue_ReturnsLoaded() =>
+        Assert.Equal(BKey, MultiSolutionManager.NextActiveKey(AKey, BKey, activate: true));
+
+    [Fact]
+    public void NextActiveKey_ActivateFalse_KeepsCurrent() =>
+        Assert.Equal(AKey, MultiSolutionManager.NextActiveKey(AKey, BKey, activate: false));
+
+    [Fact]
+    public void NextActiveKey_ActivateFalseNoCurrent_ReturnsLoaded() =>
+        Assert.Equal(BKey, MultiSolutionManager.NextActiveKey(null, BKey, activate: false));
 }

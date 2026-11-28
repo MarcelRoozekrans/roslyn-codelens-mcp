@@ -10,6 +10,23 @@ public class LoadSolutionToolTests
     private readonly string _solutionPath = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolution", "TestSolution.slnx"));
 
+    private readonly string _altSolutionPath = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "Fixtures", "TestSolutionAlt", "TestSolutionAlt.slnx"));
+
+    [Fact]
+    public async Task Execute_ActivateFalse_KeepsActiveSolution()
+    {
+        using var manager = MultiSolutionManager.CreateEmpty();
+        using var store = new BackgroundTaskStore();
+
+        await LoadSolutionTool.Execute(manager, store, _solutionPath);
+        var result = (string)await LoadSolutionTool.Execute(manager, store, _altSolutionPath, activate: false);
+
+        Assert.Contains("TestSolutionAlt", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(_solutionPath, manager.ListSolutions().Single(s => s.IsActive).Path);
+        Assert.False(manager.Resolve("TestSolutionAlt.slnx").GetLoadedSolution().IsEmpty);
+    }
+
     [Fact]
     public async Task Execute_FileNotFound_ThrowsFileNotFoundException()
     {

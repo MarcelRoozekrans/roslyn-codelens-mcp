@@ -218,8 +218,10 @@ public sealed class MultiSolutionManager : IDisposable
     /// supplied, the previous workspace is disposed and reloaded fresh so the new filter
     /// takes effect (replace semantics — no coexisting filtered views).
     /// Returns the normalised path of the loaded solution.
+    /// With <paramref name="activate"/> false the active solution stays as it is (unless there is none),
+    /// so a caller that passes <c>solution</c> per call does not switch it for everyone else.
     /// </summary>
-    public async Task<string> LoadSolutionAsync(string solutionPath, ProjectFilter? filter = null)
+    public async Task<string> LoadSolutionAsync(string solutionPath, ProjectFilter? filter = null, bool activate = true)
     {
         var normalised = Path.GetFullPath(solutionPath);
 
@@ -236,7 +238,7 @@ public sealed class MultiSolutionManager : IDisposable
             else if (_managers.ContainsKey(normalised))
             {
                 // No-filter (or seedless filter) re-load of an already-loaded path → re-activate fast path.
-                _activeKey = normalised;
+                _activeKey = NextActiveKey(_activeKey, normalised, activate);
                 return normalised;
             }
         }
@@ -267,11 +269,19 @@ public sealed class MultiSolutionManager : IDisposable
             {
                 _managers[normalised] = manager;
             }
-            _activeKey = normalised;
+            _activeKey = NextActiveKey(_activeKey, normalised, activate);
         }
 
         return normalised;
     }
+
+    /// <summary>
+    /// The active key after loading <paramref name="loaded"/>. Without activation the current key stays,
+    /// except when nothing is active: no caller can depend on an empty key, and the server would
+    /// otherwise have a loaded solution but answer "No solution loaded" to every call without one.
+    /// </summary>
+    internal static string? NextActiveKey(string? current, string loaded, bool activate) =>
+        activate || current is null ? loaded : current;
 
     /// <summary>
     /// Unload a solution by partial name match, freeing its memory.
