@@ -56,6 +56,11 @@ public sealed class MultiSolutionManager : IDisposable
         return new MultiSolutionManager(managers, activeKey);
     }
 
+    /// <summary>Builds a manager over already-created solutions, for tests that need no file watcher.</summary>
+    internal static MultiSolutionManager CreateForTesting(
+        IReadOnlyDictionary<string, SolutionManager> managers, string? activeKey) =>
+        new(new ConcurrentDictionary<string, SolutionManager>(managers, StringComparer.OrdinalIgnoreCase), activeKey);
+
     public static MultiSolutionManager CreateEmpty() =>
         new(new ConcurrentDictionary<string, SolutionManager>(StringComparer.OrdinalIgnoreCase), null);
 
@@ -74,6 +79,27 @@ public sealed class MultiSolutionManager : IDisposable
                     new { activeKey = key });
             return m;
         }
+    }
+
+    /// <summary>
+    /// The solution a single tool call runs against. <paramref name="solution"/> is matched like
+    /// <see cref="SetActiveSolution"/>; null, empty or whitespace means the active solution, read once.
+    /// A tool resolves once and uses the result for the whole call, so a concurrent
+    /// <c>set_active_solution</c> or <c>load_solution</c> from another caller cannot switch it mid-call.
+    /// A named solution never falls back to the active one.
+    /// </summary>
+    public SolutionManager Resolve(string? solution)
+    {
+        if (string.IsNullOrWhiteSpace(solution))
+            return Active;
+
+        var key = SolutionMatcher.Match(_managers.Keys.ToList(), solution);
+        if (!_managers.TryGetValue(key, out var manager))
+            throw new McpToolException(
+                ToolErrorCode.ProjectNotFound,
+                $"Solution '{key}' was unloaded while resolving '{solution}'.",
+                new { name = solution });
+        return manager;
     }
 
     public void EnsureLoaded() => Active.EnsureLoaded();
@@ -143,11 +169,14 @@ public sealed class MultiSolutionManager : IDisposable
             .ToList();
     }
 
-    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects()
+    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects() => GetSkippedProjects(null);
+
+    /// <summary>Projects the loader skipped in the given solution (see <see cref="Resolve"/>); empty if it cannot be read.</summary>
+    public IReadOnlyList<SkippedProjectInfo> GetSkippedProjects(string? solution)
     {
         try
         {
-            return Active.GetLoadedSolution().SkippedProjects
+            return Resolve(solution).GetLoadedSolution().SkippedProjects
                 .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
                 .ToList();
         }
@@ -161,11 +190,14 @@ public sealed class MultiSolutionManager : IDisposable
     /// Reference-resolution failures on the active solution (projects that opened with
     /// dropped references). Non-empty means results from those projects may be incomplete.
     /// </summary>
-    public IReadOnlyList<string> GetActiveLoadDiagnostics()
+    public IReadOnlyList<string> GetActiveLoadDiagnostics() => GetLoadDiagnostics(null);
+
+    /// <summary>Reference-resolution failures on the given solution (see <see cref="Resolve"/>).</summary>
+    public IReadOnlyList<string> GetLoadDiagnostics(string? solution)
     {
         try
         {
-            return Active.GetLoadedSolution().LoadDiagnostics;
+            return Resolve(solution).GetLoadedSolution().LoadDiagnostics;
         }
         catch
         {
