@@ -69,9 +69,11 @@ public static class FindUnusedSymbolsLogic
         string projectName, SymbolResolver resolver, List<UnusedSymbolInfo> results,
         Dictionary<string, int> counts)
     {
+        var interfaceImplementations = CollectInterfaceImplementations(type, resolver.SymbolComparer);
+
         foreach (var member in type.GetMembers())
         {
-            if (ShouldSkipMember(member, type, includeInternal, resolver.SymbolComparer)) continue;
+            if (ShouldSkipMember(member, includeInternal, interfaceImplementations)) continue;
 
             var memberReason = DeadCodeFilters.Classify(member);
             if (memberReason != DeadCodeFilters.Reason.None)
@@ -244,7 +246,7 @@ public static class FindUnusedSymbolsLogic
     }
 
     private static bool ShouldSkipMember(
-        ISymbol member, INamedTypeSymbol containingType, bool includeInternal, SymbolSignatureComparer comparer)
+        ISymbol member, bool includeInternal, HashSet<ISymbol>? interfaceImplementations)
     {
         // Skip implicitly declared
         if (member.IsImplicitlyDeclared)
@@ -267,31 +269,41 @@ public static class FindUnusedSymbolsLogic
             // Skip override methods
             if (method.IsOverride)
                 return true;
-
-            // Skip interface implementation members
-            foreach (var iface in containingType.AllInterfaces)
-            {
-                var impl = containingType.FindImplementationForInterfaceMember(method);
-                if (impl != null && comparer.Equals(impl, method))
-                    return true;
-            }
         }
 
         // Skip override properties
-        if (member is IPropertySymbol prop)
-        {
-            if (prop.IsOverride)
-                return true;
+        if (member is IPropertySymbol { IsOverride: true })
+            return true;
 
-            // Skip interface implementation properties
-            foreach (var iface in containingType.AllInterfaces)
+        // Skip implicit interface implementations: call sites bind to the interface member, so the
+        // implementation itself is never referenced. Explicit implementations are private and skipped above.
+        if (interfaceImplementations is not null && interfaceImplementations.Contains(member))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// The members of <paramref name="type"/> that implement a member of one of its interfaces, or
+    /// <see langword="null"/> when it implements none. FindImplementationForInterfaceMember takes the
+    /// interface member, not the implementing one, so the map is built from the interface side once per type.
+    /// </summary>
+    private static HashSet<ISymbol>? CollectInterfaceImplementations(INamedTypeSymbol type, SymbolSignatureComparer comparer)
+    {
+        if (type.AllInterfaces.IsEmpty)
+            return null;
+
+        var implementations = new HashSet<ISymbol>(comparer);
+        foreach (var iface in type.AllInterfaces)
+        {
+            foreach (var interfaceMember in iface.GetMembers())
             {
-                var impl = containingType.FindImplementationForInterfaceMember(prop);
-                if (impl != null && comparer.Equals(impl, prop))
-                    return true;
+                var impl = type.FindImplementationForInterfaceMember(interfaceMember);
+                if (impl != null)
+                    implementations.Add(impl);
             }
         }
 
-        return false;
+        return implementations;
     }
 }

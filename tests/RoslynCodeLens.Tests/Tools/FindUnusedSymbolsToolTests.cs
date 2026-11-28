@@ -62,6 +62,34 @@ public class FindUnusedSymbolsToolTests
         Assert.DoesNotContain(items, i => i.SymbolName.Contains("ICrossProjectOnly", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("TestLib.Square.Area")]
+    [InlineData("TestLib.Square.Scale")]
+    [InlineData("TestLib.Square.Changed")]
+    public void FindUnusedSymbols_ImplicitInterfaceImplementation_IsNotReported(string symbolName)
+    {
+        // Every call site binds to IShape's member, so Square's members are only reached through the interface.
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.DoesNotContain(items, i => string.Equals(i.SymbolName, symbolName, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FindUnusedSymbols_ImplementationOfMetadataInterface_IsNotReported()
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.DoesNotContain(items, i => string.Equals(i.SymbolName, "TestLib.SquareResource.Dispose", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FindUnusedSymbols_MemberOutsideTheInterface_IsStillReported()
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.Contains(items, i => string.Equals(i.SymbolName, "TestLib.Square.NotPartOfTheShapeContract", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void BuildSummary_GroupsByKind()
     {
