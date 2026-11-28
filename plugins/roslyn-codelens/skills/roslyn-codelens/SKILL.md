@@ -27,7 +27,7 @@ Tools that include a `summary` aggregate:
 - `find_references` — `{ byProject: { name: count }, byKind: { kind: count } }`
 - `find_callers`, `find_attribute_usages` — `{ byProject: { name: count } }`
 - `search_symbols`, `find_reflection_usage` — `{ byKind: {...} }`
-- `find_unused_symbols` — `{ byKind: {...}, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop } }`
+- `find_unused_symbols` — `{ byKind: {...}, filteredOut: { testMethod, testContainer, mcpTool, generated, composition, interop, benchmark } }`
 - `find_naming_violations` — `{ byRule: {...} }`
 - `get_complexity_metrics` — `{ max, avg, overThreshold, maxCognitive }` — `max`/`avg`/`overThreshold` describe whichever metric `metric` selected; `maxCognitive` is always the cognitive one
 - `resolve_stack_trace` — `{ byOrigin: { source, metadata, unresolved }, exceptions, skippedFrameLike }` — `skippedFrameLike` counts frame-like-but-unparseable lines (also present in items as `Kind="unknown"`)
@@ -234,7 +234,7 @@ Solutions passed on the CLI at server startup are auto-trusted in session scope 
 - Inline variable → *"Inline variable"*
 
 ### Code Quality Analysis
-- `find_unused_symbols` — dead code (reference-based). Auto-filters test methods, MCP tool entry points, source-generator output, MEF-composed services, and interop-laid-out fields; counts surface in `summary.filteredOut`.
+- `find_unused_symbols` — dead code (reference-based). Auto-filters test methods, MCP tool entry points, source-generator output, MEF-composed services, interop-laid-out fields, and BenchmarkDotNet entry points; counts surface in `summary.filteredOut`.
 - `get_complexity_metrics` — complexity per member (methods, constructors, properties, indexers, operators). Reports **three** numbers per row:
   - `complexity` — cyclomatic: how many independent paths run through the member. **Starts at 1**, so a straight-line method scores 1. Good for "how many tests do I need".
   - `cognitive` — how hard the member is to *follow*: nested structures cost more than flat ones, a whole `switch` costs 1 rather than one per case, and `else`/`else if` cost 1 without a nesting penalty. **Starts at 0** — a `cognitive` of 0 is not a bug, it means nothing branches.

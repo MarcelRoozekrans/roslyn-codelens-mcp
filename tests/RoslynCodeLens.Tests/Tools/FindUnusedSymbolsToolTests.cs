@@ -94,6 +94,7 @@ public class FindUnusedSymbolsToolTests
             ["generated"] = 0,
             ["composition"] = 0,
             ["interop"] = 0,
+            ["benchmark"] = 3,
         };
 
         var summary = FindUnusedSymbolsTool.BuildSummary(items, filteredCounts);
@@ -106,6 +107,7 @@ public class FindUnusedSymbolsToolTests
         Assert.Contains("\"generated\":0", json, StringComparison.Ordinal);
         Assert.Contains("\"composition\":0", json, StringComparison.Ordinal);
         Assert.Contains("\"interop\":0", json, StringComparison.Ordinal);
+        Assert.Contains("\"benchmark\":3", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -168,10 +170,62 @@ public class FindUnusedSymbolsToolTests
         Assert.True(counts["mcpTool"] >= 1, "Expected SyntheticMcpTool to be filtered");
     }
 
+    [Theory]
+    [InlineData("SyntheticBenchmarks.Size")]
+    [InlineData("SyntheticBenchmarks.Flag")]
+    [InlineData("SyntheticBenchmarks.FromNameofParams")]
+    [InlineData("SyntheticBenchmarks.FromStringParams")]
+    [InlineData("SyntheticBenchmarks.Setup")]
+    [InlineData("SyntheticBenchmarks.Cleanup")]
+    [InlineData("SyntheticBenchmarks.IterSetup")]
+    [InlineData("SyntheticBenchmarks.IterCleanup")]
+    [InlineData("SyntheticBenchmarks.Run")]
+    [InlineData("SyntheticBenchmarks.WithArguments")]
+    [InlineData("SyntheticBenchmarks.FromNameofArgs")]
+    [InlineData("SyntheticBenchmarks.FromStringArgs")]
+    [InlineData("SyntheticBenchmarks.FromOtherType")]
+    [InlineData("DiscoveredBenchmarks.Discovered")]
+    public void BenchmarkEntryPoints_NeverFlaggedUnused(string member)
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.DoesNotContain(items, i => string.Equals(i.SymbolName, "TestLib.FilterFixtures." + member, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("SyntheticBenchmarks.NameofParamValues")]
+    [InlineData("SyntheticBenchmarks.StringParamValues")]
+    [InlineData("SyntheticBenchmarks.NameofArgs")]
+    [InlineData("SyntheticBenchmarks.StringArgs")]
+    [InlineData("ExternalBenchmarkArgs.Values")]
+    public void BenchmarkSourceMembers_NeverFlaggedUnused(string member)
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+        Assert.DoesNotContain(items, i => string.Equals(i.SymbolName, "TestLib.FilterFixtures." + member, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BenchmarkClassNothingReferences_IsNotReportedButItsHelpersAre()
+    {
+        var (items, _) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        Assert.DoesNotContain(items, i => string.Equals(i.SymbolName, "TestLib.FilterFixtures.DiscoveredBenchmarks", StringComparison.Ordinal));
+        Assert.Contains(items, i => string.Equals(i.SymbolName, "TestLib.FilterFixtures.DiscoveredBenchmarks.UnusedBenchmarkHelper", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FilteredOut_FixtureProject_CountsBenchmarkMembers()
+    {
+        var (_, counts) = FindUnusedSymbolsLogic.Execute(_loaded, _resolver, "TestLib", false);
+
+        // SyntheticBenchmarks: 4 params members, 4 setup/cleanup methods, 5 benchmark methods.
+        // DiscoveredBenchmarks: the unreferenced class and its benchmark method.
+        Assert.Equal(15, counts["benchmark"]);
+    }
+
     private static IReadOnlyDictionary<string, int> EmptyCounts()
         => new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["testMethod"] = 0, ["testContainer"] = 0, ["mcpTool"] = 0,
-            ["generated"] = 0, ["composition"] = 0, ["interop"] = 0,
+            ["generated"] = 0, ["composition"] = 0, ["interop"] = 0, ["benchmark"] = 0,
         };
 }
