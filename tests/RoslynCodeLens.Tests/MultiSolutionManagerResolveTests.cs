@@ -68,4 +68,30 @@ public class MultiSolutionManagerResolveTests
     [Fact]
     public void NextActiveKey_ActivateFalseNoCurrent_ReturnsLoaded() =>
         Assert.Equal(BKey, MultiSolutionManager.NextActiveKey(null, BKey, activate: false));
+
+    [Fact]
+    public async Task LoadSolutionAsync_FailedFilteredReload_LeavesNoDanglingActiveKey()
+    {
+        // A filtered re-load drops the old workspace before opening the new one. If the new one fails,
+        // the active key must not keep pointing at a solution that is no longer loaded.
+        var dir = Directory.CreateTempSubdirectory("codelens-606-");
+        try
+        {
+            var bad = Path.Combine(dir.FullName, "Bad.sln");
+            await File.WriteAllTextAsync(bad, "not a solution file");
+            using var multi = MultiSolutionManager.CreateForTesting(
+                new Dictionary<string, SolutionManager>(StringComparer.Ordinal) { [bad] = SolutionManager.CreateEmpty() }, bad);
+
+            await Assert.ThrowsAsync<McpToolException>(() =>
+                multi.LoadSolutionAsync(bad, new ProjectFilter(["Anything"], []), activate: false));
+
+            var ex = Assert.Throws<McpToolException>(() => multi.Resolve(null));
+            Assert.StartsWith("No solution loaded", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
 }
+

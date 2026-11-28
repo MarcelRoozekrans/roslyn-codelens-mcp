@@ -24,9 +24,10 @@ public static class LoadSolutionTool
                  "For very large solutions (hundreds of projects) that take minutes to open, pass " +
                  "`background: true` to return a taskId immediately instead of blocking; wait on it with " +
                  "get_task_status and waitSeconds until it succeeds (its result carries the loaded/skipped counts). " +
-                 "The new solution only becomes active once the background load finishes, so other " +
+                 "Unless `activate` is false, the new solution only becomes active once the background load finishes, so other " +
                  "tools keep working against the current solution meanwhile. " +
-                 "Pass `activate: false` to load without switching the active solution for other callers.")]
+                 "Pass `activate: false` to load without switching the active solution for other callers. " +
+                 "A filtered re-load of an already-loaded solution unloads it until the new load finishes.")]
     public static async Task<object> Execute(
         MultiSolutionManager manager,
         BackgroundTaskStore store,

@@ -246,12 +246,24 @@ public sealed class MultiSolutionManager : IDisposable
         // Dispose the replaced manager OUTSIDE the lock to avoid blocking other callers.
         toDispose?.Dispose();
 
-        var manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
+        SolutionManager manager;
+        try
+        {
+            manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
+        }
+        catch
+        {
+            DropDanglingActiveKey();
+            throw;
+        }
 
         if (manager.HasLoadFailure)
         {
             var message = manager.LoadFailureMessage!;
             manager.Dispose();
+            // A failed filtered re-load has already dropped the previous workspace; the active key
+            // must not keep pointing at it.
+            DropDanglingActiveKey();
             throw new McpToolException(
                 ToolErrorCode.InvalidArgument,
                 message,
@@ -273,6 +285,19 @@ public sealed class MultiSolutionManager : IDisposable
         }
 
         return normalised;
+    }
+
+    /// <summary>
+    /// Moves the active key off a solution that is no longer loaded, the same way unloading the active
+    /// solution does: to another loaded solution if there is one, otherwise to none.
+    /// </summary>
+    private void DropDanglingActiveKey()
+    {
+        lock (_lock)
+        {
+            if (_activeKey is not null && !_managers.ContainsKey(_activeKey))
+                _activeKey = _managers.Keys.FirstOrDefault();
+        }
     }
 
     /// <summary>

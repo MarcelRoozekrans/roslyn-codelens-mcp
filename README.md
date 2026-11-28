@@ -269,7 +269,7 @@ When multiple solutions are loaded, use `list_solutions` to see what's available
 
 The active solution is shared by every caller. When several agents use one server, each on its own
 solution, pass `solution` on each call instead of switching. Every tool that works on a solution
-accepts it. It is matched by exact path first, then by exact file name, then by a case-insensitive
+accepts it. It is matched by absolute path first, then by exact file name, then by a case-insensitive
 substring, the same way `set_active_solution` matches. A name that matches nothing fails with
 `ProjectNotFound`, and a name that matches several fails with `AmbiguousMatch`. Neither falls back
 to the active solution.
