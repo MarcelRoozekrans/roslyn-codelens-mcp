@@ -178,6 +178,72 @@ public class FindAsyncViolationsToolTests
     }
 
     [Fact]
+    public void CompletionGuard_ValueTaskFastPath_ReportsOnlyTheSlowPath()
+    {
+        // The repro from issue #613: the GetResult behind IsCompletedSuccessfully does not block.
+        var result = FindAsyncViolationsLogic.Execute(_loaded, _resolver);
+
+        var hit = Assert.Single(ViolationsIn(result, "ValueTaskFastPath"));
+        Assert.Equal(AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult, hit.Pattern);
+        Assert.StartsWith("Slow(vt)", hit.Snippet, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("GuardedIfIsCompleted")]
+    [InlineData("GuardedAndChain")]
+    [InlineData("GuardedStatusRanToCompletion")]
+    [InlineData("GuardedStatusReversed")]
+    [InlineData("GuardedConditionalTrueArm")]
+    [InlineData("GuardedConditionalFalseArm")]
+    [InlineData("GuardedEarlyReturn")]
+    [InlineData("GuardedEarlyThrowBlock")]
+    [InlineData("GuardedEarlyExitOrChain")]
+    [InlineData("GuardedEarlyExitOuterBlock")]
+    [InlineData("GuardedContinue")]
+    [InlineData("GuardedElseBranch")]
+    [InlineData("GuardedConfigureAwait")]
+    [InlineData("GuardedAwaiterLocal")]
+    [InlineData("GuardedField")]
+    [InlineData("GuardedLogicalAnd")]
+    [InlineData("GuardedLogicalOr")]
+    public void CompletionGuard_SkipsReadOfCompletedReceiver(string methodName)
+    {
+        var result = FindAsyncViolationsLogic.Execute(_loaded, _resolver);
+
+        Assert.Empty(ViolationsIn(result, methodName));
+    }
+
+    [Theory]
+    [InlineData("UnguardedWrongReceiver", AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult)]
+    [InlineData("UnguardedOrChain", AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult)]
+    [InlineData("UnguardedNegatedOnTrueBranch", AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult)]
+    [InlineData("UnguardedConditionalFalseArm", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedElseOfPositiveGuard", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedStatusOtherValue", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedIfWithoutExit", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedEarlyExitWithElse", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedEmptyExitBlock", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedReadBeforeExit", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedReassignedInBranch", AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult)]
+    [InlineData("UnguardedReassignedAfterExit", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedInsideLambda", AsyncViolationPattern.SyncOverAsyncResult)]
+    [InlineData("UnguardedAwaiterFromCall", AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult)]
+    [InlineData("UnguardedProperty", AsyncViolationPattern.SyncOverAsyncResult)]
+    public void CompletionGuard_StillReportsReadTheGuardDoesNotCover(string methodName, AsyncViolationPattern pattern)
+    {
+        var result = FindAsyncViolationsLogic.Execute(_loaded, _resolver);
+
+        var hit = Assert.Single(ViolationsIn(result, methodName));
+        Assert.Equal(pattern, hit.Pattern);
+        Assert.Equal(AsyncViolationSeverity.Error, hit.Severity);
+    }
+
+    private static List<AsyncViolation> ViolationsIn(FindAsyncViolationsResult result, string methodName) =>
+        result.Violations
+            .Where(v => string.Equals(v.ContainingMethod, "CompletionGuards." + methodName, StringComparison.Ordinal))
+            .ToList();
+
+    [Fact]
     public void LinkedFile_InTwoCompilations_ReportsOneViolation()
     {
         // One physical file, two compilations — a linked file, or equivalently one project

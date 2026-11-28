@@ -92,7 +92,9 @@ public static class FindAsyncViolationsLogic
                         memberAccess.Parent is not InvocationExpressionSyntax)
                     {
                         var receiverType = semanticModel.GetTypeInfo(memberAccess.Expression).Type;
-                        if (HasTaskResultProperty(receiverType, taskSymbol, taskGenericSymbol, valueTaskGenericSymbol))
+                        // A read guarded by a completion check does not block: issue #613.
+                        if (HasTaskResultProperty(receiverType, taskSymbol, taskGenericSymbol, valueTaskGenericSymbol) &&
+                            !AsyncCompletionGuard.IsResultGuarded(memberAccess, semanticModel))
                         {
                             violations.Add(BuildViolation(
                                 AsyncViolationPattern.SyncOverAsyncResult,
@@ -118,7 +120,8 @@ public static class FindAsyncViolationsLogic
                                 projectName,
                                 Snippet(invocation.ToString())));
                         }
-                        else if (IsGetResultOnAwaiter(invocation, symbol))
+                        else if (IsGetResultOnAwaiter(invocation, symbol) &&
+                                 !AsyncCompletionGuard.IsGetResultGuarded(invocation, semanticModel))
                         {
                             violations.Add(BuildViolation(
                                 AsyncViolationPattern.SyncOverAsyncGetAwaiterGetResult,
