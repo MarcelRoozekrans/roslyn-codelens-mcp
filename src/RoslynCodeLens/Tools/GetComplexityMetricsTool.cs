@@ -23,12 +23,14 @@ public static class GetComplexityMetricsTool
         [Description("Which metric drives the threshold and the sort: 'cyclomatic' (default) or 'cognitive'. Both are always reported.")]
             string metric = "cyclomatic",
         [Description("Maximum number of items to return (default: 100). Items are sorted by the selected metric desc (worst first).")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
         var kind = ParseMetric(metric);
 
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = GetComplexityMetricsLogic.Execute(context.Loaded, context.Resolver, project, threshold, kind);
 
         var sorted = Sort(raw, kind);

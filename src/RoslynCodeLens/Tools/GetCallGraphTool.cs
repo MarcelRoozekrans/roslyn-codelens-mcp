@@ -31,10 +31,12 @@ public static class GetCallGraphTool
         int maxDepth = 3,
         [Description("Hard cap on total visited nodes. Default 500.")]
         int maxNodes = 500,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken cancellationToken = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetCallGraphLogic.ExecuteAsync(
             context.Loaded,
             context.Resolver,

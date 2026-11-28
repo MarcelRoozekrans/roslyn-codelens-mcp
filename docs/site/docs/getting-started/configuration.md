@@ -34,7 +34,10 @@ The two tools are not interchangeable: `load_solution` takes a **path** and open
 a solution the server has not seen; `set_active_solution` takes a partial,
 case-insensitive **name** and only switches between solutions already loaded.
 
-Only one solution is "active" at a time. All tool calls operate on the active solution.
+Only one solution is "active" at a time, and it is shared by every caller. Tool calls operate on
+the active solution unless they pass the optional `solution` argument, which takes a name matched
+the same way as `set_active_solution`. Use it when several agents share one server. `load_solution`
+with `activate: false` loads a solution without switching the active one.
 
 ## Automatic hot reload
 

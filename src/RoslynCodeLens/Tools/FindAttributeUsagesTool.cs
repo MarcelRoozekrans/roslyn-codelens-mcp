@@ -16,10 +16,12 @@ public static class FindAttributeUsagesTool
         MultiSolutionManager manager,
         [Description("Attribute name to search for (with or without 'Attribute' suffix)")] string attribute,
         [Description("Maximum number of items to return (default: 500). Items are sorted by file, then line.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = FindAttributeUsagesLogic.Execute(
             context.Loaded,
             context.Resolver,

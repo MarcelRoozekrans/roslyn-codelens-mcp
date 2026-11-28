@@ -10,16 +10,19 @@ public static class GetPublicApiSurfaceTool
     [McpServerTool(Name = "get_public_api_surface")]
     [Description(
         "Enumerate every public and protected type and member declared in production " +
-        "projects of the active solution. Returns a deterministically-sorted (name ASC) " +
+        "projects of the solution (the active one unless `solution` names another). Returns a deterministically-sorted (name ASC) " +
         "flat list of API entries (kind, fully-qualified name, accessibility, project, " +
         "file, line) plus per-kind/per-project/per-accessibility summary buckets. " +
         "Skips test projects, generated code, compiler-generated members, internal " +
         "symbols, and protected members on sealed types (unreachable). Inherited " +
         "members are not repeated under derived types — only declared members appear.")]
-    public static GetPublicApiSurfaceResult Execute(MultiSolutionManager manager)
+    public static GetPublicApiSurfaceResult Execute(
+        MultiSolutionManager manager,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetPublicApiSurfaceLogic.Execute(
             context.Loaded,
             context.Resolver);

@@ -15,10 +15,13 @@ public static class FindAsyncViolationsTool
         "tasks. Returns a summary plus a per-violation list (severity error/warning, " +
         "location, containing method, snippet). Skips test projects and generated " +
         "code. Static analysis only — no fix suggestions.")]
-    public static FindAsyncViolationsResult Execute(MultiSolutionManager manager)
+    public static FindAsyncViolationsResult Execute(
+        MultiSolutionManager manager,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindAsyncViolationsLogic.Execute(
             context.Loaded,
             context.Resolver);

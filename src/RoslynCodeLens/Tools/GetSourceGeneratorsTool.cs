@@ -17,10 +17,12 @@ public static class GetSourceGeneratorsTool
         [Description("Optional project name filter")] string? project = null,
         [Description("Maximum number of items to return (default: 100). Items are sorted by project, then generator name.")]
             int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = await GetSourceGeneratorsLogic.ExecuteAsync(context.Loaded, project, ct).ConfigureAwait(false);
 
         var sorted = Sort(raw);

@@ -16,10 +16,12 @@ public static class GetDiRegistrationsTool
         MultiSolutionManager manager,
         [Description("Type name to search for (simple or fully qualified)")] string symbol,
         [Description("Maximum number of items to return (default: 200). Items are sorted by service name.")]
-            int? limit = null)
+            int? limit = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         var raw = GetDiRegistrationsLogic.Execute(context.Loaded, context.Resolver, symbol);
 
         var sorted = Sort(raw);

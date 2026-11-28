@@ -18,10 +18,13 @@ public static class FindDisposableMisuseTool
         "Scope: methods only (not constructors/accessors/operators); ownership transfer " +
         "via method/constructor argument is not detected. " +
         "Static analysis only — no fix suggestions.")]
-    public static FindDisposableMisuseResult Execute(MultiSolutionManager manager)
+    public static FindDisposableMisuseResult Execute(
+        MultiSolutionManager manager,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return FindDisposableMisuseLogic.Execute(
             context.Loaded,
             context.Resolver);

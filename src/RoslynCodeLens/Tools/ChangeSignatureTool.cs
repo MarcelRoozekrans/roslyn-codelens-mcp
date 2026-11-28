@@ -42,14 +42,16 @@ public static class ChangeSignatureTool
         [Description("Parameter edits applied in order. Each has `kind` (`remove`, `reorder` or `add`) plus: `parameter` for `remove`; `order` for `reorder`; `name`, `type`, `callSiteValue` and optional `defaultValue` for `add`")] SignatureOperation[] operations,
         [Description("Preview only — return edits without writing to disk (default: true)")] bool preview = true,
         [Description("Apply even when Conflicts are reported (default: false)")] bool force = false,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return await ChangeSignatureLogic.ExecuteAsync(
             context.Loaded, context.Resolver, method, operations, preview, force,
             // After a successful apply, push the written texts into the in-memory snapshot so
             // follow-up queries see the new signature immediately (no watcher-debounce window).
-            manager.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
+            sm.CommitDocumentTextsAsync, ct).ConfigureAwait(false);
     }
 }

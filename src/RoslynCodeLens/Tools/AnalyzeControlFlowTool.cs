@@ -16,10 +16,12 @@ public static class AnalyzeControlFlowTool
         [Description("Full path to the C# source file")] string filePath,
         [Description("First line of the statement range (1-based)")] int startLine,
         [Description("Last line of the statement range (1-based)")] int endLine,
+        [Description(SolutionArgument.Description)] string? solution = null,
         CancellationToken ct = default)
     {
-        manager.EnsureLoaded();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
         return await AnalyzeControlFlowLogic.ExecuteAsync(
-            manager.GetLoadedSolution(), filePath, startLine, endLine, ct).ConfigureAwait(false);
+            sm.GetLoadedSolution(), filePath, startLine, endLine, ct).ConfigureAwait(false);
     }
 }

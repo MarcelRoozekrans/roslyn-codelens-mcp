@@ -20,10 +20,12 @@ public static class GetOverloadsTool
     public static GetOverloadsResult Execute(
         MultiSolutionManager manager,
         [Description("Method or constructor symbol (e.g. 'Greeter.Greet', 'Greeter.Greeter', 'System.Console.WriteLine').")]
-        string symbol)
+        string symbol,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetOverloadsLogic.Execute(
             context.Resolver,
             context.Metadata,

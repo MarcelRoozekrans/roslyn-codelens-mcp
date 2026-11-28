@@ -12,7 +12,7 @@ public static class SetActiveSolutionTool
                  "Returns the full path of the newly active solution.")]
     public static string Execute(
         MultiSolutionManager manager,
-        [Description("Partial or full solution name/path to match")] string name)
+        [Description("Solution to match: an absolute path matches exactly; otherwise an exact file name (e.g. `App.sln`) wins, then a case-insensitive substring of the path")] string name)
     {
         return manager.SetActiveSolution(name);
     }

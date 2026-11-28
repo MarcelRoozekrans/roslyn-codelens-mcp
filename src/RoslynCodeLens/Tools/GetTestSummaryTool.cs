@@ -22,10 +22,12 @@ public static class GetTestSummaryTool
     public static GetTestSummaryResult Execute(
         MultiSolutionManager manager,
         [Description("Optional: restrict to a single test project by name (case-insensitive).")]
-        string? project = null)
+        string? project = null,
+        [Description(SolutionArgument.Description)] string? solution = null)
     {
-        manager.EnsureLoaded();
-        var context = manager.GetAnalysisContext();
+        var sm = manager.Resolve(solution);
+        sm.EnsureLoaded();
+        var context = sm.GetAnalysisContext();
         return GetTestSummaryLogic.Execute(
             context.Loaded,
             context.Resolver,

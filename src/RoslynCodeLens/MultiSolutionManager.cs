@@ -56,6 +56,11 @@ public sealed class MultiSolutionManager : IDisposable
         return new MultiSolutionManager(managers, activeKey);
     }
 
+    /// <summary>Builds a manager over already-created solutions, for tests that need no file watcher.</summary>
+    internal static MultiSolutionManager CreateForTesting(
+        IReadOnlyDictionary<string, SolutionManager> managers, string? activeKey) =>
+        new(new ConcurrentDictionary<string, SolutionManager>(managers, StringComparer.OrdinalIgnoreCase), activeKey);
+
     public static MultiSolutionManager CreateEmpty() =>
         new(new ConcurrentDictionary<string, SolutionManager>(StringComparer.OrdinalIgnoreCase), null);
 
@@ -76,30 +81,23 @@ public sealed class MultiSolutionManager : IDisposable
         }
     }
 
-    public void EnsureLoaded() => Active.EnsureLoaded();
-    public LoadedSolution GetLoadedSolution() => Active.GetLoadedSolution();
-    public SymbolResolver GetResolver() => Active.GetResolver();
-    public MetadataSymbolResolver GetMetadataResolver() => Active.GetMetadataResolver();
-
     /// <summary>
-    /// An internally-consistent (solution, resolver, metadata) snapshot from the active solution.
-    /// Tools needing more than one of these must use this rather than the individual getters,
-    /// which each rebuild independently and can diverge if a rebuild races between two calls.
+    /// The solution a single tool call runs against. <paramref name="solution"/> is matched like
+    /// <see cref="SetActiveSolution"/>; null, empty or whitespace means the active solution, read once.
+    /// A tool resolves once and uses the result for the whole call, so a concurrent
+    /// <c>set_active_solution</c> or <c>load_solution</c> from another caller cannot switch it mid-call.
+    /// A named solution never falls back to the active one.
     /// </summary>
-    public SolutionAnalysisContext GetAnalysisContext() => Active.GetAnalysisContext();
-    public IlDisassemblerAdapter GetIlDisassembler() => Active.GetIlDisassembler();
-    public Task WaitForWarmupAsync() => Active.WaitForWarmupAsync();
-    public Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync() => Active.ForceReloadAsync();
+    public SolutionManager Resolve(string? solution)
+    {
+        if (string.IsNullOrWhiteSpace(solution))
+            return Active;
 
-    /// <summary>
-    /// Commits already-written document texts to the active solution's in-memory snapshot
-    /// immediately (bypassing the file watcher's debounce). See
-    /// <see cref="SolutionManager.CommitDocumentTextsAsync"/>.
-    /// </summary>
-    public Task CommitDocumentTextsAsync(
-        IReadOnlyList<(Microsoft.CodeAnalysis.DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)> documents,
-        CancellationToken ct = default)
-        => Active.CommitDocumentTextsAsync(documents, ct);
+        // Match over one snapshot so the key and its manager come from the same moment.
+        var snapshot = _managers.ToArray().ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        return snapshot[SolutionMatcher.Match(snapshot.Keys, solution)];
+    }
+
 
     public IReadOnlyList<SolutionInfo> ListSolutions()
     {
@@ -143,11 +141,12 @@ public sealed class MultiSolutionManager : IDisposable
             .ToList();
     }
 
-    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects()
+    /// <summary>Projects the loader skipped in the given solution (see <see cref="Resolve"/>); empty if it cannot be read.</summary>
+    public IReadOnlyList<SkippedProjectInfo> GetSkippedProjects(string? solution)
     {
         try
         {
-            return Active.GetLoadedSolution().SkippedProjects
+            return Resolve(solution).GetLoadedSolution().SkippedProjects
                 .Select(s => new SkippedProjectInfo(s.Name, s.Path, s.Kind, s.Reason))
                 .ToList();
         }
@@ -157,15 +156,12 @@ public sealed class MultiSolutionManager : IDisposable
         }
     }
 
-    /// <summary>
-    /// Reference-resolution failures on the active solution (projects that opened with
-    /// dropped references). Non-empty means results from those projects may be incomplete.
-    /// </summary>
-    public IReadOnlyList<string> GetActiveLoadDiagnostics()
+    /// <summary>Reference-resolution failures on the given solution (see <see cref="Resolve"/>).</summary>
+    public IReadOnlyList<string> GetLoadDiagnostics(string? solution)
     {
         try
         {
-            return Active.GetLoadedSolution().LoadDiagnostics;
+            return Resolve(solution).GetLoadedSolution().LoadDiagnostics;
         }
         catch
         {
@@ -175,24 +171,9 @@ public sealed class MultiSolutionManager : IDisposable
 
     public string SetActiveSolution(string name)
     {
-        var matches = _managers.Keys
-            .Where(k => k.Contains(name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (matches.Count == 0)
-            throw new McpToolException(
-                ToolErrorCode.ProjectNotFound,
-                $"No solution matching '{name}'. Available: {string.Join(", ", _managers.Keys.Select(Path.GetFileName))}",
-                new { name, available = _managers.Keys.Select(Path.GetFileName).ToArray() });
-
-        if (matches.Count > 1)
-            throw new McpToolException(
-                ToolErrorCode.AmbiguousMatch,
-                $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
-                new { name, matches });
-
-        lock (_lock) { _activeKey = matches[0]; }
-        return matches[0];
+        var key = SolutionMatcher.Match(_managers.Keys.ToList(), name);
+        lock (_lock) { _activeKey = key; }
+        return key;
     }
 
     /// <summary>
@@ -201,8 +182,10 @@ public sealed class MultiSolutionManager : IDisposable
     /// supplied, the previous workspace is disposed and reloaded fresh so the new filter
     /// takes effect (replace semantics — no coexisting filtered views).
     /// Returns the normalised path of the loaded solution.
+    /// With <paramref name="activate"/> false the active solution stays as it is (unless there is none),
+    /// so a caller that passes <c>solution</c> per call does not switch it for everyone else.
     /// </summary>
-    public async Task<string> LoadSolutionAsync(string solutionPath, ProjectFilter? filter = null)
+    public async Task<string> LoadSolutionAsync(string solutionPath, ProjectFilter? filter = null, bool activate = true)
     {
         var normalised = Path.GetFullPath(solutionPath);
 
@@ -219,7 +202,7 @@ public sealed class MultiSolutionManager : IDisposable
             else if (_managers.ContainsKey(normalised))
             {
                 // No-filter (or seedless filter) re-load of an already-loaded path → re-activate fast path.
-                _activeKey = normalised;
+                _activeKey = NextActiveKey(_activeKey, normalised, activate);
                 return normalised;
             }
         }
@@ -227,12 +210,16 @@ public sealed class MultiSolutionManager : IDisposable
         // Dispose the replaced manager OUTSIDE the lock to avoid blocking other callers.
         toDispose?.Dispose();
 
+        // CreateAsync reports an open failure through HasLoadFailure rather than throwing.
         var manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
 
         if (manager.HasLoadFailure)
         {
             var message = manager.LoadFailureMessage!;
             manager.Dispose();
+            // A failed filtered re-load has already dropped the previous workspace; the active key
+            // must not keep pointing at it.
+            DropDanglingActiveKey();
             throw new McpToolException(
                 ToolErrorCode.InvalidArgument,
                 message,
@@ -250,11 +237,32 @@ public sealed class MultiSolutionManager : IDisposable
             {
                 _managers[normalised] = manager;
             }
-            _activeKey = normalised;
+            _activeKey = NextActiveKey(_activeKey, normalised, activate);
         }
 
         return normalised;
     }
+
+    /// <summary>
+    /// Moves the active key off a solution that is no longer loaded, the same way unloading the active
+    /// solution does: to another loaded solution if there is one, otherwise to none.
+    /// </summary>
+    private void DropDanglingActiveKey()
+    {
+        lock (_lock)
+        {
+            if (_activeKey is not null && !_managers.ContainsKey(_activeKey))
+                _activeKey = _managers.Keys.FirstOrDefault();
+        }
+    }
+
+    /// <summary>
+    /// The active key after loading <paramref name="loaded"/>. Without activation the current key stays,
+    /// except when nothing is active: no caller can depend on an empty key, and the server would
+    /// otherwise have a loaded solution but answer "No solution loaded" to every call without one.
+    /// </summary>
+    internal static string? NextActiveKey(string? current, string loaded, bool activate) =>
+        activate || current is null ? loaded : current;
 
     /// <summary>
     /// Unload a solution by partial name match, freeing its memory.
@@ -281,23 +289,7 @@ public sealed class MultiSolutionManager : IDisposable
         {
             var keysSnapshot = _managers.Keys.ToList();
 
-            var matches = keysSnapshot
-                .Where(k => k.Contains(name, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (matches.Count == 0)
-                throw new McpToolException(
-                    ToolErrorCode.ProjectNotFound,
-                    $"No solution matching '{name}'. Available: {string.Join(", ", keysSnapshot.Select(Path.GetFileName))}",
-                    new { name, available = keysSnapshot.Select(Path.GetFileName).ToArray() });
-
-            if (matches.Count > 1)
-                throw new McpToolException(
-                    ToolErrorCode.AmbiguousMatch,
-                    $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
-                    new { name, matches });
-
-            key = matches[0];
+            key = SolutionMatcher.Match(keysSnapshot, name);
 
             if (string.Equals(_activeKey, key, StringComparison.OrdinalIgnoreCase))
             {
