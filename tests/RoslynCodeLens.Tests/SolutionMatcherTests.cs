@@ -20,7 +20,8 @@ public class SolutionMatcherTests
 
     [Fact]
     public void Match_FullPathWithDotSegment_Matches() =>
-        Assert.Equal(A, SolutionMatcher.Match(Keys, "/tmp/x/./A.sln"));
+        // Built from the key so the name is fully qualified on every platform, a drive included on Windows.
+        Assert.Equal(A, SolutionMatcher.Match(Keys, Path.Combine(Path.GetDirectoryName(A)!, ".", "A.sln")));
 
     [Fact]
     public void Match_RelativeFileName_SharedByTwoSolutions_IsAmbiguous()
