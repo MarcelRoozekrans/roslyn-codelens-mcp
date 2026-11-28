@@ -29,6 +29,28 @@ public class SolutionArgumentRoutingTests
         [("start_background_task", "toolName")] = "rebuild_solution",
     };
 
+    // How each tool rejects the placeholder arguments once it has reached the named solution. Every
+    // tool not listed must succeed on them.
+    private static readonly Dictionary<string, (Type Type, ToolErrorCode? Code)> PlaceholderFailures =
+        new(StringComparer.Ordinal)
+        {
+            ["analyze_method"] = (typeof(McpToolException), ToolErrorCode.SymbolNotFound),
+            ["change_signature"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            ["check_architecture"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            ["find_breaking_changes"] = (typeof(McpToolException), ToolErrorCode.FileNotFound),
+            ["find_catch_blocks"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            ["find_throw_sites"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            ["get_exception_flow"] = (typeof(McpToolException), ToolErrorCode.SymbolNotFound),
+            ["get_file_overview"] = (typeof(McpToolException), ToolErrorCode.FileNotFound),
+            ["get_method_source"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            ["resolve_stack_trace"] = (typeof(McpToolException), ToolErrorCode.InvalidArgument),
+            // Raised by looking the placeholder up in the solution's references and symbols.
+            ["inspect_external_assembly"] = (typeof(ArgumentException), null),
+            ["peek_il"] = (typeof(ArgumentException), null),
+            // The in-memory solution has no file to reopen.
+            ["rebuild_solution"] = (typeof(InvalidOperationException), null),
+        };
+
     // Never written: no test here trusts a solution, so the file is never created.
     private static readonly TrustStore Trust =
         new(Path.Combine(Path.GetTempPath(), $"codelens-606-trust-{Guid.NewGuid():N}.json"));
@@ -67,10 +89,19 @@ public class SolutionArgumentRoutingTests
 
         var ex = await Invoke(tool, multi, solution: "Loaded.sln");
 
-        // Without the argument this would fail with "No solution loaded". Anything else, including a
-        // tool error about the placeholder arguments, means the call reached the named solution.
-        if (ex is McpToolException toolEx)
-            Assert.DoesNotContain("No solution loaded", toolEx.Message, StringComparison.Ordinal);
+        // Only success, or the tool's own complaint about the placeholder arguments, which it can only
+        // raise after reaching the named solution. A selection error such as ProjectNotFound, or any
+        // other failure, means the call never got there.
+        if (PlaceholderFailures.TryGetValue(tool, out var expected))
+        {
+            Assert.NotNull(ex);
+            Assert.Equal(expected.Type, ex!.GetType());
+            Assert.Equal(expected.Code, (ex as McpToolException)?.Code);
+        }
+        else
+        {
+            Assert.Null(ex);
+        }
     }
 
     // A compiled one-project solution in memory: loaded, so EnsureLoaded passes and each tool runs

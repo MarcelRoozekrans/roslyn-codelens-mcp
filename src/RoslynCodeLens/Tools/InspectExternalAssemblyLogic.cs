@@ -14,7 +14,7 @@ public static class InspectExternalAssemblyLogic
     {
         var assembly = metadata.FindAssembly(assemblyName)
             ?? throw new ArgumentException(
-                $"Assembly '{assemblyName}' is not referenced by any project in the active solution. " +
+                $"Assembly '{assemblyName}' is not referenced by any project in the solution. " +
                 "Use get_nuget_dependencies to list referenced assemblies.",
                 nameof(assemblyName));
 

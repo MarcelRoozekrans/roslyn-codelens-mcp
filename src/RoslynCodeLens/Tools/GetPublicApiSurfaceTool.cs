@@ -10,7 +10,7 @@ public static class GetPublicApiSurfaceTool
     [McpServerTool(Name = "get_public_api_surface")]
     [Description(
         "Enumerate every public and protected type and member declared in production " +
-        "projects of the active solution. Returns a deterministically-sorted (name ASC) " +
+        "projects of the solution (the active one unless `solution` names another). Returns a deterministically-sorted (name ASC) " +
         "flat list of API entries (kind, fully-qualified name, accessibility, project, " +
         "file, line) plus per-kind/per-project/per-accessibility summary buckets. " +
         "Skips test projects, generated code, compiler-generated members, internal " +
