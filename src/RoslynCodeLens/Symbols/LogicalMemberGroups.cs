@@ -141,8 +141,9 @@ internal static class LogicalMemberGroups
     // owns its location; synthesized members share theirs (both Equals overloads of a record point at the record's
     // name), so they also carry their documentation ID, whose types are namespace-qualified (a record named Object) and
     // which is the same in every compilation of a declaration. Display strings would not do: IntPtr is nint on runtimes
-    // with a numeric IntPtr. A partial method or property is listed as its definition part, whose locations leave out the
-    // implementation part's, so those are added: a definition per project with a linked implementation is one target.
+    // with a numeric IntPtr. A partial method, property or event is listed as its definition part, whose locations leave
+    // out the implementation part's, so those are added: a definition per project with a linked implementation is one
+    // target.
     private static IEnumerable<DeclarationKey> DeclarationKeys(ISymbol symbol, SymbolResolver resolver)
     {
         var synthesized = symbol.IsImplicitlyDeclared
@@ -152,6 +153,7 @@ internal static class LogicalMemberGroups
         {
             IMethodSymbol method => method.PartialImplementationPart,
             IPropertySymbol property => (ISymbol?)property.PartialImplementationPart,
+            IEventSymbol @event => @event.PartialImplementationPart,
             _ => null,
         };
         return symbol.Locations.Concat(implementation?.Locations ?? [])

@@ -169,7 +169,7 @@ public class SymbolResolver
         BuildProjectLookups(LoadedSolution loaded)
     {
         var fileToProject = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var documentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var documentPaths = new HashSet<string>(SolutionLoader.PathComparer);
         var idToName = new Dictionary<ProjectId, string>();
         var assemblyToProject = new Dictionary<IAssemblySymbol, string>(SymbolEqualityComparer.Default);
 

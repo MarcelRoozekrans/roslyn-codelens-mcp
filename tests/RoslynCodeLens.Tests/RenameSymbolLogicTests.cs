@@ -210,6 +210,32 @@ public class RenameSymbolLogicTests
             ex.Message);
     }
 
+    [NonWindowsFact]
+    public void ResolveSingleTarget_GeneratedMemberWhosePathDiffersFromAProjectDocumentOnlyInCasing_NamesEachProject()
+    {
+        // Same generated member as in the previous test, but Alpha also has a document whose path differs from the generated
+        // one only in casing. On a case-sensitive file system that is another file, so the generated document must not be
+        // taken for a project document, which a link could share; the members would then merge into one target.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [
+                    ("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }"),
+                    ("gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }"),
+                ]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { public int Generated() => 1; }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Generated' matched 2 distinct symbols: Duplicate.Helper.Generated() (project Alpha), "
+                + "Duplicate.Helper.Generated() (project Beta). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
     [Fact]
     public void ResolveSingleTarget_FullNameDeclaredInALinkedFileAndAnotherProject_NamesEveryProjectOfTheLinkedFile()
     {
@@ -291,6 +317,11 @@ public class RenameSymbolLogicTests
         "public partial int Value { get; }",
         "public partial int Value => 1; public int Use() => Value;",
         "Value")]
+    [InlineData(
+        "Demo.Helper.Changed",
+        "public partial event System.Action Changed;",
+        "public partial event System.Action Changed { add { } remove { } } public void Use() => Changed += null;",
+        "Changed")]
     public async Task PartialMemberWithDefinitionPerProjectAndLinkedImplementation_RenamesEveryPart(
         string symbol, string definition, string implementation, string name)
     {
@@ -955,6 +986,17 @@ public class RenameSymbolLogicTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // Paths that differ only in casing name one file on Windows, so a case-sensitive file system cannot be tested there;
+    // elsewhere the test runs, and Windows reports it as Skipped instead of a pass that checked nothing.
+    private sealed class NonWindowsFactAttribute : FactAttribute
+    {
+        public NonWindowsFactAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "Paths that differ only in casing name one file on Windows.";
         }
     }
 }
