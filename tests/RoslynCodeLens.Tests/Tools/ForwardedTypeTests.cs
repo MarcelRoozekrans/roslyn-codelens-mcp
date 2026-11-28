@@ -1,4 +1,5 @@
 using RoslynCodeLens;
+using RoslynCodeLens.Models;
 using RoslynCodeLens.Symbols;
 using RoslynCodeLens.Tools;
 using RoslynCodeLens.Tests.Fixtures;
@@ -216,6 +217,50 @@ public class ForwardedTypeTests
                     u => Assert.Equal("Net10AppUsages.ThreadId", u.CallerName),
                     u => Assert.Equal("SharedUsages.ThreadId", u.CallerName));
             });
+    }
+
+    // SharedUsages.cs is linked into Net10App and Net48Lib: the two assemblies compile one declaration, which is one
+    // target for rename_symbol and change_signature rather than two symbols that share a full name.
+    [Theory]
+    [InlineData("SharedSource.SharedUsages", "class SharedUsages", "class Renamed")]
+    [InlineData("SharedSource.SharedUsages.ThreadId", "int ThreadId()", "int Renamed()")]
+    [InlineData("SharedSource.SharedUsages.Handle", "bool Handle(IntPtr handle)", "bool Renamed(IntPtr handle)")]
+    public async Task RenameSymbol_DeclarationInLinkedFile_RenamesTheOneDeclaration(
+        string symbol, string oldDeclaration, string newDeclaration)
+    {
+        var result = await RenameSymbolLogic.ExecuteAsync(
+            _loaded, _resolver, symbol, "Renamed",
+            renameOverloads: true, renameInStrings: false, renameInComments: false, preview: true, force: false,
+            commitToMemory: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.FilesChanged);
+        // Each linked document reports the same change, so the edits are compared without duplicates.
+        var edit = Assert.Single(result.Edits.Distinct());
+        Assert.Equal("SharedUsages.cs", Path.GetFileName(edit.FilePath));
+        var original = Microsoft.CodeAnalysis.Text.SourceText.From(await File.ReadAllTextAsync(edit.FilePath));
+        var renamed = original.WithChanges(new Microsoft.CodeAnalysis.Text.TextChange(
+            Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(
+                original.Lines[edit.StartLine - 1].Start + edit.StartColumn - 1,
+                original.Lines[edit.EndLine - 1].Start + edit.EndColumn - 1),
+            edit.NewText));
+        Assert.Equal(original.ToString().Replace(oldDeclaration, newDeclaration, StringComparison.Ordinal), renamed.ToString());
+    }
+
+    [Fact]
+    public async Task ChangeSignature_MethodInLinkedFile_ChangesTheOneDeclaration()
+    {
+        var result = await ChangeSignatureLogic.ExecuteAsync(
+            _loaded, _resolver, "SharedSource.SharedUsages.ThreadId",
+            [new SignatureOperation("add", Name: "offset", Type: "int", CallSiteValue: "0")],
+            preview: true, force: false, commitToMemory: null, CancellationToken.None);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("ThreadId(int offset)", result.NewSignature);
+        Assert.Equal(1, result.FilesChanged);
+        var edit = Assert.Single(result.Edits.Distinct());
+        Assert.Equal("SharedUsages.cs", Path.GetFileName(edit.FilePath));
+        Assert.Contains("public static int ThreadId(int offset)", edit.NewText, StringComparison.Ordinal);
     }
 
     // The resolver scans the projects in file path order, Net10App first. Moving Net48Lib to a

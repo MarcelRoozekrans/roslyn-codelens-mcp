@@ -70,13 +70,15 @@ public static class RenameSymbolLogic
         }
 
         // Overloads of one method are a single rename target (Renamer handles the
-        // group via RenameOverloads); everything else groups by full display string.
-        var groups = LogicalMemberGroups.GroupLogicalTargets(matches);
+        // group via RenameOverloads); every other symbol is its own target.
+        var groups = LogicalMemberGroups.GroupLogicalTargets(matches, resolver);
         if (groups.Count > 1)
         {
+            var ambiguity = LogicalMemberGroups.DescribeAmbiguity(groups, resolver);
             throw new McpToolException(ToolErrorCode.AmbiguousMatch,
-                $"Symbol '{symbol}' matched {groups.Count} distinct symbols. Use a more qualified name.",
-                new { matches = groups.Select(g => g.First().ToDisplayString()).ToList() });
+                $"Symbol '{symbol}' matched {groups.Count} distinct symbols: "
+                    + $"{string.Join(", ", ambiguity.Candidates)}. {ambiguity.Hint}",
+                new { matches = ambiguity.Candidates });
         }
 
         return groups[0].First();

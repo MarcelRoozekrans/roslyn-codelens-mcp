@@ -288,6 +288,125 @@ public class GetMethodSourceLogicTests
         Assert.Equal(2, item.Candidates!.Count);
     }
 
+    private const string AlphaHelper = "namespace Duplicate; public class Helper { public int Common() => 1; }";
+    private const string BetaHelper = "namespace Duplicate; public class Helper { public int Common() => 2; }";
+
+    [Fact]
+    public void FullNameDeclaredInTwoProjects_ReturnsTheSourceOfEach()
+    {
+        // No name selects one of two types that share a full name, so a read-only answer returns both rather than
+        // an ambiguity the caller cannot resolve.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", AlphaHelper)]),
+            ("Beta", [("Beta/Helper.cs", BetaHelper)]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["Duplicate.Helper.Common"]);
+
+        Assert.Equal(
+            [
+                ("ok", "Alpha", "public int Common() => 1;"),
+                ("ok", "Beta", "public int Common() => 2;"),
+            ],
+            items.Select(i => (i.Status, i.Project, i.Source)).Order());
+    }
+
+    [Fact]
+    public void Ambiguous_FullNameDeclaredInTwoProjects_NamesTheProjectOfThoseCandidates()
+    {
+        // "Helper.Common" also matches Other.Helper, so the request stays ambiguous; only the two candidates that
+        // share a full name need their project to be told apart.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", AlphaHelper), ("Alpha/Other.cs", "namespace Other; public class Helper { public int Common() => 3; }")]),
+            ("Beta", [("Beta/Helper.cs", BetaHelper)]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Helper.Common"]));
+
+        Assert.Equal("ambiguous", item.Status);
+        Assert.Equal(
+            ["Duplicate.Helper.Common() (project Alpha)", "Duplicate.Helper.Common() (project Beta)", "Other.Helper.Common()"],
+            item.Candidates!.Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void Ambiguous_LinkedFileCompiledIntoTwoNamespaces_IsNotAnsweredAsOneFullName()
+    {
+        // The linked file compiles into First in Alpha and into Third in Beta (as #if around the namespace would do), so
+        // its declaration can be selected as Third.Helper.Common. Only Gamma's First.Helper shares the full name.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", "namespace First; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Shared/Helper.cs", "namespace Third; public class Helper { public int Common() => 1; }")]),
+            ("Gamma", [("Gamma/Helper.cs", "namespace First; public class Helper { public int Common() => 3; }")]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Helper.Common"]));
+
+        Assert.Equal("ambiguous", item.Status);
+        // The linked declaration is listed under the name only it has. First.Helper.Common would select it too, so
+        // Gamma's candidate keeps its project label.
+        Assert.Equal(
+            ["First.Helper.Common() (project Gamma)", "Third.Helper.Common()"],
+            item.Candidates!.Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void CtorRequest_FullNameDeclaredInTwoProjects_ReturnsTheSourceOfEach()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public Helper() { } }")]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public Helper(int a) { } }")]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["Duplicate.Helper.Helper"]);
+
+        Assert.Equal(
+            [
+                ("ok", "Alpha", "public Helper() { }"),
+                ("ok", "Beta", "public Helper(int a) { }"),
+            ],
+            items.Select(i => (i.Status, i.Project, i.Source)).Order());
+    }
+
+    [Fact]
+    public void CtorRequest_Ambiguous_FullNameDeclaredInTwoProjects_NamesTheProjectOfThoseCandidates()
+    {
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [
+                ("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public Helper() { } }"),
+                ("Alpha/Other.cs", "namespace Other; public class Helper { public Helper() { } }")]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public Helper(int a) { } }")]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var item = Assert.Single(GetMethodSourceLogic.Execute(resolver, metadata, ["Helper.Helper"]));
+
+        Assert.Equal("ambiguous", item.Status);
+        Assert.Equal(
+            ["Duplicate.Helper (project Alpha)", "Duplicate.Helper (project Beta)", "Other.Helper"],
+            item.Candidates!.Order(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void CtorRequest_LinkedFile_ReturnsTheSourceOfTheOneConstructor()
+    {
+        // The same file path in two projects stands for a file linked into both: one declaration compiled twice.
+        // Like the member form, the answer carries that declaration once per compilation.
+        const string widget = "namespace Shared; public class Widget { public Widget(int size) { } }";
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Widget.cs", widget)]),
+            ("Beta", [("Shared/Widget.cs", widget)]));
+        var metadata = new MetadataSymbolResolver(loaded, resolver);
+
+        var items = GetMethodSourceLogic.Execute(resolver, metadata, ["Shared.Widget.Widget"]);
+
+        Assert.Equal(
+            [("ok", "Shared/Widget.cs", "public Widget(int size) { }"), ("ok", "Shared/Widget.cs", "public Widget(int size) { }")],
+            items.Select(i => (i.Status, i.File, i.Source)));
+    }
+
     [Fact]
     public void Metadata_Status_OneItemPerRequest()
     {

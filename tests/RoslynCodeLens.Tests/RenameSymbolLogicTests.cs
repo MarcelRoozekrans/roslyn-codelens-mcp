@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using RoslynCodeLens;
 using RoslynCodeLens.Models;
 using RoslynCodeLens.Tests.Fixtures;
@@ -51,6 +52,74 @@ public class RenameSymbolLogicTests
         return (degraded, new SymbolResolver(degraded));
     }
 
+    /// <summary>
+    /// Adds a tree to the compilations of the given <paramref name="projects"/> (all when none are given) without adding it
+    /// to the solution's documents, the way a source generator's output appears.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) WithGeneratedTree(
+        (LoadedSolution Loaded, SymbolResolver Resolver) workspace, string filePath, string source, params string[] projects)
+    {
+        var generated = new LoadedSolution
+        {
+            Solution = workspace.Loaded.Solution,
+            Compilations = new ConcurrentDictionary<ProjectId, Compilation>(workspace.Loaded.Compilations.Select(
+                pair => KeyValuePair.Create(pair.Key,
+                    projects.Length == 0 || projects.Contains(workspace.Loaded.Solution.GetProject(pair.Key)!.Name)
+                        ? pair.Value.AddSyntaxTrees(CSharpSyntaxTree.ParseText(source, path: filePath))
+                        : pair.Value))),
+        };
+        return (generated, new SymbolResolver(generated));
+    }
+
+    /// <summary>
+    /// Lib declares <paramref name="libSource"/> against version 1 of an assembly Dep; App references Lib and version 2 of
+    /// Dep, so App sees Lib through a retargeted assembly symbol. Gamma, unrelated, also references version 1 of Dep and
+    /// declares <paramref name="gammaSource"/> in <paramref name="gammaPath"/>.
+    /// </summary>
+    private static (LoadedSolution Loaded, SymbolResolver Resolver) WithRetargetedProject(
+        string libSource, string gammaSource, string gammaPath = "Gamma/Helper.cs")
+    {
+        var corlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary);
+        var solution = new AdhocWorkspace().CurrentSolution;
+        var ids = new List<ProjectId>();
+        (string Name, MetadataReference[] References, string Path, string Source)[] projects =
+        [
+            ("Lib", [corlib, Dep("1.0.0.0")], "Lib/Helper.cs", libSource),
+            ("App", [corlib, Dep("2.0.0.0")], "App/App.cs", "namespace App; public class Consumer { }"),
+            ("Gamma", [corlib, Dep("1.0.0.0")], gammaPath, gammaSource),
+        ];
+        foreach (var (name, references, path, source) in projects)
+        {
+            var id = ProjectId.CreateNewId();
+            solution = solution
+                .AddProject(ProjectInfo.Create(id, VersionStamp.Create(), name, name, LanguageNames.CSharp, compilationOptions: options)
+                    .WithMetadataReferences(references)
+                    .WithProjectReferences(name == "App" ? [new ProjectReference(ids[0])] : []))
+                .AddDocument(DocumentId.CreateNewId(id), System.IO.Path.GetFileName(path), source, filePath: path);
+            ids.Add(id);
+        }
+
+        var loaded = new LoadedSolution
+        {
+            Solution = solution,
+            Compilations = new ConcurrentDictionary<ProjectId, Compilation>(
+                ids.Select(id => KeyValuePair.Create(id, solution.GetProject(id)!.GetCompilationAsync().GetAwaiter().GetResult()!))),
+        };
+        return (loaded, new SymbolResolver(loaded));
+
+        MetadataReference Dep(string version)
+        {
+            var dep = CSharpCompilation.Create("Dep",
+                [CSharpSyntaxTree.ParseText($"[assembly: System.Reflection.AssemblyVersion(\"{version}\")] namespace Dep {{ public class D {{ }} }}")],
+                [corlib], options);
+            using var stream = new MemoryStream();
+            var emitted = dep.Emit(stream);
+            Assert.True(emitted.Success, string.Join("; ", emitted.Diagnostics));
+            return MetadataReference.CreateFromImage(stream.ToArray());
+        }
+    }
+
     [Fact]
     public async Task InvalidIdentifier_ThrowsInvalidArgument()
     {
@@ -78,6 +147,296 @@ public class RenameSymbolLogicTests
         var ex = await Assert.ThrowsAsync<McpToolException>(
             () => RunAsync(loaded, resolver, "Dup", "Renamed"));
         Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+    }
+
+    [Theory]
+    [InlineData("Duplicate.Helper", "Duplicate.Helper")]
+    [InlineData("Duplicate.Helper.Common", "Duplicate.Helper.Common()")]
+    public async Task FullNameDeclaredInTwoProjects_ThrowsAmbiguousMatchNamingTheProjects(string symbol, string candidate)
+    {
+        // Two distinct types that share a full name: no name selects one of them, so renaming only the first would
+        // silently leave the other project behind. Beta references Alpha (the builder chains projects), which only
+        // adds a CS0436 warning in Beta and does not merge the two types.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 2; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, symbol, "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            $"Symbol '{symbol}' matched 2 distinct symbols: {candidate} (project Alpha), {candidate} (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FullNameDeclaredInTwoProjectsWithTheSameGeneratedPart_ThrowsAmbiguousMatchNamingTheProjects()
+    {
+        // A generator runs in each project. Without an output directory its documents get the same relative path, and
+        // generating the same part gives the same span. That is no linked file, so the two types stay distinct. The
+        // generated tree is not in the solution, so the test stops at target resolution instead of running Renamer.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper' matched 2 distinct symbols: Duplicate.Helper (project Alpha), Duplicate.Helper (project Beta). "
+                + "Symbols that share a full name in different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_GeneratedMemberInTwoProjects_NamesEachProject()
+    {
+        // Both generated documents have the same path, so the path cannot tell which project a member comes from; the
+        // compilation that declares it can.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { public int Generated() => 1; }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Generated' matched 2 distinct symbols: Duplicate.Helper.Generated() (project Alpha), "
+                + "Duplicate.Helper.Generated() (project Beta). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [NonWindowsFact]
+    public void ResolveSingleTarget_GeneratedMemberWhosePathDiffersFromAProjectDocumentOnlyInCasing_NamesEachProject()
+    {
+        // Same generated member as in the previous test, but both projects also link a document whose path differs from
+        // the generated one only in casing. On a case-sensitive file system that is another file, so the generated
+        // documents must not be taken for project documents, which a link could share; the members would then merge into
+        // one target.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [
+                    ("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }"),
+                    ("gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }"),
+                ]),
+                ("Beta", [
+                    ("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }"),
+                    ("gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }"),
+                ])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { public int Generated() => 1; }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Generated' matched 2 distinct symbols: Duplicate.Helper.Generated() (project Alpha), "
+                + "Duplicate.Helper.Generated() (project Beta). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_GeneratedMemberAtThePathOfAnotherProjectsDocument_NamesEachProject()
+    {
+        // Same generated member as in ResolveSingleTarget_GeneratedMemberInTwoProjects_NamesEachProject, but an unrelated
+        // project Gamma has a regular document at exactly the generated path (e.g. generator output compiled explicitly).
+        // That document is not part of Alpha or Beta, so their generated documents must not be taken for project
+        // documents, which a link could share; the members would then merge into one target.
+        var (_, resolver) = WithGeneratedTree(
+            RenameTestWorkspace.Create(
+                ("Alpha", [("Alpha/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public partial class Helper { }")]),
+                ("Gamma", [("Gen/Gen.Generator/Helper.g.cs", "namespace Other; public class Unrelated { }")])),
+            "Gen/Gen.Generator/Helper.g.cs",
+            "namespace Duplicate; partial class Helper { public int Generated() => 1; }",
+            "Alpha", "Beta");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Generated"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Generated' matched 2 distinct symbols: Duplicate.Helper.Generated() (project Alpha), "
+                + "Duplicate.Helper.Generated() (project Beta). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FullNameDeclaredInALinkedFileAndAnotherProject_NamesEveryProjectOfTheLinkedFile()
+    {
+        // The linked declaration is one target compiled into Alpha and Beta; naming only one of them would hide that
+        // renaming it changes both projects.
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Shared/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }")]),
+            ("Gamma", [("Gamma/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 3; }")]));
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Common' matched 2 distinct symbols: Duplicate.Helper.Common() (projects Alpha, Beta), "
+                + "Duplicate.Helper.Common() (project Gamma). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FileLinkedWithDifferentPathCasing_IsOneTargetWhereFilePathsIgnoreCase()
+    {
+        // Two projects link the same file under differently cased paths. Windows paths ignore case, so both projects
+        // compile one declaration; on a case-sensitive file system the paths name two files, and the name is ambiguous.
+        const string source = "namespace Duplicate; public class Helper { public int Common() => 1; }";
+        var (_, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", source)]),
+            ("Beta", [("shared/helper.cs", source)]));
+
+        if (OperatingSystem.IsWindows())
+        {
+            var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common");
+
+            Assert.Equal("Duplicate.Helper.Common()", target.ToDisplayString());
+        }
+        else
+        {
+            var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common"));
+
+            Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+            Assert.Equal(
+                "Symbol 'Duplicate.Helper.Common' matched 2 distinct symbols: Duplicate.Helper.Common() (project Alpha), "
+                    + "Duplicate.Helper.Common() (project Beta). Symbols that share a full name in different projects or "
+                    + "assemblies cannot be selected by name.",
+                ex.Message);
+        }
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FullNameOfARetargetedProjectAndAnotherProject_NamesBothProjects()
+    {
+        // App comes first, so the index holds Lib's type as App sees it: through a retargeted assembly symbol, which is
+        // not Lib's own compilation assembly but still declared by Lib.
+        var (_, resolver) = WithRetargetedProject(
+            "namespace Duplicate; public class Helper { public Dep.D Use() => null; public int Common() => 1; }",
+            "namespace Duplicate; public class Helper { public int Common() => 3; }");
+
+        var ex = Assert.Throws<McpToolException>(() => RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Duplicate.Helper.Common' matched 2 distinct symbols: Duplicate.Helper.Common() (project Lib), "
+                + "Duplicate.Helper.Common() (project Gamma). Symbols that share a full name in different projects or "
+                + "assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void ResolveSingleTarget_FileLinkedIntoARetargetedProjectAndAnotherProject_IsOneTarget()
+    {
+        // Lib and Gamma link the same file. The index holds Lib's type as App sees it, through a retargeted assembly
+        // symbol; the linked file is still a regular document of Lib, so both projects compile one declaration.
+        const string source = "namespace Duplicate; public class Helper { public Dep.D Use() => null; public int Common() => 1; }";
+        var (_, resolver) = WithRetargetedProject(source, source, gammaPath: "Lib/Helper.cs");
+
+        var target = RenameSymbolLogic.ResolveSingleTarget(resolver, "Duplicate.Helper.Common");
+
+        Assert.Equal("Duplicate.Helper.Common()", target.ToDisplayString());
+    }
+
+    // A partial member whose definition each project declares itself, with the implementation in a linked file: the
+    // definitions do not point at the implementation, yet the linked part makes the projects' members one target.
+    [Theory]
+    [InlineData(
+        "Demo.Helper.Compute",
+        "public partial int Compute(int value);",
+        "public partial int Compute(int value) => value; public int Use() => Compute(1);",
+        "Compute")]
+    [InlineData(
+        "Demo.Helper.Value",
+        "public partial int Value { get; }",
+        "public partial int Value => 1; public int Use() => Value;",
+        "Value")]
+    [InlineData(
+        "Demo.Helper.Changed",
+        "public partial event System.Action Changed;",
+        "public partial event System.Action Changed { add { } remove { } } public void Use() => Changed += null;",
+        "Changed")]
+    public async Task PartialMemberWithDefinitionPerProjectAndLinkedImplementation_RenamesEveryPart(
+        string symbol, string definition, string implementation, string name)
+    {
+        var alpha = $"namespace Demo; public partial class Helper {{ {definition} }}";
+        var beta = $"namespace Demo; public partial class Helper {{ public int Beta() => 2; {definition} }}";
+        var shared = $"namespace Demo; public partial class Helper {{ {implementation} }}";
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Alpha/Helper.cs", alpha), ("Shared/Helper.Impl.cs", shared)]),
+            ("Beta", [("Beta/Helper.cs", beta), ("Shared/Helper.Impl.cs", shared)]));
+
+        var result = await RunAsync(loaded, resolver, symbol, "Renamed");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(3, result.FilesChanged);
+        // Each linked document reports the same change, so the edits are compared without duplicates.
+        Assert.Equal(
+            [
+                ("Alpha/Helper.cs", alpha.Replace(name, "Renamed", StringComparison.Ordinal)),
+                ("Beta/Helper.cs", beta.Replace(name, "Renamed", StringComparison.Ordinal)),
+                ("Shared/Helper.Impl.cs", shared.Replace(name, "Renamed", StringComparison.Ordinal)),
+            ],
+            result.Edits.Select(e => (e.FilePath, e.NewText)).Distinct().Order());
+    }
+
+    [Fact]
+    public async Task AmbiguousNameWithSharedFullName_HintsBothWaysOut()
+    {
+        // Other.Helper.Common can still be selected by a more qualified name; only the two Duplicate.Helper.Common
+        // methods cannot, so the message gives both hints.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [
+                ("Alpha/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 1; }"),
+                ("Alpha/Other.cs", "namespace Other; public class Helper { public int Common() => 3; }"),
+            ]),
+            ("Beta", [("Beta/Helper.cs", "namespace Duplicate; public class Helper { public int Common() => 2; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Helper.Common", "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Helper.Common' matched 3 distinct symbols: Duplicate.Helper.Common() (project Alpha), Other.Helper.Common(), "
+                + "Duplicate.Helper.Common() (project Beta). Use a more qualified name; symbols that share a full name in "
+                + "different projects or assemblies cannot be selected by name.",
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task AmbiguousNameWithLinkedFileInTwoNamespaces_ListsTheLinkedDeclarationByItsUniqueName()
+    {
+        // The linked file compiles into Third in Alpha and into First in Beta. Only Third.Helper.Common selects it alone;
+        // First.Helper.Common matches Gamma's method as well, so Gamma's candidate cannot be selected by name. That holds
+        // although First is not the name the linked declaration has in its first project.
+        var (loaded, resolver) = RenameTestWorkspace.Create(
+            ("Alpha", [("Shared/Helper.cs", "namespace Third; public class Helper { public int Common() => 1; }")]),
+            ("Beta", [("Shared/Helper.cs", "namespace First; public class Helper { public int Common() => 1; }")]),
+            ("Gamma", [("Gamma/Helper.cs", "namespace First; public class Helper { public int Common() => 3; }")]));
+
+        var ex = await Assert.ThrowsAsync<McpToolException>(
+            () => RunAsync(loaded, resolver, "Helper.Common", "Renamed"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+        Assert.Equal(
+            "Symbol 'Helper.Common' matched 2 distinct symbols: Third.Helper.Common(), First.Helper.Common() (project Gamma). "
+                + "Use a more qualified name; symbols that share a full name in different projects or assemblies cannot be "
+                + "selected by name.",
+            ex.Message);
     }
 
     [Fact]
@@ -675,6 +1034,17 @@ public class RenameSymbolLogicTests
         finally
         {
             Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // Paths that differ only in casing name one file on Windows, so a case-sensitive file system cannot be tested there;
+    // elsewhere the test runs, and Windows reports it as Skipped instead of a pass that checked nothing.
+    private sealed class NonWindowsFactAttribute : FactAttribute
+    {
+        public NonWindowsFactAttribute()
+        {
+            if (OperatingSystem.IsWindows())
+                Skip = "Paths that differ only in casing name one file on Windows.";
         }
     }
 }
