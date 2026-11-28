@@ -93,5 +93,26 @@ public class MultiSolutionManagerResolveTests
             dir.Delete(recursive: true);
         }
     }
-}
 
+    [Fact]
+    public void GetSkippedProjects_UnknownSolution_ReturnsEmpty()
+    {
+        var (multi, _, _) = Create(AKey);
+        Assert.Empty(multi.GetSkippedProjects("Nope"));
+    }
+
+    [Fact]
+    public void GetLoadDiagnostics_UnknownSolution_ReturnsEmpty()
+    {
+        var (multi, _, _) = Create(AKey);
+        Assert.Empty(multi.GetLoadDiagnostics("Nope"));
+    }
+
+    [Fact]
+    public void GetSkippedProjects_NamedSolution_ReadsThatSolution()
+    {
+        var (multi, _, _) = Create(AKey);
+        Assert.Empty(multi.GetSkippedProjects("B"));
+        Assert.Empty(multi.GetLoadDiagnostics("B"));
+    }
+}

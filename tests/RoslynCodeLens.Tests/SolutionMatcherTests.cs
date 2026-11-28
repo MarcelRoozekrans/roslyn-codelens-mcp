@@ -76,5 +76,13 @@ public class SolutionMatcherTests
 
         Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
     }
-}
 
+    [Fact]
+    public void Match_PathWithInvalidCharacter_IsNotFound()
+    {
+        // GetFullPath rejects the NUL character; the name then simply matches no tier.
+        var ex = Assert.Throws<McpToolException>(() =>
+            SolutionMatcher.Match(Keys, Path.Combine(Path.GetDirectoryName(A)!, "A\0.sln")));
+        Assert.Equal(ToolErrorCode.ProjectNotFound, ex.Code);
+    }
+}
