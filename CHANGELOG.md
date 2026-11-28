@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.0](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.4...v2.21.0) (2026-11-28)
+
+
+### Features
+
+* optional per-call solution argument on solution-bound tools ([b3dc240](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/commit/b3dc240c3b7416f4d931b1d2c361e40ba3179078)), closes [#606](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/issues/606)
+
 ## [2.20.4](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp/compare/v2.20.3...v2.20.4) (2026-11-27)
 
 
