@@ -175,24 +175,9 @@ public sealed class MultiSolutionManager : IDisposable
 
     public string SetActiveSolution(string name)
     {
-        var matches = _managers.Keys
-            .Where(k => k.Contains(name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (matches.Count == 0)
-            throw new McpToolException(
-                ToolErrorCode.ProjectNotFound,
-                $"No solution matching '{name}'. Available: {string.Join(", ", _managers.Keys.Select(Path.GetFileName))}",
-                new { name, available = _managers.Keys.Select(Path.GetFileName).ToArray() });
-
-        if (matches.Count > 1)
-            throw new McpToolException(
-                ToolErrorCode.AmbiguousMatch,
-                $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
-                new { name, matches });
-
-        lock (_lock) { _activeKey = matches[0]; }
-        return matches[0];
+        var key = SolutionMatcher.Match(_managers.Keys.ToList(), name);
+        lock (_lock) { _activeKey = key; }
+        return key;
     }
 
     /// <summary>
@@ -281,23 +266,7 @@ public sealed class MultiSolutionManager : IDisposable
         {
             var keysSnapshot = _managers.Keys.ToList();
 
-            var matches = keysSnapshot
-                .Where(k => k.Contains(name, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (matches.Count == 0)
-                throw new McpToolException(
-                    ToolErrorCode.ProjectNotFound,
-                    $"No solution matching '{name}'. Available: {string.Join(", ", keysSnapshot.Select(Path.GetFileName))}",
-                    new { name, available = keysSnapshot.Select(Path.GetFileName).ToArray() });
-
-            if (matches.Count > 1)
-                throw new McpToolException(
-                    ToolErrorCode.AmbiguousMatch,
-                    $"Ambiguous match for '{name}'. Matches: {string.Join(", ", matches)}",
-                    new { name, matches });
-
-            key = matches[0];
+            key = SolutionMatcher.Match(keysSnapshot, name);
 
             if (string.Equals(_activeKey, key, StringComparison.OrdinalIgnoreCase))
             {
