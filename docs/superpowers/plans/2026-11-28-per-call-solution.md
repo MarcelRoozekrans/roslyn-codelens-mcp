@@ -26,7 +26,7 @@
 2. A path with different casing or a trailing `./` segment still hits tier 1, via `Path.GetFullPath` and a case-insensitive comparison. Covered by a Task 1 test.
 3. Whitespace or an empty `solution` (`""`) means "not passed", not "match everything by substring". Today `Contains("")` matches every key. Covered by Task 2 `Resolve_EmptyString_ReturnsActive`.
 4. `load_solution(activate:false)` on a path that is already loaded without a filter is a no-op. It does not switch the active solution. Covered by a Task 4 unit test of `NextActiveKey`.
-5. `start_background_task` with `solution` rebuilds that solution even if the active key changes before the task runs. Covered by a Task 3 test that resolves at queue time, using an empty manager and then a key swap.
+5. `start_background_task` with `solution` rebuilds that solution even if the active key changes before the task runs. Covered by the Task 3 test `StartBackgroundTask_UnknownSolution_ThrowsBeforeQueueing`, which proves the solution is resolved at queue time.
 
 ---
 
@@ -96,7 +96,7 @@ One match in a tier returns it. More than one throws `AmbiguousMatch`. No match 
 - `StartBackgroundTaskTool`: `var sm = manager.Resolve(solution);` before `store.Start`. The closure captures `sm`, not `manager`.
 
 - [ ] **Step 1: Write the failing coverage test** `EverySolutionBoundTool_DeclaresOptionalSolution`. Use reflection over `typeof(MultiSolutionManager).Assembly`: every method with `[McpServerTool]` that has a `MultiSolutionManager` parameter, and whose tool `Name` is not in `{set_active_solution, unload_solution, load_solution, list_solutions}`, must have a parameter named `solution` of type `string`, with `HasDefaultValue` and `DefaultValue == null`. Assert that the set of tools checked has exactly 58 entries, and that the list of missing tools is empty. Put the missing tool names in the message.
-- [ ] **Step 2: Write the failing test** `StartBackgroundTask_Solution_ResolvesAtQueueTime` in `StartBackgroundTaskToolTests`. Build a manager with `CreateForTesting`, with A active and B present. Call `Execute(..., toolName: "unknown", solution: "Nope")` and assert `ProjectNotFound`, not `InvalidArgument`. That proves `Resolve` runs before dispatch and before the task is queued. The allowlist check stays first, so this test uses `"rebuild_solution"` with `solution: "Nope"` and asserts that `ProjectNotFound` is thrown synchronously.
+- [ ] **Step 2: Write the failing test** `StartBackgroundTask_UnknownSolution_ThrowsBeforeQueueing` in `StartBackgroundTaskToolTests`. Build a manager with `CreateForTesting`, with A active. `Execute(manager, store, "rebuild_solution", solution: "Nope")` throws `ProjectNotFound` synchronously, and `store` has no tasks. That proves the solution is resolved at queue time, not when the task runs.
 - [ ] **Step 3: Run `--filter "SolutionArgumentCoverageTests|StartBackgroundTaskToolTests"`.** Expected: the coverage test fails and lists 58 tools, and the background test fails to compile.
 - [ ] **Step 4: Apply the pattern to all 58 tools.**
 - [ ] **Step 5: Run `dotnet build -warnaserror`, then the same filter.** Expected: the build is clean and both tests pass.
