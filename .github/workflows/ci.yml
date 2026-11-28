@@ -95,7 +95,7 @@ jobs:
             10.0.x
             11.0.x
 
-      - name: Test legacy solution loading
+      - name: Test legacy solution loading and solution-name matching
         run: >-
           dotnet test tests/RoslynCodeLens.Tests/RoslynCodeLens.Tests.csproj -c Release -m:1
-          --filter "FullyQualifiedName~LegacySolutionHandlingTests"
+          --filter "FullyQualifiedName~LegacySolutionHandlingTests|FullyQualifiedName~SolutionMatcherTests"

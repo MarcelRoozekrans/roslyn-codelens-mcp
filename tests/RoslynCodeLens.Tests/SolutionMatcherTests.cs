@@ -60,4 +60,20 @@ public class SolutionMatcherTests
         var ex = Assert.Throws<McpToolException>(() => SolutionMatcher.Match(Keys, "Nope"));
         Assert.Equal(ToolErrorCode.ProjectNotFound, ex.Code);
     }
+
+    [Fact]
+    public void Match_DriveRelativePath_SharedFileName_IsAmbiguousOnWindows()
+    {
+        // `\repo\App.sln` is rooted but not fully qualified on Windows: it depends on the current drive,
+        // so it must not pick C:\repo\App.sln over D:\repo\App.sln. Off Windows there are no drives and
+        // the case does not exist. The Windows CI job runs this class.
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var ex = Assert.Throws<McpToolException>(() =>
+            SolutionMatcher.Match([@"C:\repo\App.sln", @"D:\repo\App.sln"], @"\repo\App.sln"));
+
+        Assert.Equal(ToolErrorCode.AmbiguousMatch, ex.Code);
+    }
 }
+
