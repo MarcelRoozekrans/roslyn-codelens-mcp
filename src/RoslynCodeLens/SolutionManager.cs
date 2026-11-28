@@ -529,7 +529,9 @@ public sealed class SolutionManager : IDisposable
     /// Re-opens the solution from disk, recompiles everything, and swaps in the result, disposing
     /// the superseded workspace/loader afterwards. Must be called while holding <see cref="_rebuildGate"/>.
     /// </summary>
-    private async Task<(int ProjectCount, TimeSpan Elapsed)> ReloadAndSwapAsync()
+    // Internal so a test can drive the swap against a manager disposed mid-reload; callers go through
+    // ForceReloadAsync, which holds the rebuild gate.
+    internal async Task<(int ProjectCount, TimeSpan Elapsed)> ReloadAndSwapAsync()
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
 

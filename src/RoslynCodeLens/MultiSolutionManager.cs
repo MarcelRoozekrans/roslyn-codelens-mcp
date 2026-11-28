@@ -93,39 +93,11 @@ public sealed class MultiSolutionManager : IDisposable
         if (string.IsNullOrWhiteSpace(solution))
             return Active;
 
-        var key = SolutionMatcher.Match(_managers.Keys.ToList(), solution);
-        if (!_managers.TryGetValue(key, out var manager))
-            throw new McpToolException(
-                ToolErrorCode.ProjectNotFound,
-                $"Solution '{key}' was unloaded while resolving '{solution}'.",
-                new { name = solution });
-        return manager;
+        // Match over one snapshot so the key and its manager come from the same moment.
+        var snapshot = _managers.ToArray().ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        return snapshot[SolutionMatcher.Match(snapshot.Keys, solution)];
     }
 
-    public void EnsureLoaded() => Active.EnsureLoaded();
-    public LoadedSolution GetLoadedSolution() => Active.GetLoadedSolution();
-    public SymbolResolver GetResolver() => Active.GetResolver();
-    public MetadataSymbolResolver GetMetadataResolver() => Active.GetMetadataResolver();
-
-    /// <summary>
-    /// An internally-consistent (solution, resolver, metadata) snapshot from the active solution.
-    /// Tools needing more than one of these must use this rather than the individual getters,
-    /// which each rebuild independently and can diverge if a rebuild races between two calls.
-    /// </summary>
-    public SolutionAnalysisContext GetAnalysisContext() => Active.GetAnalysisContext();
-    public IlDisassemblerAdapter GetIlDisassembler() => Active.GetIlDisassembler();
-    public Task WaitForWarmupAsync() => Active.WaitForWarmupAsync();
-    public Task<(int ProjectCount, TimeSpan Elapsed)> ForceReloadAsync() => Active.ForceReloadAsync();
-
-    /// <summary>
-    /// Commits already-written document texts to the active solution's in-memory snapshot
-    /// immediately (bypassing the file watcher's debounce). See
-    /// <see cref="SolutionManager.CommitDocumentTextsAsync"/>.
-    /// </summary>
-    public Task CommitDocumentTextsAsync(
-        IReadOnlyList<(Microsoft.CodeAnalysis.DocumentId Id, Microsoft.CodeAnalysis.Text.SourceText Text)> documents,
-        CancellationToken ct = default)
-        => Active.CommitDocumentTextsAsync(documents, ct);
 
     public IReadOnlyList<SolutionInfo> ListSolutions()
     {
@@ -169,8 +141,6 @@ public sealed class MultiSolutionManager : IDisposable
             .ToList();
     }
 
-    public IReadOnlyList<SkippedProjectInfo> GetActiveSkippedProjects() => GetSkippedProjects(null);
-
     /// <summary>Projects the loader skipped in the given solution (see <see cref="Resolve"/>); empty if it cannot be read.</summary>
     public IReadOnlyList<SkippedProjectInfo> GetSkippedProjects(string? solution)
     {
@@ -185,12 +155,6 @@ public sealed class MultiSolutionManager : IDisposable
             return Array.Empty<SkippedProjectInfo>();
         }
     }
-
-    /// <summary>
-    /// Reference-resolution failures on the active solution (projects that opened with
-    /// dropped references). Non-empty means results from those projects may be incomplete.
-    /// </summary>
-    public IReadOnlyList<string> GetActiveLoadDiagnostics() => GetLoadDiagnostics(null);
 
     /// <summary>Reference-resolution failures on the given solution (see <see cref="Resolve"/>).</summary>
     public IReadOnlyList<string> GetLoadDiagnostics(string? solution)
@@ -246,16 +210,8 @@ public sealed class MultiSolutionManager : IDisposable
         // Dispose the replaced manager OUTSIDE the lock to avoid blocking other callers.
         toDispose?.Dispose();
 
-        SolutionManager manager;
-        try
-        {
-            manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
-        }
-        catch
-        {
-            DropDanglingActiveKey();
-            throw;
-        }
+        // CreateAsync reports an open failure through HasLoadFailure rather than throwing.
+        var manager = await SolutionManager.CreateAsync(normalised, filter).ConfigureAwait(false);
 
         if (manager.HasLoadFailure)
         {

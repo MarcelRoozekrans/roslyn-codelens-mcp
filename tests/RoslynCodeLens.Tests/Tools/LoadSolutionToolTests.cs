@@ -80,7 +80,7 @@ public class LoadSolutionToolTests
         Assert.NotNull(final.Result);
 
         // The loaded solution becomes active only once the task finishes.
-        Assert.True(manager.GetLoadedSolution().Solution.Projects.Any());
+        Assert.True(manager.Resolve(null).GetLoadedSolution().Solution.Projects.Any());
     }
 
     private static async Task<BackgroundTaskInfo> PollUntilTerminalAsync(BackgroundTaskStore store, string taskId)
